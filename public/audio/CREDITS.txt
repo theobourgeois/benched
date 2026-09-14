@@ -1,0 +1,88 @@
+BENCHED — Sound credits
+
+All clips are field recordings, bundled locally. No third-party requests during play.
+Trimmed silence, faded edges, and normalized level; some playback pitch varies slightly.
+
+shot.mp3
+“Hockey Stick Slap 2” by jameb32, via SoundBible.
+https://soundbible.com/1747-Hockey-Stick-Slap-2.html
+Creative Commons Attribution 3.0 Unported
+https://creativecommons.org/licenses/by/3.0/
+
+slapshot.mp3
+“Ice Hockey Sound Library_Slapshot2” by AudioAlchemyDesigns, via Freesound.
+https://freesound.org/people/AudioAlchemyDesigns/sounds/826198/
+Creative Commons Attribution 4.0 International
+https://creativecommons.org/licenses/by/4.0/
+
+wrist.mp3
+“Ice Hockey Sound Library_Wrist Shot” by AudioAlchemyDesigns, via Freesound.
+https://freesound.org/people/AudioAlchemyDesigns/sounds/826200/
+Creative Commons Attribution 4.0 International
+https://creativecommons.org/licenses/by/4.0/
+
+pass.mp3
+“Hockey Puck Slap” by jameb32, via SoundBible.
+https://soundbible.com/1556-Hockey-Puck-Slap.html
+Creative Commons Attribution 3.0 Unported
+https://creativecommons.org/licenses/by/3.0/
+
+pass2.mp3, pass3.mp3
+“Ice Hockey Sound Library_Stick Handles” by AudioAlchemyDesigns, via Freesound.
+https://freesound.org/people/AudioAlchemyDesigns/sounds/826199/
+Creative Commons Attribution 4.0 International
+https://creativecommons.org/licenses/by/4.0/
+Changes: two individual stick taps extracted from the recording.
+
+hit.mp3
+“Hockey - Huge Body Check Hit Into Boards” by producerdan, via Freesound.
+https://freesound.org/people/producerdan/sounds/161996/
+Creative Commons Zero 1.0 (CC0)
+https://creativecommons.org/publicdomain/zero/1.0/
+Changes: trimmed to the body-check impact.
+
+boards.mp3, save2.mp3
+“hockey outdoor puck hit board clean cu” by kyles, via Freesound.
+https://freesound.org/people/kyles/sounds/450719/
+Creative Commons Zero 1.0 (CC0)
+https://creativecommons.org/publicdomain/zero/1.0/
+Changes: two board-hit transients extracted.
+
+post.mp3
+“Ice Hockey Sound Library_Post2” by AudioAlchemyDesigns, via Freesound.
+https://freesound.org/people/AudioAlchemyDesigns/sounds/826197/
+Creative Commons Attribution 4.0 International
+https://creativecommons.org/licenses/by/4.0/
+
+post2.mp3
+“Slapshot Metal Hit1” by pthj412, via Freesound.
+https://freesound.org/people/pthj412/sounds/224006/
+Creative Commons Attribution 4.0 International
+https://creativecommons.org/licenses/by/4.0/
+
+save.mp3
+“Ice Hockey Sound Library_Chip off Glass” by AudioAlchemyDesigns, via Freesound.
+https://freesound.org/people/AudioAlchemyDesigns/sounds/826195/
+Creative Commons Attribution 4.0 International
+https://creativecommons.org/licenses/by/4.0/
+
+goal.mp3, horn.mp3
+“Hockey arena goal horn with crowd applause” by SEF7, via Freesound.
+https://freesound.org/people/SEF7/sounds/702099/
+Creative Commons Zero 1.0 (CC0)
+https://creativecommons.org/publicdomain/zero/1.0/
+Changes: goal clip keeps horn plus crowd; period horn is a shorter blast.
+
+whistle.mp3
+“Referee whistle sound” by Rosa-Orenes256, via Freesound.
+https://freesound.org/people/Rosa-Orenes256/sounds/538422/
+Creative Commons Zero 1.0 (CC0)
+https://creativecommons.org/publicdomain/zero/1.0/
+
+skating.mp3
+“Skating.wav” by 13FPanska_Marval_Lukas, via Freesound.
+https://freesound.org/people/13FPanska_Marval_Lukas/sounds/379329/
+Creative Commons Zero 1.0 (CC0)
+https://creativecommons.org/publicdomain/zero/1.0/
+Source: high-quality MP3 preview. Changes: normalized and faded at loop boundaries;
+playback speed and volume follow skating speed.

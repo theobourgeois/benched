@@ -1,0 +1,11 @@
+BENCHED — Model credits
+
+skater.fbx
+Mixamo X Bot (Adobe Mixamo), T-pose, Mixamo humanoid rig.
+https://www.mixamo.com/
+Characters and animations may be used royalty-free in games.
+Any other Mixamo-rigged FBX with mixamorig bones can replace this file.
+
+At runtime the skeleton is cloned per skater, team-tinted, and posed in code
+(src/scene/skaterModel.ts, src/scene/skaterPose.ts). Stick IK and knockdown
+ragdoll are applied on top of the Mixamo bind pose.

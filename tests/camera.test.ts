@@ -1,0 +1,190 @@
+import { describe, it, expect } from 'vitest';
+import { PerspectiveCamera, Vector3 } from 'three';
+import { createMatch, netShotTarget, resetFormation, startMatch } from '../src/game/engine';
+import { attackDirection, EMPTY_INPUT } from '../src/game/config';
+import { screenInputToRink } from '../src/input/coordinates';
+import { cameraFraming } from '../src/scene/camera';
+import type { Team } from '../src/game/types';
+describe('end-to-end arena camera', () => {
+  for (const team of [0, 1] as Team[])
+    for (const period of [1, 2, 3]) {
+      it(`keeps attack up and movement screen-relative for team ${team}, period ${period}`, () => {
+        const match = createMatch(team);
+        match.phase = 'playing';
+        match.period = period;
+        const framing = cameraFraming(match, 'broadcast', 1.5);
+        const camera = new PerspectiveCamera(framing.fov, 1.5, 0.1, 250);
+        camera.position.set(...framing.position);
+        camera.lookAt(new Vector3(...framing.target));
+        camera.updateMatrixWorld();
+        const origin = new Vector3(...framing.target),
+          center = origin.clone().project(camera);
+        const up = screenInputToRink({ ...EMPTY_INPUT, moveZ: -1 }, match, 'broadcast');
+        const right = screenInputToRink({ ...EMPTY_INPUT, moveX: 1 }, match, 'broadcast');
+        expect(
+          origin
+            .clone()
+            .add(new Vector3(up.moveX, 0, up.moveZ))
+            .project(camera).y,
+        ).toBeGreaterThan(center.y);
+        expect(
+          origin
+            .clone()
+            .add(new Vector3(right.moveX, 0, right.moveZ))
+            .project(camera).x,
+        ).toBeGreaterThan(center.x);
+        expect(up.moveX).toBe(attackDirection(team, period));
+        expect(up.aimZ).toBeCloseTo(0);
+        expect(up.shotHeight).toBe(1);
+        const shot = screenInputToRink(
+          { ...EMPTY_INPUT, moveX: 1, shoot: true },
+          match,
+          'broadcast',
+        );
+        expect(shot.aimZ).toBe(attackDirection(team, period));
+        expect(shot.shoot).toBe(true);
+        const deke = screenInputToRink(
+          { ...EMPTY_INPUT, stickX: 1, stickY: -1, shoot: true },
+          match,
+          'broadcast',
+        );
+        expect(deke.aimZ).toBeCloseTo(0);
+        expect(deke.stickY).toBe(-1);
+        const corner = screenInputToRink(
+          { ...EMPTY_INPUT, moveX: 1, moveZ: -1, shoot: true },
+          match,
+          'broadcast',
+        );
+        expect(corner.aimZ).toBe(attackDirection(team, period));
+        expect(corner.shotHeight).toBe(1);
+        const ice = screenInputToRink({ ...EMPTY_INPUT, moveZ: 1 }, match, 'broadcast');
+        expect(ice.shotHeight).toBe(0);
+        const locked = screenInputToRink(
+          { ...EMPTY_INPUT, moveZ: 1, shotHeight: 1 },
+          match,
+          'broadcast',
+        );
+        expect(locked.shotHeight).toBe(1);
+        const rest = screenInputToRink(EMPTY_INPUT, match, 'broadcast');
+        expect(rest.aimZ).toBeCloseTo(0);
+        expect(rest.shotHeight).toBeCloseTo(0.5);
+      });
+    }
+  it('tracks either offensive zone and keeps the old wide camera available', () => {
+    const match = createMatch();
+    match.phase = 'playing';
+    match.puck.x = 25;
+    expect(cameraFraming(match, 'broadcast', 1.5).target[0]).toBeGreaterThan(15);
+    match.puck.x = -25;
+    expect(cameraFraming(match, 'broadcast', 1.5).target[0]).toBeLessThan(-15);
+    expect(cameraFraming(match, 'wide', 1.5).target).toEqual([0, 0, 0]);
+    expect(screenInputToRink({ ...EMPTY_INPUT, moveX: 1 }, match, 'wide').moveX).toBe(1);
+    expect(screenInputToRink({ ...EMPTY_INPUT, moveZ: 1 }, match, 'wide').aimZ).toBe(1);
+    expect(screenInputToRink({ ...EMPTY_INPUT, moveX: 1 }, match, 'wide').aimZ).toBe(0);
+    expect(screenInputToRink({ ...EMPTY_INPUT, moveX: 1 }, match, 'wide').shotHeight).toBe(1);
+  });
+  it('keeps the skater in frame at center ice and still shows the net as a goal mouth', () => {
+    const match = createMatch();
+    match.phase = 'playing';
+    const framing = cameraFraming(match, 'broadcast', 1.5);
+    const camera = new PerspectiveCamera(framing.fov, 1.5, 0.1, 250);
+    camera.position.set(...framing.position);
+    camera.lookAt(new Vector3(...framing.target));
+    camera.updateMatrixWorld();
+    const player = match.skaters[match.controlled];
+    const skater = new Vector3(player.x, 0.95, player.z).project(camera);
+    expect(skater.y).toBeGreaterThan(-0.72);
+    expect(skater.y).toBeLessThan(0.15);
+    const dir = attackDirection(match.homeTeam, match.period);
+    const ice = new Vector3(dir * 26, 0.12, 0).project(camera);
+    const shelf = new Vector3(dir * 26, 1.35, 0).project(camera);
+    const left = new Vector3(dir * 26, 0.7, -1.8).project(camera);
+    const right = new Vector3(dir * 26, 0.7, 1.8).project(camera);
+    expect(ice.y).toBeLessThan(0.95);
+    expect(shelf.y).toBeGreaterThan(ice.y + 0.04);
+    expect(Math.abs(right.x - left.x)).toBeGreaterThan(0.04);
+  });
+  it('starts closer and less top-down so the attacking net still has an angle', () => {
+    const match = createMatch();
+    match.phase = 'playing';
+    const open = cameraFraming(match, 'broadcast', 1.5);
+    const lookDown = Math.atan2(
+      open.position[1] - open.target[1],
+      Math.abs(open.position[0] - open.target[0]),
+    );
+    expect(open.fov).toBeLessThan(40);
+    expect(lookDown).toBeLessThan((50 * Math.PI) / 180);
+  });
+  it('offers tighter and higher angles than the default broadcast camera', () => {
+    const match = createMatch();
+    match.phase = 'playing';
+    const broadcast = cameraFraming(match, 'broadcast', 1.5);
+    const tight = cameraFraming(match, 'tight', 1.5);
+    const high = cameraFraming(match, 'high', 1.5);
+    expect(tight.position[1]).toBeLessThan(broadcast.position[1]);
+    expect(tight.fov).toBeLessThan(broadcast.fov);
+    expect(high.position[1]).toBeGreaterThan(broadcast.position[1]);
+    expect(cameraFraming(match, 'wide', 1.5).target).toEqual([0, 0, 0]);
+  });
+  it('drops toward the net in the offensive zone so the goal mouth is readable', () => {
+    const match = createMatch();
+    match.phase = 'playing';
+    const open = cameraFraming(match, 'broadcast', 1.5);
+    match.skaters[match.controlled].x = 22;
+    match.puck.x = 22;
+    match.puck.owner = match.controlled;
+    match.shotLift = 1;
+    const crease = cameraFraming(match, 'broadcast', 1.5);
+    expect(crease.target[1]).toBeGreaterThan(0.6);
+    expect(crease.position[1]).toBeLessThan(open.position[1] - 3);
+    expect(crease.target[0] * attackDirection(match.homeTeam, match.period)).toBeGreaterThan(
+      open.target[0] * attackDirection(match.homeTeam, match.period),
+    );
+  });
+  it('stays with the goalie when the other team is shooting in a shootout', () => {
+    const match = createMatch(0, 'shootout');
+    startMatch(match);
+    match.shootoutShooter = 1;
+    resetFormation(match);
+    startMatch(match);
+    const goalie = match.skaters[match.controlled];
+    const shooter = match.skaters.find((p) => p.team === 1 && p.role === 'C')!;
+    expect(goalie.role).toBe('G');
+    const framing = cameraFraming(match, 'broadcast', 1.5);
+    expect(Math.abs(framing.position[0] - goalie.x)).toBeGreaterThan(12);
+    expect(Math.abs(framing.position[0] - goalie.x)).toBeLessThan(
+      Math.abs(framing.position[0] - shooter.x),
+    );
+    const camera = new PerspectiveCamera(framing.fov, 1.5, 0.1, 250);
+    camera.position.set(...framing.position);
+    camera.lookAt(new Vector3(...framing.target));
+    camera.updateMatrixWorld();
+    const onScreen = new Vector3(goalie.x, 0.95, goalie.z).project(camera);
+    const rush = new Vector3(shooter.x, 0.95, shooter.z).project(camera);
+    expect(onScreen.y).toBeGreaterThan(-0.95);
+    expect(onScreen.y).toBeLessThan(0.55);
+    expect(Math.abs(onScreen.x)).toBeLessThan(0.85);
+    expect(rush.y).toBeGreaterThan(-0.85);
+    expect(rush.y).toBeLessThan(0.95);
+    expect(Math.abs(rush.x)).toBeLessThan(1.05);
+    const out = screenInputToRink({ ...EMPTY_INPUT, moveZ: -1 }, match, 'broadcast');
+    expect(out.moveX).toBe(attackDirection(0, 1));
+  });
+  it('puts the beginner shot marker on-screen in free skate from center ice', () => {
+    const match = createMatch(0, 'freeSkate');
+    startMatch(match);
+    match.phase = 'playing';
+    const player = match.skaters[match.controlled];
+    const target = netShotTarget(match, player, 0, 0.35);
+    const framing = cameraFraming(match, 'broadcast', 1.5);
+    const camera = new PerspectiveCamera(framing.fov, 1.5, 0.1, 250);
+    camera.position.set(...framing.position);
+    camera.lookAt(new Vector3(...framing.target));
+    camera.updateMatrixWorld();
+    const marker = new Vector3(target.x, Math.max(0.35, target.y), target.z).project(camera);
+    expect(marker.x).toBeGreaterThan(-0.9);
+    expect(marker.x).toBeLessThan(0.9);
+    expect(marker.y).toBeGreaterThan(-0.2);
+    expect(marker.y).toBeLessThan(0.95);
+  });
+});
