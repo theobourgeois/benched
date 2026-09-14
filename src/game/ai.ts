@@ -305,7 +305,7 @@ function sidestep(s: MatchState, p: Skater, target: Vec2, decision: AIDecision) 
       dz = foe.z - p.z,
       ahead = dx * hx + dz * hz,
       across = dx * hz - dz * hx;
-    if (ahead < 0.6 || ahead > 3.6 || Math.abs(across) > 1.6) continue;
+    if (ahead < 0.6 || ahead > 4.5 || Math.abs(across) > 2) continue;
     const side = across >= 0 ? 1 : -1;
     // Player-space right is −across; the skill stick's +X is the player's right.
     decision.stickX = side * 0.85;
@@ -372,11 +372,11 @@ export function decideAI(s: MatchState, p: Skater): AIDecision {
         // A real check needs closing speed, not a chase from behind, and some restraint: this
         // defender is in a hitting mood a little over half the time.
         const closing = (p.vx - owner.vx) * toward.x + (p.vz - owner.vz) * toward.z;
-        const mood = Math.sin(s.tick * 0.011 + p.id * 2.3) > 0.4;
+        const mood = Math.sin(s.tick * 0.011 + p.id * 2.3) > 0.55;
         decision.check =
           !decision.poke &&
           mood &&
-          gap < 2.2 &&
+          gap < 2.0 &&
           closing > (isDefense(p) ? 3.2 : 4.5) &&
           face > 0.55 &&
           p.stamina > 0.15;

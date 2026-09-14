@@ -33,6 +33,8 @@ export interface Skater extends Vec2 {
   checkPower: number;
   /** The live check already connected; the follow-through is not a whiff. */
   checkLanded: boolean;
+  /** A flick thrown while unavailable, waiting to fire. */
+  queuedCheck: { x: number; z: number; load: number; timer: number } | null;
   hitImmunity: number;
   fallAngle: number;
   /** Blade offset to the skater's left (+) or right (−). */

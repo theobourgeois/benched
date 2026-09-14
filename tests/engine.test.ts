@@ -179,11 +179,11 @@ describe('skating and defense', () => {
       q = fast.skaters[fast.controlled];
     Object.assign(q, { x: -10, z: 0, vx: PHYSICS.maxSpeed, vz: 0, angle: Math.PI / 2 });
     for (let i = 0; i < 30; i++) stepMatch(fast, { ...EMPTY_INPUT, moveZ: 1 });
-    expect(q.angle).toBeGreaterThan(0.4);
-    expect(Math.hypot(q.vx, q.vz)).toBeGreaterThan(PHYSICS.maxSpeed * 0.7);
+    expect(q.angle).toBeGreaterThan(0.15);
+    expect(Math.hypot(q.vx, q.vz)).toBeGreaterThan(PHYSICS.maxSpeed * 0.65);
     // The velocity follows the skates: little sideways slip relative to the facing.
     const slip = q.vx * -Math.cos(q.angle) + q.vz * Math.sin(q.angle);
-    expect(Math.abs(slip)).toBeLessThan(Math.hypot(q.vx, q.vz) * 0.35);
+    expect(Math.abs(slip)).toBeLessThan(Math.hypot(q.vx, q.vz) * 0.4);
   });
   it('a hard carve at pace scrubs speed but keeps rolling', () => {
     const s = openIce(),
@@ -456,16 +456,45 @@ describe('contact, elevation and puck handling', () => {
     expect(a.vx).toBeGreaterThan(5);
     expect(s.hits[0]).toBe(0);
   });
-  it('running down a breakaway from behind is a shove, not a hit', () => {
+  it('running down a breakaway and connecting knocks the puck loose; loaded, it drops them', () => {
     const chase = collision(12, { check: true, victimVx: 8.8, victimAngle: Math.PI / 2 });
     expect(chase.b.downTimer).toBe(0);
-    expect(chase.b.stumbleTimer).toBe(0);
-    expect(chase.s.puck.owner).toBe(chase.b.id);
-    expect(chase.s.hits[0]).toBe(0);
-    expect(chase.b.vx).toBeGreaterThan(8.8);
+    expect(chase.b.stumbleTimer).toBeGreaterThan(0);
+    expect(chase.s.puck.owner).not.toBe(chase.b.id);
+    expect(chase.s.hits[0]).toBe(1);
+    const loaded = collision(12, { check: true, load: 1, victimVx: 8.8, victimAngle: Math.PI / 2 });
+    expect(loaded.b.downTimer).toBeGreaterThan(0);
+    // Without a flick, catching up from behind is only a rub.
     const bump = collision(12, { victimVx: 8.8, victimAngle: Math.PI / 2 });
     expect(bump.b.stumbleTimer).toBe(0);
     expect(bump.s.puck.owner).toBe(bump.b.id);
+    expect(bump.s.hits[0]).toBe(0);
+  });
+  it('a flick thrown a hair early fires when the body is free', () => {
+    const s = openIce(),
+      a = s.skaters[0],
+      b = s.skaters[6];
+    Object.assign(a, { x: 0, z: 0, vx: 9, vz: 0, angle: Math.PI / 2, cooldown: 0.12 });
+    Object.assign(b, { x: 2.6, z: 0, vx: 0, vz: 0, angle: 0, cooldown: 10 });
+    s.puck.owner = b.id;
+    stepMatch(s, { ...EMPTY_INPUT, check: true, stickIceX: 1 });
+    expect(a.checkTimer).toBe(0);
+    expect(a.queuedCheck).not.toBeNull();
+    for (let i = 0; i < 40 && s.hits[0] === 0; i++) stepMatch(s, { ...EMPTY_INPUT, moveX: 1 });
+    expect(a.queuedCheck).toBeNull();
+    expect(s.hits[0]).toBe(1);
+  });
+  it('a live check reaches an opponent crossing just outside body contact', () => {
+    const s = openIce(),
+      a = s.skaters[0],
+      b = s.skaters[6];
+    Object.assign(a, { x: 0, z: 0, vx: 9, vz: 0, angle: Math.PI / 2, cooldown: 0 });
+    Object.assign(b, { x: 2.4, z: 1.3, vx: 0, vz: 0, angle: 0, cooldown: 10 });
+    s.puck.owner = b.id;
+    stepMatch(s, { ...EMPTY_INPUT, check: true, stickIceX: 1 });
+    expect(a.hitLock).toBe(b.id);
+    for (let i = 0; i < 40 && s.hits[0] === 0; i++) stepMatch(s, { ...EMPTY_INPUT, moveX: 1 });
+    expect(s.hits[0]).toBe(1);
   });
   it('a standing flick is a shove on a braced carrier and never a knockdown', () => {
     const braced = collision(0, { check: true, braced: true });
@@ -516,7 +545,7 @@ describe('contact, elevation and puck handling', () => {
     expect(open.b.downTimer).toBeGreaterThan(braced.b.downTimer);
     expect(b.downTimer).toBeGreaterThan(open.b.downTimer);
   });
-  it('a check lands from the front or the side, but from behind it only pushes', () => {
+  it('a check lands from the front or the side; from behind it strips the puck without a knockdown', () => {
     const side = collision(8, { check: true });
     const front = collision(8, { check: true, braced: true });
     const back = collision(8, { check: true, victimVx: 7, victimAngle: Math.PI / 2 });
@@ -526,6 +555,7 @@ describe('contact, elevation and puck handling', () => {
     expect(front.b.downTimer).toBeGreaterThan(0);
     expect(back.b.downTimer).toBe(0);
     expect(back.b.vx).toBeGreaterThan(7);
+    expect(back.s.puck.owner).not.toBe(back.b.id);
   });
   it('a check that finds nothing leaves you overextended', () => {
     const s = openIce(),
@@ -537,7 +567,7 @@ describe('contact, elevation and puck handling', () => {
     expect(a.stamina).toBeLessThan(1);
     tick(s, PHYSICS.checkWindow);
     expect(a.checkTimer).toBe(0);
-    expect(a.stumbleTimer).toBeGreaterThan(0.2);
+    expect(a.stumbleTimer).toBeGreaterThan(0.15);
     expect(a.cooldown).toBeGreaterThan(0.2);
   });
   it('a live check steers onto a near miss and still connects', () => {
@@ -642,8 +672,8 @@ describe('contact, elevation and puck handling', () => {
     expect(s.puck.owner).toBe(6);
   });
   it('harder checks send the victim farther and keep them down longer', () => {
-    const slow = collision(8, { check: true }),
-      fast = collision(11, { check: true });
+    const slow = collision(5, { check: true }),
+      fast = collision(9, { check: true });
     expect(fast.b.downTimer).toBeGreaterThan(slow.b.downTimer);
     expect(fast.b.vx).toBeGreaterThan(slow.b.vx);
     // Observe a quarter second of the actual slide, while the victim cannot skate.

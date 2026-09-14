@@ -26,22 +26,24 @@ export const PHYSICS = {
   hustleSpeed: 12.2,
   /** Carrying the puck costs a little top end, so a chaser can close but not walk them down. */
   carrySpeed: 0.965,
+  /** Hustling with the puck costs more; a chasing defender can run a carrier down. */
+  carryHustle: 0.92,
   /** Exponential approach rate toward the stick's speed at a standstill; the first strides bite. */
   launchRate: 2.4,
   /** How much of that rate is lost as you near top speed; the last metre per second is earned. */
   topEndTaper: 1.0,
   /** Heading turn rate near a standstill (rad/s): pivots are instant. */
-  turnRateLow: 12,
+  turnRateLow: 14,
   /** Heading turn rate at top speed (rad/s): about a 2.5 m carve radius. */
-  turnRateHigh: 3.6,
+  turnRateHigh: 4.8,
   /** Extra turn-rate loss while hustling; a sprinting skater is a train. */
-  hustleTurn: 0.8,
+  hustleTurn: 0.9,
   /** How quickly sideways slip is bitten off by the edges. Lower lets the skater drift. */
-  edgeGrip: 10,
+  edgeGrip: 14,
   /** Grip while the puck is being thrown wide on a deke; the skater rides an edge. */
   dekeGrip: 2.2,
   /** Speed scrubbed per radian of carve at top speed. */
-  carveBleed: 0.16,
+  carveBleed: 0.1,
   /** Glide when the stick is released. Ice should carry you; it should not feel like running. */
   coastDrag: 0.42,
   /** Opposite-stick hockey stop. */
@@ -64,15 +66,23 @@ export const PHYSICS = {
   /** Cosine of the pass aim-assist cone (~47° from the stick). */
   passAssist: 0.68,
   /** Lunge a committed check adds to the checker's speed, before loading. */
-  checkLunge: 3.8,
+  checkLunge: 4.4,
   /** Extra lunge from a fully loaded (pulled-back) check. */
   checkLoadLunge: 2.2,
   /** Ceiling on speed during a lunge. */
   checkLungeCap: 1.4,
   /** How long a committed check is live for, from the flick. */
-  checkWindow: 0.42,
+  checkWindow: 0.5,
   /** The last part of the window is follow-through; contact there is only a bump. */
   checkRecovery: 0.12,
+  /** A committed check counts its own drive into the body, not only the relative closing speed. */
+  checkDrive: 0.4,
+  /** Extra shoulder reach while a check is live. */
+  checkReach: 0.35,
+  /** A flick thrown during a cooldown is held this long and fires when it can. */
+  checkBuffer: 0.3,
+  /** How far ahead a live check leads a moving target. */
+  hitLockLead: 0.12,
   /** Flat power a committed check adds on top of closing momentum. */
   checkCommit: 1.6,
   /** How much a fully loaded check scales that commitment. */
@@ -80,23 +90,23 @@ export const PHYSICS = {
   /** Closing power that staggers the victim and knocks the puck loose. */
   checkStumble: 6.0,
   /** Closing power that puts the victim on the ice. */
-  checkKnockdown: 9.5,
+  checkKnockdown: 9.0,
   /** Incidental collisions never exceed a stumble unless closing this hard (two sprinters head-on). */
   bumpKnockdown: 13,
   /** Incidental closing that staggers whoever was on their heels. */
   bumpStumble: 7,
   /** Squaring up to a hit takes this much off it; it does not cancel the hit. */
-  checkBrace: 0.85,
+  checkBrace: 0.9,
   /** A victim mid-deke or already off balance takes this much more. */
   checkExposed: 1.15,
   /** Hitting someone skating away from you is a shove, not a hit. */
-  checkFromBehind: 0.65,
+  checkFromBehind: 0.85,
   /** How far a committed check will pick a target. */
-  hitLockRange: 3.4,
+  hitLockRange: 5,
   /** Cosine of the lock cone; you have to be flicking at them. */
-  hitLockCone: 0.45,
+  hitLockCone: 0.2,
   /** How quickly a live check steers onto its target. */
-  hitLockSteer: 9,
+  hitLockSteer: 16,
   /** Stamina a committed check costs; loading costs a little more. */
   checkStamina: 0.06,
   /** Time frozen on a knockdown for impact. */

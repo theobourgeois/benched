@@ -92,6 +92,7 @@ export function createMatch(homeTeam: Team = 0, mode: GameMode = 'exhibition'): 
         hitLock: -1,
         checkPower: 0,
         checkLanded: false,
+        queuedCheck: null,
         hitImmunity: 0,
         fallAngle: 0,
         stickSide: STICK.restSide,
@@ -135,6 +136,7 @@ export function resetFormation(s: MatchState) {
     p.hitLock = -1;
     p.checkPower = 0;
     p.checkLanded = false;
+    p.queuedCheck = null;
     p.hitImmunity = 0;
     p.stickSide = STICK.restSide;
     p.stickReach = STICK.restReach;
@@ -696,15 +698,25 @@ export function launchCheck(s: MatchState, p: Skater, aimX: number, aimZ: number
     if (dist > PHYSICS.hitLockRange) continue;
     const to = normalized(q.x - p.x, q.z - p.z);
     const dot = aim.x * to.x + aim.z * to.z;
-    if (dot < PHYSICS.hitLockCone) continue;
+    // Anyone in the flick's cone; at arm's length, anyone in front of you at all.
+    if (dot < PHYSICS.hitLockCone && !(dist < 2 && dot > -0.2)) continue;
     const score =
-      dot + (1 - dist / PHYSICS.hitLockRange) * 0.5 + (s.puck.owner === q.id ? 0.15 : 0);
+      dot * 0.8 + (1 - dist / PHYSICS.hitLockRange) * 1.2 + (s.puck.owner === q.id ? 0.3 : 0);
     if (score > bestScore) {
       bestScore = score;
       best = q;
     }
   }
   p.hitLock = best ? best.id : -1;
+  if (best) {
+    // The lunge goes at them, not just where the stick pointed.
+    const to = normalized(best.x - p.x, best.z - p.z);
+    const speed = Math.hypot(p.vx, p.vz);
+    const dir = normalized(p.vx + to.x * lunge, p.vz + to.z * lunge);
+    p.vx = dir.x * speed;
+    p.vz = dir.z * speed;
+    p.angle = Math.atan2(dir.x, dir.z);
+  }
   return true;
 }
 function stickLift(s: MatchState, p: Skater) {
@@ -746,7 +758,13 @@ function closingSpeed(hitter: Skater, victim: Skater, nx: number, nz: number) {
  * mid-deke or already off balance. A committed check adds its lunge and a flat commitment.
  */
 function hitPower(hitter: Skater, victim: Skater, nx: number, nz: number, committed: boolean) {
-  const closing = closingSpeed(hitter, victim, nx, nz);
+  const relative = closingSpeed(hitter, victim, nx, nz);
+  const drive = Math.max(0, hitter.vx * nx + hitter.vz * nz);
+  // A bump is pure relative momentum. A committed check also counts the speed you drove in with,
+  // so running a carrier down and connecting means something.
+  const closing = committed
+    ? relative * (1 - PHYSICS.checkDrive) + drive * PHYSICS.checkDrive
+    : relative;
   const square = 0.55 + 0.45 * clamp(facing(hitter, nx, nz), 0, 1);
   const away = victim.vx * nx + victim.vz * nz;
   const fromBehind = away > 2.5 && facing(victim, nx, nz) > 0.5 ? PHYSICS.checkFromBehind : 1;
@@ -992,7 +1010,7 @@ function moveSkater(
     (goalie ? 0.64 : 1) *
     (backskate ? PHYSICS.backskateSpeed : 1) *
     (stumbling ? 0.55 : 1) *
-    (carrying && !goalie ? PHYSICS.carrySpeed : 1);
+    (carrying && !goalie ? (boosting ? PHYSICS.carryHustle : PHYSICS.carrySpeed) : 1);
   const speedNow = Math.hypot(p.vx, p.vz);
   const spinning = p.dekeKind === 'spin';
   if (down || diving || stumbling || goalie) {
@@ -1107,9 +1125,10 @@ function steerCheck(s: MatchState, p: Skater, dt: number) {
   }
   const speed = Math.hypot(p.vx, p.vz);
   if (speed < 0.5) return;
-  const to = normalized(target.x - p.x, target.z - p.z),
+  const lead = PHYSICS.hitLockLead;
+  const to = normalized(target.x + target.vx * lead - p.x, target.z + target.vz * lead - p.z),
     dir = normalized(p.vx, p.vz);
-  if (dir.x * to.x + dir.z * to.z < 0.2) {
+  if (dir.x * to.x + dir.z * to.z < 0) {
     p.hitLock = -1;
     return;
   }
@@ -1122,8 +1141,8 @@ function steerCheck(s: MatchState, p: Skater, dt: number) {
 /** A check that finds nothing but air leaves you overextended: no puck, no second swing, for a beat. */
 function whiffCheck(p: Skater) {
   p.hitLock = -1;
-  p.stumbleTimer = Math.max(p.stumbleTimer, 0.3);
-  p.cooldown = Math.max(p.cooldown, 0.35);
+  p.stumbleTimer = Math.max(p.stumbleTimer, 0.22);
+  p.cooldown = Math.max(p.cooldown, 0.3);
   p.vx *= 0.85;
   p.vz *= 0.85;
 }
@@ -1144,12 +1163,13 @@ function separatePlayers(s: MatchState) {
       if (!isOnIce(s, a) || !isOnIce(s, b)) continue;
       const d = distance(a, b),
         min = PHYSICS.playerRadius * 1.8;
-      if (d < min && d > 0.001) {
+      const opponents = a.team !== b.team && a.downTimer <= 0 && b.downTimer <= 0;
+      const reach = opponents && (liveCheck(a) || liveCheck(b)) ? PHYSICS.checkReach : 0;
+      if (d < min + reach && d > 0.001) {
         const n = normalized(b.x - a.x, b.z - a.z),
-          overlap = (min - d) / 2;
+          overlap = Math.max(0, min - d) / 2;
         const closing = (a.vx - b.vx) * n.x + (a.vz - b.vz) * n.z;
-        if (a.team !== b.team && a.downTimer <= 0 && b.downTimer <= 0)
-          contact(s, a, b, n.x, n.z, closing);
+        if (opponents) contact(s, a, b, n.x, n.z, closing);
         a.x -= n.x * overlap;
         a.z -= n.z * overlap;
         b.x += n.x * overlap;
@@ -1476,8 +1496,17 @@ export function stepMatch(s: MatchState, input: InputFrame = EMPTY_INPUT, dt = R
       moveSkater(p, input.moveX, input.moveZ, input.hustle, input.backskate, dt, carrying, grip);
       if (input.dive && s.puck.owner !== p.id) startDive(s, p, input);
       if (input.check && s.puck.owner !== p.id) {
-        const aim = actionAim(p, input, s);
-        launchCheck(s, p, aim.x, aim.z, input.checkPower ?? 0);
+        const aim = actionAim(p, input, s),
+          load = input.checkPower ?? 0;
+        p.queuedCheck = launchCheck(s, p, aim.x, aim.z, load)
+          ? null
+          : { x: aim.x, z: aim.z, load, timer: PHYSICS.checkBuffer };
+      } else if (p.queuedCheck) {
+        // A flick thrown a hair early fires as soon as the body is free.
+        const queued = p.queuedCheck;
+        queued.timer -= dt;
+        if (queued.timer <= 0 || s.puck.owner === p.id) p.queuedCheck = null;
+        else if (launchCheck(s, p, queued.x, queued.z, queued.load)) p.queuedCheck = null;
       }
       if (input.chip) {
         if (s.puck.owner === p.id) chipPuck(s, p, input);
