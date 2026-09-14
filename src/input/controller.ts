@@ -172,7 +172,9 @@ export class Controller {
       }
     } else {
       poke = rb && !this.previous.rb && !both;
-      check = stickFlick && !rb && !both;
+      // Pulling down loads the shoulder. Only the forward edge commits it, including a
+      // direct down-to-up flick that never crosses a neutral frame.
+      check = stickY < -0.55 && !this.previous.up && !rb && !both;
       if (check) checkPower = this.windup;
       this.bumperTime = 0;
       this.bumperChipped = false;

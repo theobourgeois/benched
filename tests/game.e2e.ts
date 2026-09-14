@@ -45,10 +45,10 @@ test('keyboard skates, skill stick shoots, pause freezes play and help stays pau
   await start(page);
   await changeState(
     page,
-    'const s=runtime.match; s.controlled=0; s.puck.owner=0; s.skaters[0].x=0; s.skaters[0].z=-8; s.skaters[0].cooldown=0; s.skaters.slice(6).forEach(p=>{p.x=20;p.z=10})',
+    'const s=runtime.match; s.controlled=0; s.puck.owner=0; s.skaters[0].x=0; s.skaters[0].z=-8; s.skaters[0].cooldown=0;Object.assign(s.skaters[0],{vx:0,vz:0,angle:Math.PI/2,downTimer:0,stumbleTimer:0,checkTimer:0}); s.skaters.slice(6).forEach(p=>{p.x=20;p.z=10})',
   );
   await page.keyboard.down('KeyD');
-  await page.waitForTimeout(350);
+  await expect.poll(async () => (await state(page)).skaters[0].z).toBeGreaterThan(-7.7);
   await page.keyboard.up('KeyD');
   expect((await state(page)).skaters[0].z).toBeGreaterThan(-7.7);
   await page.keyboard.down('ArrowDown');
@@ -113,10 +113,10 @@ test('virtual Xbox connects, skates, shoots with RS, and safely disconnects', as
   await expect(page.locator('.score-clock small')).toHaveText('● LIVE');
   await changeState(
     page,
-    'const s=runtime.match; s.controlled=0; s.puck.owner=0; s.skaters[0].x=0;s.skaters[0].z=-8;s.skaters[0].cooldown=0;s.skaters.slice(6).forEach(p=>{p.x=20;p.z=10})',
+    'const s=runtime.match; s.controlled=0; s.puck.owner=0; s.skaters[0].x=0;s.skaters[0].z=-8;s.skaters[0].cooldown=0;Object.assign(s.skaters[0],{vx:0,vz:0,angle:Math.PI/2,downTimer:0,stumbleTimer:0,checkTimer:0});s.skaters.slice(6).forEach(p=>{p.x=20;p.z=10})',
   );
   await page.evaluate('window.testPad.axes[0]=1');
-  await page.waitForTimeout(350);
+  await expect.poll(async () => (await state(page)).skaters[0].z).toBeGreaterThan(-7.7);
   await page.evaluate('window.testPad.axes[0]=0');
   expect((await state(page)).skaters[0].z).toBeGreaterThan(-7.7);
   await page.evaluate('window.testPad.axes[3]=1');
@@ -299,4 +299,29 @@ test('a blocked Gamepad API explains the problem and leaves keyboard gameplay us
   await page.keyboard.press('Escape');
   await expect(page.getByRole('heading', { name: 'Paused' })).toBeVisible();
   expect(errors).toEqual([]);
+});
+
+test('a keyboard flick drives a backcheck toward your own end and dislodges the carrier', async ({
+  page,
+}) => {
+  await start(page);
+  await changeState(
+    page,
+    `
+    const s=runtime.match;
+    s.mode='oneOnOne'; s.controlled=0; s.hitstop=0; s.hits=[0,0]; s.phase='playing';
+    Object.assign(s.skaters[0], {x:2,z:5,vx:-8,vz:0,angle:-Math.PI/2,cooldown:0,downTimer:0,stumbleTimer:0,checkTimer:0,checkLanded:false});
+    Object.assign(s.skaters[6], {x:-0.5,z:5,vx:-5,vz:0,angle:-Math.PI/2,cooldown:10,stumbleTimer:1,downTimer:0,hitImmunity:0});
+    Object.assign(s.puck, {owner:6,x:-1.5,z:5,vx:-5,vz:0,shot:false});
+  `,
+  );
+  await page.keyboard.down('KeyS');
+  await page.keyboard.down('ArrowUp');
+  await expect.poll(async () => (await state(page)).hits[0]).toBe(1);
+  await page.keyboard.up('ArrowUp');
+  await page.keyboard.up('KeyS');
+  const s = await state(page);
+  expect(s.skaters[0].vx).toBeLessThan(0);
+  expect(s.skaters[6].downTimer + s.skaters[6].stumbleTimer).toBeGreaterThan(0);
+  expect(s.puck.owner).not.toBe(6);
 });

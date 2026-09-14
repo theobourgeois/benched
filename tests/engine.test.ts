@@ -162,12 +162,14 @@ describe('skating and defense', () => {
     stepMatch(s, { ...EMPTY_INPUT, moveX: 1, hustle: true });
     expect(p.vx).toBeGreaterThan(0);
     expect(p.vx).toBeLessThan(PHYSICS.hustleSpeed);
-    expect(p.stamina).toBeLessThan(1);
+    expect(p.stamina).toBe(1); // Hustle only drains once the stride opens up.
     const speed = p.vx;
     stepMatch(s);
     expect(p.vx).toBeGreaterThan(0);
     expect(p.vx).toBeLessThan(speed);
     expect(p.stamina).toBeGreaterThan(0.998);
+    for (let i = 0; i < 120; i++) stepMatch(s, { ...EMPTY_INPUT, moveX: 1, hustle: true });
+    expect(p.stamina).toBeLessThan(0.95);
   });
   it('pivots on the spot at a standstill and carves a wide arc at speed', () => {
     const still = openIce(),
@@ -197,15 +199,16 @@ describe('skating and defense', () => {
   });
   it('reaches a higher top speed while hustling and carrying the puck costs a little', () => {
     const run = (hustle: boolean, carry: boolean) => {
-      const s = openIce(),
+      const s = createMatch(0, 'freeSkate'),
         p = s.skaters[s.controlled];
+      s.phase = 'playing';
       Object.assign(p, { x: -20, z: 0, vx: 0, vz: 0, angle: Math.PI / 2, stamina: 1 });
       if (carry) s.puck.owner = p.id;
       else Object.assign(s.puck, { owner: null, x: 0, z: -12 });
       for (let i = 0; i < 240; i++) stepMatch(s, { ...EMPTY_INPUT, moveX: 1, hustle });
       return Math.hypot(p.vx, p.vz);
     };
-    expect(run(true, false)).toBeGreaterThan(run(false, false) + 1.5);
+    expect(run(true, false)).toBeGreaterThan(run(false, false) + 1);
     expect(run(false, false)).toBeGreaterThan(run(false, true));
     expect(run(false, false)).toBeGreaterThan(PHYSICS.maxSpeed * 0.9);
   });
@@ -563,7 +566,7 @@ describe('contact, elevation and puck handling', () => {
     Object.assign(a, { x: 0, z: 0, vx: 6, vz: 0, angle: Math.PI / 2, cooldown: 0, stamina: 1 });
     stepMatch(s, { ...EMPTY_INPUT, check: true, stickIceX: 1 });
     expect(a.checkTimer).toBeGreaterThan(0.3);
-    expect(a.vx).toBeGreaterThan(9);
+    expect(a.vx).toBeGreaterThan(8);
     expect(a.stamina).toBeLessThan(1);
     tick(s, PHYSICS.checkWindow);
     expect(a.checkTimer).toBe(0);

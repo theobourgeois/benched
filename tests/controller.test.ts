@@ -122,6 +122,20 @@ describe('Xbox skill stick', () => {
     pad.axes[3] = -1;
     expect(input.read(1 / 60)).toMatchObject({ check: true, dive: false });
   });
+  it('loads a defensive check without firing, then commits once on a direct down-to-up flick', () => {
+    const pad = setupPad(),
+      input = new Controller();
+    pad.axes[3] = 1;
+    for (let i = 0; i < 30; i++) expect(input.read(1 / 60, false).check).toBe(false);
+    pad.axes[3] = -1;
+    const hit = input.read(1 / 60, false);
+    expect(hit.check).toBe(true);
+    expect(hit.checkPower).toBeGreaterThan(0.9);
+    expect(input.read(1 / 60, false).check).toBe(false);
+    pad.axes[3] = 0;
+    pad.axes[2] = 1;
+    expect(input.read(1 / 60, false).check).toBe(false);
+  });
   it('reports disconnects and rejects unsupported mappings', () => {
     const pad = setupPad(),
       input = new Controller(),

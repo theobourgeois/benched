@@ -22,12 +22,15 @@ export interface Skater extends Vec2 {
   /** Shoulder lean while finishing a hit. */
   checkTimer: number;
   stride: number;
+  /** Actual push effort and signed edge load, used by the skating pose. */
+  skateDrive: number;
+  edgeLean: number;
   downTimer: number;
   /** Knocked off balance by a check: coasting with little control, unable to play the puck. */
   stumbleTimer: number;
   /** Smoothed skating speed, for animation and audio. Hit power comes from real closing speed. */
   rush: number;
-  /** Opponent the current check is locked onto, or -1. */
+  /** Opponent used for aim assistance at launch, or -1; never tracked in flight. */
   hitLock: number;
   /** How far the current check was loaded, 0 to 1. */
   checkPower: number;

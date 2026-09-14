@@ -1,7 +1,8 @@
 import { attackDirection, EMPTY_INPUT, PHYSICS, PUCK, RINK, RULES, STICK } from './config';
 import { activeDeke, classifyOneTouch, clearDeke, startDeke, stepDeke } from './dekes';
 import { decideAI } from './ai';
-import { clamp, constrainToRink, distance, normalized, turnToward } from './math';
+import { skateVelocity } from './skating';
+import { clamp, constrainToRink, distance, normalized } from './math';
 import { isOnIce, modeInfo, SHOOTOUT_ROUNDS } from './modes';
 import type {
   DekeSpecial,
@@ -86,6 +87,8 @@ export function createMatch(homeTeam: Team = 0, mode: GameMode = 'exhibition'): 
         cooldown: 0,
         checkTimer: 0,
         stride: i,
+        skateDrive: 0,
+        edgeLean: 0,
         downTimer: 0,
         stumbleTimer: 0,
         rush: 0,
@@ -130,6 +133,8 @@ export function resetFormation(s: MatchState) {
     p.angle = dir > 0 ? Math.PI / 2 : -Math.PI / 2;
     p.cooldown = 0;
     p.checkTimer = 0;
+    p.skateDrive = 0;
+    p.edgeLean = 0;
     p.downTimer = 0;
     p.stumbleTimer = 0;
     p.rush = 0;
@@ -345,26 +350,8 @@ function advanceStick(p: Skater, stickX: number, pull: number, dt: number, carry
   p.stickReachVel = reach.vel;
   if (!carrying || p.role === 'G') return;
   const leftX = Math.cos(p.angle),
-    leftZ = -Math.sin(p.angle),
-    fx = Math.sin(p.angle),
-    fz = Math.cos(p.angle);
-  if (pose) {
-    if (p.dekeKind === 'spin') {
-      const speed = Math.hypot(p.vx, p.vz);
-      if (speed > 0.2) {
-        p.vx += (p.vx / speed) * pose.surge * dt;
-        p.vz += (p.vz / speed) * pose.surge * dt;
-      } else {
-        p.vx += fx * pose.surge * dt;
-        p.vz += fz * pose.surge * dt;
-      }
-      return;
-    }
-    const cut = -p.dekeDir * pose.cut;
-    p.vx += (leftX * cut + fx * pose.surge) * dt;
-    p.vz += (leftZ * cut + fz * pose.surge) * dt;
-    return;
-  }
+    leftZ = -Math.sin(p.angle);
+  if (pose) return;
   // A deke should carry the skater a little with the puck, like an edge cut, not a dash.
   const skating = Math.hypot(p.vx, p.vz) > 1.5;
   const push =
@@ -675,21 +662,6 @@ export function launchCheck(s: MatchState, p: Skater, aimX: number, aimZ: number
   let aim = normalized(aimX, aimZ);
   if (Math.hypot(aim.x, aim.z) < 0.2) aim = { x: Math.sin(p.angle), z: Math.cos(p.angle) };
   load = clamp(load, 0, 1);
-  const lunge = PHYSICS.checkLunge + load * PHYSICS.checkLoadLunge;
-  p.vx += aim.x * lunge;
-  p.vz += aim.z * lunge;
-  const speed = Math.hypot(p.vx, p.vz),
-    cap = PHYSICS.hustleSpeed + PHYSICS.checkLungeCap;
-  if (speed > cap) {
-    p.vx *= cap / speed;
-    p.vz *= cap / speed;
-  }
-  p.angle = Math.atan2(aim.x, aim.z);
-  p.checkTimer = PHYSICS.checkWindow;
-  p.checkPower = load;
-  p.checkLanded = false;
-  p.cooldown = 0.5;
-  p.stamina = clamp(p.stamina - (PHYSICS.checkStamina + load * 0.04), 0, 1);
   let best: Skater | null = null,
     bestScore = -Infinity;
   for (const q of s.skaters) {
@@ -698,8 +670,7 @@ export function launchCheck(s: MatchState, p: Skater, aimX: number, aimZ: number
     if (dist > PHYSICS.hitLockRange) continue;
     const to = normalized(q.x - p.x, q.z - p.z);
     const dot = aim.x * to.x + aim.z * to.z;
-    // Anyone in the flick's cone; at arm's length, anyone in front of you at all.
-    if (dot < PHYSICS.hitLockCone && !(dist < 2 && dot > -0.2)) continue;
+    if (dot < PHYSICS.hitLockCone) continue;
     const score =
       dot * 0.8 + (1 - dist / PHYSICS.hitLockRange) * 1.2 + (s.puck.owner === q.id ? 0.3 : 0);
     if (score > bestScore) {
@@ -709,14 +680,41 @@ export function launchCheck(s: MatchState, p: Skater, aimX: number, aimZ: number
   }
   p.hitLock = best ? best.id : -1;
   if (best) {
-    // The lunge goes at them, not just where the stick pointed.
-    const to = normalized(best.x - p.x, best.z - p.z);
-    const speed = Math.hypot(p.vx, p.vz);
-    const dir = normalized(p.vx + to.x * lunge, p.vz + to.z * lunge);
-    p.vx = dir.x * speed;
-    p.vz = dir.z * speed;
-    p.angle = Math.atan2(dir.x, dir.z);
+    const predicted = Math.atan2(
+      best.x + best.vx * PHYSICS.hitLockLead - p.x,
+      best.z + best.vz * PHYSICS.hitLockLead - p.z,
+    );
+    const angle = Math.atan2(aim.x, aim.z);
+    const correction = Math.atan2(Math.sin(predicted - angle), Math.cos(predicted - angle));
+    const assisted = angle + clamp(correction, -PHYSICS.checkAimAssist, PHYSICS.checkAimAssist);
+    aim = { x: Math.sin(assisted), z: Math.cos(assisted) };
   }
+  const speed = Math.hypot(p.vx, p.vz);
+  // Aim assistance is resolved once, before commitment. Redirect only a little of existing
+  // momentum: arriving on the right angle matters, and a late deke can make the shoulder miss.
+  if (speed > 0.5) {
+    const travel = Math.atan2(p.vx, p.vz),
+      target = Math.atan2(aim.x, aim.z);
+    const error = Math.atan2(Math.sin(target - travel), Math.cos(target - travel));
+    const turn = clamp(error, -PHYSICS.checkAimAssist, PHYSICS.checkAimAssist);
+    p.vx = Math.sin(travel + turn) * speed;
+    p.vz = Math.cos(travel + turn) * speed;
+  }
+  const lunge = (PHYSICS.checkLunge + load * PHYSICS.checkLoadLunge) * (0.65 + p.stamina * 0.35);
+  p.vx += aim.x * lunge;
+  p.vz += aim.z * lunge;
+  const launched = Math.hypot(p.vx, p.vz),
+    cap = PHYSICS.hustleSpeed + PHYSICS.checkLungeCap;
+  if (launched > cap) {
+    p.vx *= cap / launched;
+    p.vz *= cap / launched;
+  }
+  p.angle = Math.atan2(p.vx, p.vz);
+  p.checkTimer = PHYSICS.checkWindow;
+  p.checkPower = load;
+  p.checkLanded = false;
+  p.cooldown = PHYSICS.checkWindow + 0.1;
+  p.stamina = clamp(p.stamina - (PHYSICS.checkStamina + load * 0.04), 0, 1);
   return true;
 }
 function stickLift(s: MatchState, p: Skater) {
@@ -784,7 +782,8 @@ function knockDown(
   nx: number,
   nz: number,
 ) {
-  const impulse = clamp(power * 0.85, 5, 14);
+  freePuck(s, victim);
+  const impulse = clamp(closingSpeed(hitter, victim, nx, nz) * 0.55 + power * 0.18, 3.5, 9);
   victim.vx += nx * impulse + hitter.vx * 0.1;
   victim.vz += nz * impulse + hitter.vz * 0.1;
   victim.downTimer = clamp(0.9 + power * 0.09, 1.1, 2.3);
@@ -796,7 +795,6 @@ function knockDown(
   victim.blockTimer = 0;
   hitter.vx *= 0.8;
   hitter.vz *= 0.8;
-  freePuck(s, victim);
   s.hits[hitter.team]++;
   s.hitstop = PHYSICS.hitstop;
   emit(s, 'hit', clamp(0.75 + (power - PHYSICS.checkKnockdown) * 0.05, 0.75, 1), victim);
@@ -810,7 +808,8 @@ function stagger(
   nx: number,
   nz: number,
 ) {
-  const push = clamp(power * 0.7, 3.5, 9);
+  freePuck(s, victim);
+  const push = clamp(closingSpeed(hitter, victim, nx, nz) * 0.45 + power * 0.12, 2, 6);
   victim.vx += nx * push;
   victim.vz += nz * push;
   hitter.vx *= 0.86;
@@ -818,7 +817,6 @@ function stagger(
   victim.hitImmunity = 0.45;
   victim.stumbleTimer = clamp(0.45 + (power - PHYSICS.checkStumble) * 0.12, 0.45, 0.9);
   victim.cooldown = Math.max(victim.cooldown, victim.stumbleTimer);
-  freePuck(s, victim);
 }
 function shove(hitter: Skater, victim: Skater, power: number, nx: number, nz: number) {
   const push = clamp(power * 0.5, 1.2, 3.2);
@@ -924,8 +922,8 @@ function incidental(s: MatchState, a: Skater, b: Skater, nx: number, nz: number,
 }
 /** Opponents in contact: a live check lands as a hit; anything else is a bump. */
 function contact(s: MatchState, a: Skater, b: Skater, nx: number, nz: number, closing: number) {
-  const aLive = liveCheck(a) && s.puck.owner !== a.id,
-    bLive = liveCheck(b) && s.puck.owner !== b.id;
+  const aLive = shoulderContact(s, a, b, nx, nz),
+    bLive = shoulderContact(s, b, a, -nx, -nz);
   if (aLive && bLive) {
     // Two committed checks: the heavier momentum wins and the other eats it at a discount.
     const aDrive = a.vx * nx + a.vz * nz,
@@ -984,101 +982,8 @@ function moveSkater(
   carrying = false,
   grip = PHYSICS.edgeGrip,
 ) {
-  const down = p.downTimer > 0,
-    diving = p.diveTimer > 0;
-  if (down || diving) {
-    x = 0;
-    z = 0;
-    hustle = false;
-  }
-  let mag = Math.hypot(x, z);
-  if (mag > 1) {
-    x /= mag;
-    z /= mag;
-    mag = 1;
-  }
-  const stumbling = p.stumbleTimer > 0,
-    goalie = p.role === 'G';
-  const boosting = hustle && p.stamina > 0.08 && mag > 0.3 && !stumbling;
-  p.stamina = clamp(
-    p.stamina + (boosting ? -PHYSICS.hustleDrain : PHYSICS.staminaRecover) * dt,
-    0,
-    1,
-  );
-  const max =
-    (boosting ? PHYSICS.hustleSpeed : PHYSICS.maxSpeed) *
-    (goalie ? 0.64 : 1) *
-    (backskate ? PHYSICS.backskateSpeed : 1) *
-    (stumbling ? 0.55 : 1) *
-    (carrying && !goalie ? (boosting ? PHYSICS.carryHustle : PHYSICS.carrySpeed) : 1);
   const speedNow = Math.hypot(p.vx, p.vz);
-  const spinning = p.dekeKind === 'spin';
-  if (down || diving || stumbling || goalie) {
-    // Nobody is steering here: the goalie shuffles across the crease, the rest ride it out.
-    const rate = down
-      ? 2.4
-      : diving
-        ? 0.82
-        : stumbling
-          ? 1.1
-          : mag > 0.05
-            ? 2.6
-            : PHYSICS.coastDrag;
-    p.vx += (x * max - p.vx) * Math.min(1, rate * dt);
-    p.vz += (z * max - p.vz) * Math.min(1, rate * dt);
-    if (stumbling && speedNow > 1.2) p.angle = turnToward(p.angle, Math.atan2(p.vx, p.vz), dt * 4);
-  } else if (mag > 0.05) {
-    const ratio = clamp(speedNow / PHYSICS.maxSpeed, 0, 1);
-    const ix = x / mag,
-      iz = z / mag;
-    const align = speedNow > 0.4 ? (p.vx * ix + p.vz * iz) / speedNow : 1;
-    const stopping = align < PHYSICS.stopAlign && speedNow > 1.2;
-    let turned = 0;
-    if (!spinning) {
-      const want = Math.atan2(x, z) + (backskate ? Math.PI : 0);
-      let turnRate =
-        (PHYSICS.turnRateLow + (PHYSICS.turnRateHigh - PHYSICS.turnRateLow) * ratio) *
-        (boosting ? PHYSICS.hustleTurn : 1) *
-        (backskate ? 0.8 : 1);
-      if (stopping) turnRate *= PHYSICS.stopPivot;
-      const before = p.angle;
-      p.angle = turnToward(p.angle, want, turnRate * dt);
-      turned = Math.abs(Math.atan2(Math.sin(p.angle - before), Math.cos(p.angle - before)));
-    }
-    const heading = p.angle + (backskate ? Math.PI : 0);
-    const hx = spinning && speedNow > 0.4 ? p.vx / speedNow : Math.sin(heading),
-      hz = spinning && speedNow > 0.4 ? p.vz / speedNow : Math.cos(heading);
-    if (stopping) {
-      const decay = Math.exp(-PHYSICS.stopDrag * dt);
-      p.vx *= decay;
-      p.vz *= decay;
-    } else {
-      // The first stride from a standstill goes wherever the stick points; after that, thrust
-      // follows the heading and turning is what the edges are for.
-      const free = 1 - clamp(speedNow / 2.5, 0, 1);
-      const thrust = normalized(hx * (1 - free) + ix * free, hz * (1 - free) + iz * free);
-      const along = p.vx * hx + p.vz * hz;
-      const rate = PHYSICS.launchRate - PHYSICS.topEndTaper * clamp(along / max, 0, 1);
-      const dv = (mag * max - along) * Math.min(1, rate * dt);
-      p.vx += thrust.x * dv;
-      p.vz += thrust.z * dv;
-    }
-    const slip = p.vx * -hz + p.vz * hx;
-    const bite = slip * (1 - Math.exp(-grip * dt));
-    p.vx += hz * bite;
-    p.vz -= hx * bite;
-    if (turned > 0 && !stopping) {
-      const bleed = clamp(turned * PHYSICS.carveBleed * ratio, 0, 0.5);
-      p.vx *= 1 - bleed;
-      p.vz *= 1 - bleed;
-    }
-  } else {
-    const decay = Math.exp(-PHYSICS.coastDrag * dt);
-    p.vx *= decay;
-    p.vz *= decay;
-    if (!spinning && speedNow > 1.2 && !backskate)
-      p.angle = turnToward(p.angle, Math.atan2(p.vx, p.vz), dt * 3);
-  }
+  skateVelocity(p, x, z, hustle, backskate, dt, carrying, grip);
   p.x += p.vx * dt;
   p.z += p.vz * dt;
   // The goal frame is solid for skaters; keep players out of the net interior.
@@ -1115,29 +1020,6 @@ function moveSkater(
   }
   p.stride += speedNow * dt * 1.05;
 }
-/** A live check steers onto the opponent it was flicked at. No lock, no magnet. */
-function steerCheck(s: MatchState, p: Skater, dt: number) {
-  if (!liveCheck(p) || p.hitLock < 0) return;
-  const target = s.skaters[p.hitLock];
-  if (!isOnIce(s, target) || target.downTimer > 0) {
-    p.hitLock = -1;
-    return;
-  }
-  const speed = Math.hypot(p.vx, p.vz);
-  if (speed < 0.5) return;
-  const lead = PHYSICS.hitLockLead;
-  const to = normalized(target.x + target.vx * lead - p.x, target.z + target.vz * lead - p.z),
-    dir = normalized(p.vx, p.vz);
-  if (dir.x * to.x + dir.z * to.z < 0) {
-    p.hitLock = -1;
-    return;
-  }
-  const blend = 1 - Math.exp(-PHYSICS.hitLockSteer * dt);
-  const steered = normalized(dir.x + (to.x - dir.x) * blend, dir.z + (to.z - dir.z) * blend);
-  p.vx = steered.x * speed;
-  p.vz = steered.z * speed;
-  p.angle = Math.atan2(steered.x, steered.z);
-}
 /** A check that finds nothing but air leaves you overextended: no puck, no second swing, for a beat. */
 function whiffCheck(p: Skater) {
   p.hitLock = -1;
@@ -1155,29 +1037,72 @@ function updateRush(p: Skater, dt: number) {
   const speed = Math.hypot(p.vx, p.vz);
   p.rush += (speed - p.rush) * (1 - Math.exp(-6 * dt));
 }
-function separatePlayers(s: MatchState) {
+/** The shoulder has a forward contact cone. Brushing a hip or being touched from behind
+ * cannot spend a check, and a receding opponent cannot be hit by the reach allowance. */
+function shoulderContact(s: MatchState, a: Skater, b: Skater, nx: number, nz: number) {
+  return (
+    liveCheck(a) &&
+    s.puck.owner !== a.id &&
+    a.team !== b.team &&
+    a.downTimer <= 0 &&
+    b.downTimer <= 0 &&
+    facing(a, nx, nz) > 0.35 &&
+    closingSpeed(a, b, nx, nz) > 0.1
+  );
+}
+function separatePlayers(s: MatchState, previous: Vec2[]) {
+  const contacts: { a: Skater; b: Skater; t: number; nx: number; nz: number; body: boolean }[] = [];
   for (let i = 0; i < s.skaters.length; i++)
     for (let j = i + 1; j < s.skaters.length; j++) {
       const a = s.skaters[i],
         b = s.skaters[j];
       if (!isOnIce(s, a) || !isOnIce(s, b)) continue;
-      const d = distance(a, b),
-        min = PHYSICS.playerRadius * 1.8;
+      const min = PHYSICS.playerRadius * 2;
       const opponents = a.team !== b.team && a.downTimer <= 0 && b.downTimer <= 0;
-      const reach = opponents && (liveCheck(a) || liveCheck(b)) ? PHYSICS.checkReach : 0;
-      if (d < min + reach && d > 0.001) {
-        const n = normalized(b.x - a.x, b.z - a.z),
-          overlap = Math.max(0, min - d) / 2;
-        const closing = (a.vx - b.vx) * n.x + (a.vz - b.vz) * n.z;
-        if (opponents) contact(s, a, b, n.x, n.z, closing);
-        a.x -= n.x * overlap;
-        a.z -= n.z * overlap;
-        b.x += n.x * overlap;
-        b.z += n.z * overlap;
-        constrainToRink(a, PHYSICS.playerRadius);
-        constrainToRink(b, PHYSICS.playerRadius);
-      }
+      const radius = min + (opponents && (liveCheck(a) || liveCheck(b)) ? PHYSICS.checkReach : 0);
+      const rx = previous[j].x - previous[i].x,
+        rz = previous[j].z - previous[i].z;
+      const dx = b.x - a.x - rx,
+        dz = b.z - a.z - rz;
+      const c = rx * rx + rz * rz - radius * radius;
+      const aa = dx * dx + dz * dz,
+        bb = 2 * (rx * dx + rz * dz);
+      const discriminant = bb * bb - 4 * aa * c;
+      const t =
+        c <= 0
+          ? 0
+          : aa > 1e-10 && discriminant >= 0
+            ? (-bb - Math.sqrt(discriminant)) / (2 * aa)
+            : Infinity;
+      if (t < 0 || t > 1) continue;
+      const atX = rx + dx * t,
+        atZ = rz + dz * t;
+      const n =
+        Math.hypot(atX, atZ) > 1e-5
+          ? normalized(atX, atZ)
+          : normalized(a.vx - b.vx || 1, a.vz - b.vz);
+      const closest = aa > 1e-10 ? clamp(-(rx * dx + rz * dz) / aa, 0, 1) : 0;
+      const body = Math.hypot(rx + dx * closest, rz + dz * closest) < min;
+      contacts.push({ a, b, t, nx: n.x, nz: n.z, body });
     }
+  // The first shoulder along the path wins, independent of roster order.
+  contacts.sort((a, b) => a.t - b.t);
+  for (const { a, b, nx, nz, body } of contacts) {
+    const opponents = a.team !== b.team && a.downTimer <= 0 && b.downTimer <= 0;
+    const eligible = shoulderContact(s, a, b, nx, nz) || shoulderContact(s, b, a, -nx, -nz);
+    const closing = (a.vx - b.vx) * nx + (a.vz - b.vz) * nz;
+    if (opponents && (body || eligible)) contact(s, a, b, nx, nz, closing);
+    else if (body) jostle(a, b, nx, nz, closing);
+    if (!body) continue;
+    const overlap =
+      Math.max(0, PHYSICS.playerRadius * 2 - ((b.x - a.x) * nx + (b.z - a.z) * nz)) / 2;
+    a.x -= nx * overlap;
+    a.z -= nz * overlap;
+    b.x += nx * overlap;
+    b.z += nz * overlap;
+    constrainToRink(a, PHYSICS.playerRadius);
+    constrainToRink(b, PHYSICS.playerRadius);
+  }
 }
 function goal(s: MatchState, scoringTeam: Team) {
   if (s.mode === 'freeSkate' && scoringTeam !== s.homeTeam) return false;
@@ -1455,6 +1380,11 @@ export function stepMatch(s: MatchState, input: InputFrame = EMPTY_INPUT, dt = R
   }
   applyPassAim(s, s.skaters[s.controlled], input);
   const controlledThisStep = s.controlled;
+  const previous = s.skaters.map((p) => ({ x: p.x, z: p.z }));
+  // Every CPU sees the same pre-movement frame, regardless of its roster index.
+  const decisions = s.skaters.map((p) =>
+    p.id !== controlledThisStep && isOnIce(s, p) ? decideAI(s, p) : null,
+  );
   for (const p of s.skaters) {
     if (!isOnIce(s, p)) continue;
     p.cooldown = Math.max(0, p.cooldown - dt);
@@ -1475,8 +1405,9 @@ export function stepMatch(s: MatchState, input: InputFrame = EMPTY_INPUT, dt = R
     const controlled = p.id === controlledThisStep;
     if (controlled && s.puck.owner === p.id) tryStartDeke(p, input);
     const drag = controlled && input.toeDrag && s.puck.owner === p.id;
-    const side = controlled ? input.stickX : Math.sin(s.tick * 0.025 + p.id) * 0.35;
-    const pull = drag ? clamp(input.stickY, 0, 1) : 0;
+    const ai = decisions[p.id];
+    const side = controlled ? input.stickX : ai?.stickX || Math.sin(s.tick * 0.025 + p.id) * 0.35;
+    const pull = drag ? clamp(input.stickY, 0, 1) : ai?.toeDrag ? 0.82 : 0;
     const carrying = s.puck.owner === p.id;
     advanceStick(p, side, pull, dt, carrying);
     const grip = activeDeke(p)
@@ -1496,7 +1427,14 @@ export function stepMatch(s: MatchState, input: InputFrame = EMPTY_INPUT, dt = R
       moveSkater(p, input.moveX, input.moveZ, input.hustle, input.backskate, dt, carrying, grip);
       if (input.dive && s.puck.owner !== p.id) startDive(s, p, input);
       if (input.check && s.puck.owner !== p.id) {
-        const aim = actionAim(p, input, s),
+        // RS up is a commitment gesture, not a world-space north aim. Backchecking toward
+        // our own goal must drive the shoulder down-ice with the left stick and skating path.
+        const aim =
+            Math.hypot(input.moveX, input.moveZ) > 0.18
+              ? normalized(input.moveX, input.moveZ)
+              : Math.hypot(p.vx, p.vz) > 0.8
+                ? normalized(p.vx, p.vz)
+                : { x: Math.sin(p.angle), z: Math.cos(p.angle) },
           load = input.checkPower ?? 0;
         p.queuedCheck = launchCheck(s, p, aim.x, aim.z, load)
           ? null
@@ -1519,17 +1457,13 @@ export function stepMatch(s: MatchState, input: InputFrame = EMPTY_INPUT, dt = R
       if (input.passRelease && s.puck.owner === p.id) passPuck(s, p, input.moveX, input.moveZ);
       if (input.poke) pokeCheck(s, p);
       else if (input.pokeHeld) pokeCheck(s, p, true);
-      steerCheck(s, p, dt);
     } else {
-      const ai = decideAI(s, p);
-      if (s.puck.owner === p.id && (ai.toeDrag || Math.abs(ai.stickX) > 0.04))
-        advanceStick(p, ai.stickX, ai.toeDrag ? 0.82 : 0, dt, true);
+      if (!ai) continue;
       moveSkater(p, ai.move.x, ai.move.z, ai.hustle, ai.backskate, dt, carrying, grip);
       if (p.role === 'G')
         p.angle = attackDirection(p.team, s.period) > 0 ? Math.PI / 2 : -Math.PI / 2;
       else {
         if (ai.check) launchCheck(s, p, ai.checkAim.x, ai.checkAim.z, ai.checkPower);
-        steerCheck(s, p, dt);
       }
       if (ai.shoot) shootPuck(s, p, ai.shotPower, ai.shotAim, ai.shotHeight);
       else if (ai.pass) passPuck(s, p, ai.passDir.x, ai.passDir.z);
@@ -1537,7 +1471,7 @@ export function stepMatch(s: MatchState, input: InputFrame = EMPTY_INPUT, dt = R
     }
     updateRush(p, dt);
   }
-  separatePlayers(s);
+  separatePlayers(s, previous);
   advancePuck(s, dt);
 }
 export const isLivePhase = (phase: Phase) =>

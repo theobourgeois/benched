@@ -95,6 +95,7 @@ function Simulation() {
           dekeSpecial: frame.dekeSpecial ?? old.dekeSpecial,
           dive: frame.dive || old.dive,
           check: frame.check || old.check,
+          checkPower: frame.check ? frame.checkPower : old.checkPower,
           switchPlayer: frame.switchPlayer || old.switchPlayer,
           pause: frame.pause || old.pause,
         }

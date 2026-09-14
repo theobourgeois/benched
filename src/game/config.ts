@@ -23,36 +23,26 @@ export const PUCK = {
 export const PHYSICS = {
   /** Top skating speed. Real NHL pace is about 9 m/s; this runs a touch hotter for arcade feel. */
   maxSpeed: 9.6,
-  hustleSpeed: 12.2,
+  hustleSpeed: 11.2,
   /** Carrying the puck costs a little top end, so a chaser can close but not walk them down. */
   carrySpeed: 0.965,
   /** Hustling with the puck costs more; a chasing defender can run a carrier down. */
   carryHustle: 0.92,
-  /** Exponential approach rate toward the stick's speed at a standstill; the first strides bite. */
-  launchRate: 2.4,
-  /** How much of that rate is lost as you near top speed; the last metre per second is earned. */
-  topEndTaper: 1.0,
-  /** Heading turn rate near a standstill (rad/s): pivots are instant. */
-  turnRateLow: 14,
-  /** Heading turn rate at top speed (rad/s): about a 2.5 m carve radius. */
-  turnRateHigh: 4.8,
-  /** Extra turn-rate loss while hustling; a sprinting skater is a train. */
-  hustleTurn: 0.9,
-  /** How quickly sideways slip is bitten off by the edges. Lower lets the skater drift. */
-  edgeGrip: 14,
-  /** Grip while the puck is being thrown wide on a deke; the skater rides an edge. */
-  dekeGrip: 2.2,
-  /** Speed scrubbed per radian of carve at top speed. */
-  carveBleed: 0.1,
-  /** Glide when the stick is released. Ice should carry you; it should not feel like running. */
-  coastDrag: 0.42,
-  /** Opposite-stick hockey stop. */
-  stopDrag: 7.5,
-  /** Turn-rate multiplier while stopping, so the skater swings around as they bite. */
-  stopPivot: 2.4,
-  /** Fraction of speed that must oppose the stick to read as a stop instead of a carve. */
+  /** Forward push in m/s². Hustle earns a higher top end, never a faster first stride. */
+  skateAcceleration: 12,
+  /** Edges can only redirect this much velocity per second; pace widens the turning circle. */
+  edgeAcceleration: 24,
+  /** Tight turns spend speed as the skater loads an edge. */
+  carveBleed: 0.16,
+  /** Blade alignment at low speed, independently of the torso facing. */
+  pivotRate: 12,
+  /** A planted hockey stop sheds metres per second, rather than multiplying velocity away. */
+  stopDeceleration: 19,
   stopAlign: -0.35,
-  drag: 2.8,
+  coastDrag: 0.22,
+  /** Relative edge grip, reduced while reaching out through a deke. */
+  edgeGrip: 14,
+  dekeGrip: 8,
   backskateSpeed: 0.68,
   hustleDrain: 0.2,
   staminaRecover: 0.14,
@@ -66,27 +56,27 @@ export const PHYSICS = {
   /** Cosine of the pass aim-assist cone (~47° from the stick). */
   passAssist: 0.68,
   /** Lunge a committed check adds to the checker's speed, before loading. */
-  checkLunge: 4.4,
+  checkLunge: 2.8,
   /** Extra lunge from a fully loaded (pulled-back) check. */
-  checkLoadLunge: 2.2,
+  checkLoadLunge: 1.6,
   /** Ceiling on speed during a lunge. */
   checkLungeCap: 1.4,
   /** How long a committed check is live for, from the flick. */
-  checkWindow: 0.5,
+  checkWindow: 0.46,
   /** The last part of the window is follow-through; contact there is only a bump. */
   checkRecovery: 0.12,
   /** A committed check counts its own drive into the body, not only the relative closing speed. */
   checkDrive: 0.4,
   /** Extra shoulder reach while a check is live. */
-  checkReach: 0.35,
+  checkReach: 0.24,
   /** A flick thrown during a cooldown is held this long and fires when it can. */
   checkBuffer: 0.3,
-  /** How far ahead a live check leads a moving target. */
+  /** Lead time for the one-time aim assistance at check launch. */
   hitLockLead: 0.12,
   /** Flat power a committed check adds on top of closing momentum. */
   checkCommit: 1.6,
   /** How much a fully loaded check scales that commitment. */
-  checkLoadBonus: 0.6,
+  checkLoadBonus: 1.25,
   /** Closing power that staggers the victim and knocks the puck loose. */
   checkStumble: 6.0,
   /** Closing power that puts the victim on the ice. */
@@ -99,14 +89,14 @@ export const PHYSICS = {
   checkBrace: 0.9,
   /** A victim mid-deke or already off balance takes this much more. */
   checkExposed: 1.15,
-  /** Hitting someone skating away from you is a shove, not a hit. */
+  /** Reduce impact when the victim is skating away along the contact. */
   checkFromBehind: 0.85,
   /** How far a committed check will pick a target. */
-  hitLockRange: 5,
+  hitLockRange: 3.8,
   /** Cosine of the lock cone; you have to be flicking at them. */
-  hitLockCone: 0.2,
-  /** How quickly a live check steers onto its target. */
-  hitLockSteer: 16,
+  hitLockCone: 0.65,
+  /** Maximum aim assistance at launch, in radians. The committed path cannot home afterward. */
+  checkAimAssist: 0.32,
   /** Stamina a committed check costs; loading costs a little more. */
   checkStamina: 0.06,
   /** Time frozen on a knockdown for impact. */

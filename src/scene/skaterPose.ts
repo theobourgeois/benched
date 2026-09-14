@@ -103,12 +103,7 @@ export function poseSkater(
   const move = activeDeke(skater);
   const skate = Math.min(speed / 8.2, 1);
   // Mixamo thighs: +X swings the skate forward, +Z abducts toward the skater's left.
-  const drive =
-    phase === 'up' && dive <= 0
-      ? goalie
-        ? skate * 0.22
-        : THREE.MathUtils.clamp((speed - 0.45) / 3.4, 0, 1)
-      : 0;
+  const drive = phase === 'up' && dive <= 0 ? (goalie ? skate * 0.22 : skater.skateDrive) : 0;
   const swing = Math.sin(skater.stride);
   const crouch =
     phase === 'limp'
@@ -135,7 +130,7 @@ export function poseSkater(
     'pelvis',
     pelvisTilt + Math.abs(swing) * drive * 0.04,
     -swing * drive * 0.12 + deke * 0.14,
-    lurch * 0.18 + checking * 0.12 + deke * 0.2,
+    lurch * 0.18 + checking * 0.12 + deke * 0.2 - skater.edgeLean * 0.28,
     limp,
   );
   applyMix(
@@ -143,7 +138,7 @@ export function poseSkater(
     'spine',
     lean * 0.5 + lurch * 0.2 + dive * 0.4,
     -swing * drive * 0.18 + checking * 0.38 + deke * 0.32,
-    -lurch * 0.25 - deke * 0.12,
+    -lurch * 0.25 - deke * 0.12 - skater.edgeLean * 0.12,
     limp,
   );
   applyMix(
