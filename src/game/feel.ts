@@ -135,6 +135,17 @@ export const FEEL_PARAMS: FeelParam[] = [
   ),
   p(
     'skate',
+    'autoSkatePush',
+    'Switch push',
+    1,
+    2.2,
+    0.05,
+    'First-stride multiplier after a defensive switch while the left stick is quiet.',
+    'the new skater jumps at the play',
+    'they keep their old pace',
+  ),
+  p(
+    'skate',
     'edgeAcceleration',
     'Edge bite',
     8,

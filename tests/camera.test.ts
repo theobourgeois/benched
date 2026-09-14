@@ -4,6 +4,7 @@ import { createMatch, netShotTarget, resetFormation, startMatch } from '../src/g
 import { attackDirection, EMPTY_INPUT } from '../src/game/config';
 import { screenInputToRink } from '../src/input/coordinates';
 import { cameraFraming } from '../src/scene/camera';
+import { playerLocator } from '../src/scene/locator';
 import type { Team } from '../src/game/types';
 describe('end-to-end arena camera', () => {
   for (const team of [0, 1] as Team[])
@@ -186,5 +187,52 @@ describe('end-to-end arena camera', () => {
     expect(marker.x).toBeLessThan(0.9);
     expect(marker.y).toBeGreaterThan(-0.2);
     expect(marker.y).toBeLessThan(0.95);
+  });
+});
+function framedCamera(
+  match: ReturnType<typeof createMatch>,
+  mode: 'broadcast' | 'wide' = 'broadcast',
+) {
+  const framing = cameraFraming(match, mode, 1.5);
+  const camera = new PerspectiveCamera(framing.fov, 1.5, 0.1, 250);
+  camera.position.set(...framing.position);
+  camera.lookAt(new Vector3(...framing.target));
+  camera.updateMatrixWorld();
+  return camera;
+}
+describe('off-screen player locator', () => {
+  it('stays hidden while the skater is in the broadcast frame', () => {
+    const match = createMatch();
+    match.phase = 'playing';
+    expect(playerLocator(match, framedCamera(match), 1600)).toBeNull();
+  });
+  it('pins a trailing skater to the bottom and keeps left wing left of right wing', () => {
+    const match = createMatch();
+    match.phase = 'playing';
+    const player = match.skaters[match.controlled];
+    match.puck.x = 25;
+    match.puck.z = 0;
+    player.x = -18;
+    player.z = 0;
+    const camera = framedCamera(match);
+    const center = playerLocator(match, camera, 1600);
+    expect(center).not.toBeNull();
+    expect(center!.number).toBe(player.number);
+    expect(center!.color).toBe(match.teams[player.team].accent);
+    expect(center!.x).toBeGreaterThan(560);
+    expect(center!.x).toBeLessThan(1040);
+    player.z = -10;
+    const left = playerLocator(match, framedCamera(match), 1600)!;
+    player.z = 10;
+    const right = playerLocator(match, framedCamera(match), 1600)!;
+    expect(left.x).toBeLessThan(center!.x);
+    expect(right.x).toBeGreaterThan(center!.x);
+  });
+  it('does not mark a full-rink camera', () => {
+    const match = createMatch();
+    match.phase = 'playing';
+    match.puck.x = 25;
+    match.skaters[match.controlled].x = -18;
+    expect(playerLocator(match, framedCamera(match, 'wide'), 1600)).toBeNull();
   });
 });

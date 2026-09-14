@@ -30,6 +30,8 @@ export const PHYSICS = {
   carryHustle: 0.92,
   /** Forward push in m/s². Hustle earns a higher top end, never a faster first stride. */
   skateAcceleration: 12,
+  /** Extra first-stride push after a player switch so a take-over can still close a hit. */
+  autoSkatePush: 1.4,
   /** Edges can only redirect this much velocity per second; pace widens the turning circle. */
   edgeAcceleration: 40,
   // Feel tweaks — paste into src/game/config.ts

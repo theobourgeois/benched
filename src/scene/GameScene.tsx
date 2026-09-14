@@ -9,6 +9,7 @@ import { stepMatch, togglePause, netShotTarget } from '../game/engine';
 import { navigateWithController } from '../input/menuNavigation';
 import { screenInputToRink } from '../input/coordinates';
 import { cameraFraming } from './camera';
+import { playerLocator } from './locator';
 import { PUCK, RULES } from '../game/config';
 import type { InputFrame } from '../game/types';
 const _aimNdc = new THREE.Vector3();
@@ -239,6 +240,30 @@ function PassAim() {
     </group>
   );
 }
+function PlayerLocatorHud({ marker }: { marker: RefObject<HTMLDivElement | null> }) {
+  const shown = useRef(false);
+  useFrame(({ camera, size }) => {
+    const el = marker.current;
+    if (!el) return;
+    const loc = playerLocator(
+      runtime.match,
+      camera as THREE.PerspectiveCamera,
+      size.width,
+      shown.current,
+    );
+    shown.current = Boolean(loc);
+    if (!loc) {
+      el.hidden = true;
+      return;
+    }
+    el.hidden = false;
+    el.style.setProperty('--locator', loc.color);
+    el.style.transform = `translateX(${loc.x}px) translateX(-50%)`;
+    const num = el.querySelector('b');
+    if (num && num.textContent !== String(loc.number)) num.textContent = String(loc.number);
+  });
+  return null;
+}
 function ShotAimHud({ marker }: { marker: RefObject<HTMLDivElement | null> }) {
   useFrame(({ camera, size }) => {
     const el = marker.current;
@@ -288,62 +313,73 @@ class SceneBoundary extends Component<{ children: ReactNode }, { error: boolean 
 }
 export function GameScene() {
   const { match, settings } = useGame();
-  const shotAim = useRef<HTMLDivElement>(null);
+  const shotAim = useRef<HTMLDivElement>(null),
+    locator = useRef<HTMLDivElement>(null);
   return (
-    <div className={`arena-canvas ${match.phase === 'menu' ? 'arena-menu' : ''}`}>
-      <div ref={shotAim} className="shot-aim-marker" hidden />
-      <SceneBoundary>
-        <Canvas
-          shadows={settings.quality === 'high'}
-          dpr={settings.quality === 'high' ? [1, 1.75] : 1}
-          camera={{ position: [35, 39, 45], fov: 43, near: 0.1, far: 250 }}
-          gl={{ antialias: true, powerPreference: 'high-performance' }}
-          onCreated={({ gl }) => {
-            gl.setClearColor('#071316');
-            gl.toneMapping = THREE.ACESFilmicToneMapping;
-            gl.toneMappingExposure = 1.15;
-          }}
-          fallback={
-            <div className="webgl-error">
-              WebGL is needed to play. Try a browser with hardware acceleration enabled.
-            </div>
-          }
-        >
-          <fog attach="fog" args={['#071316', 65, 135]} />
-          <ambientLight intensity={0.8} color="#bcd6e0" />
-          <hemisphereLight args={['#d4ecf8', '#254545', 1.2]} />
-          <directionalLight
-            position={[6, 25, 12]}
-            intensity={2.2}
-            color="#f2f6ff"
-            castShadow={settings.quality === 'high'}
-            shadow-mapSize={[2048, 2048]}
-            shadow-camera-left={-36}
-            shadow-camera-right={36}
-            shadow-camera-top={24}
-            shadow-camera-bottom={-24}
-            shadow-normalBias={0.04}
-            shadow-radius={3}
-            shadow-bias={-0.0002}
-          />
-          <directionalLight position={[-22, 16, -10]} intensity={1.1} color="#d6e6ff" />
-          <Suspense fallback={null}>
-            <Arena />
-            <Puck />
-            <ShotAimHud marker={shotAim} />
-            <PassAim />
-            <IceSpray />
-          </Suspense>
-          <Suspense fallback={null}>
-            {/* Keyed by matchup so jerseys are rebuilt when the clubs change. */}
-            {Array.from({ length: 12 }, (_, i) => (
-              <Player key={`${match.teams[0].key}|${match.teams[1].key}|${i}`} id={i} />
-            ))}
-          </Suspense>
-          <Simulation />
-          <CameraRig />
-        </Canvas>
-      </SceneBoundary>
-    </div>
+    <>
+      <div className={`arena-canvas ${match.phase === 'menu' ? 'arena-menu' : ''}`}>
+        <div ref={shotAim} className="shot-aim-marker" hidden />
+        <SceneBoundary>
+          <Canvas
+            shadows={settings.quality === 'high'}
+            dpr={settings.quality === 'high' ? [1, 1.75] : 1}
+            camera={{ position: [35, 39, 45], fov: 43, near: 0.1, far: 250 }}
+            gl={{ antialias: true, powerPreference: 'high-performance' }}
+            onCreated={({ gl }) => {
+              gl.setClearColor('#071316');
+              gl.toneMapping = THREE.ACESFilmicToneMapping;
+              gl.toneMappingExposure = 1.15;
+            }}
+            fallback={
+              <div className="webgl-error">
+                WebGL is needed to play. Try a browser with hardware acceleration enabled.
+              </div>
+            }
+          >
+            <fog attach="fog" args={['#071316', 65, 135]} />
+            <ambientLight intensity={0.8} color="#bcd6e0" />
+            <hemisphereLight args={['#d4ecf8', '#254545', 1.2]} />
+            <directionalLight
+              position={[6, 25, 12]}
+              intensity={2.2}
+              color="#f2f6ff"
+              castShadow={settings.quality === 'high'}
+              shadow-mapSize={[2048, 2048]}
+              shadow-camera-left={-36}
+              shadow-camera-right={36}
+              shadow-camera-top={24}
+              shadow-camera-bottom={-24}
+              shadow-normalBias={0.04}
+              shadow-radius={3}
+              shadow-bias={-0.0002}
+            />
+            <directionalLight position={[-22, 16, -10]} intensity={1.1} color="#d6e6ff" />
+            <Suspense fallback={null}>
+              <Arena />
+              <Puck />
+              <ShotAimHud marker={shotAim} />
+              <PassAim />
+              <IceSpray />
+            </Suspense>
+            <Suspense fallback={null}>
+              {/* Keyed by matchup so jerseys are rebuilt when the clubs change. */}
+              {Array.from({ length: 12 }, (_, i) => (
+                <Player key={`${match.teams[0].key}|${match.teams[1].key}|${i}`} id={i} />
+              ))}
+            </Suspense>
+            <Simulation />
+            <CameraRig />
+            <PlayerLocatorHud marker={locator} />
+          </Canvas>
+        </SceneBoundary>
+      </div>
+      <div ref={locator} className="player-locator" hidden aria-hidden="true">
+        <span>
+          <b />
+          <small>YOU</small>
+        </span>
+        <i />
+      </div>
+    </>
   );
 }

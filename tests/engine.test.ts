@@ -251,6 +251,61 @@ describe('skating and defense', () => {
     stepMatch(s, { ...EMPTY_INPUT, switchPlayer: true });
     expect(s.controlled).toBe(3);
   });
+  it('keeps accelerating after a switch instead of coasting to a stop', () => {
+    const setup = () => {
+      const s = openIce();
+      Object.assign(s.skaters[0], { x: 12, z: 8, vx: 0, vz: 0 });
+      Object.assign(s.skaters[1], { x: 18, z: 10 });
+      Object.assign(s.skaters[2], { x: 16, z: -10 });
+      Object.assign(s.skaters[3], { x: -4, z: 0, vx: 6, vz: 0, angle: Math.PI / 2, stamina: 1 });
+      Object.assign(s.skaters[4], { x: 18, z: -8 });
+      Object.assign(s.skaters[6], { x: 8, z: 0, vx: 3, vz: 0 });
+      Object.assign(s.puck, { owner: 6, x: 8, z: 0 });
+      s.controlled = 0;
+      return s;
+    };
+    const auto = setup();
+    stepMatch(auto, { ...EMPTY_INPUT, switchPlayer: true });
+    expect(auto.controlled).toBe(3);
+    expect(auto.autoSkate).toBe(true);
+    for (let i = 0; i < 24; i++) stepMatch(auto);
+    const coast = setup();
+    coast.controlled = 3;
+    for (let i = 0; i < 25; i++) stepMatch(coast);
+    expect(auto.skaters[3].vx).toBeGreaterThan(6);
+    expect(auto.skaters[3].vx).toBeGreaterThan(coast.skaters[3].vx + 0.35);
+  });
+  it('steers on the first stick input after a switch', () => {
+    const s = openIce();
+    Object.assign(s.skaters[0], { x: 12, z: 8, vx: 0, vz: 0 });
+    Object.assign(s.skaters[1], { x: 18, z: 10 });
+    Object.assign(s.skaters[2], { x: 16, z: -10 });
+    Object.assign(s.skaters[3], { x: -4, z: 0, vx: 6, vz: 0, angle: Math.PI / 2, stamina: 1 });
+    Object.assign(s.skaters[4], { x: 18, z: -8 });
+    Object.assign(s.skaters[6], { x: 8, z: 0, vx: 3, vz: 0 });
+    Object.assign(s.puck, { owner: 6, x: 8, z: 0 });
+    s.controlled = 0;
+    stepMatch(s, { ...EMPTY_INPUT, switchPlayer: true, moveZ: 1 });
+    expect(s.controlled).toBe(3);
+    expect(s.autoSkate).toBe(false);
+    for (let i = 0; i < 12; i++) stepMatch(s, { ...EMPTY_INPUT, moveZ: 1 });
+    expect(s.skaters[3].vz).toBeGreaterThan(1.5);
+  });
+  it('drives through a carrier already in range after a switch instead of easing off', () => {
+    const s = openIce();
+    Object.assign(s.skaters[0], { x: 12, z: 8, vx: 0, vz: 0 });
+    Object.assign(s.skaters[1], { x: 18, z: 10 });
+    Object.assign(s.skaters[2], { x: 16, z: -10 });
+    Object.assign(s.skaters[3], { x: 0.4, z: 0, vx: 7, vz: 0, angle: Math.PI / 2, stamina: 1 });
+    Object.assign(s.skaters[4], { x: 18, z: -8 });
+    Object.assign(s.skaters[6], { x: 3.2, z: 0, vx: 4, vz: 0, cooldown: 10 });
+    Object.assign(s.puck, { owner: 6, x: 3.2, z: 0 });
+    s.controlled = 0;
+    stepMatch(s, { ...EMPTY_INPUT, switchPlayer: true });
+    expect(s.controlled).toBe(3);
+    for (let i = 0; i < 18; i++) stepMatch(s);
+    expect(s.skaters[3].vx).toBeGreaterThan(6.5);
+  });
   it('a poke check dislodges enemy possession', () => {
     const s = openIce();
     const a = s.skaters[0],

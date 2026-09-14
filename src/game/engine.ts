@@ -47,6 +47,7 @@ export function createMatch(
       shot: false,
     },
     controlled: homeTeam * 6,
+    autoSkate: false,
     homeTeam,
     teams,
     scoringTeam: null,
@@ -164,6 +165,7 @@ export function resetFormation(s: MatchState) {
     shot: false,
   });
   s.controlled = s.homeTeam * 6;
+  endAutoSkate(s);
   s.shotCharge = 0;
   s.shotAim = 0;
   s.shotLift = 0;
@@ -429,10 +431,17 @@ function switchCost(p: Skater, from: { x: number; z: number }, netX: number) {
     dist - clamp(along, 0, 10) * 0.85 + (along < 0 ? -along * 1.5 : 0) + Math.abs(across) * 0.4
   );
 }
+function endAutoSkate(s: MatchState) {
+  s.autoSkate = false;
+}
+function beginAutoSkate(s: MatchState) {
+  s.autoSkate = true;
+}
 export function switchSkater(s: MatchState) {
   const owner = s.puck.owner;
   if (owner !== null && s.skaters[owner].team === s.homeTeam) {
     s.controlled = owner;
+    endAutoSkate(s);
     return;
   }
   const options = s.skaters.filter(
@@ -449,6 +458,45 @@ export function switchSkater(s: MatchState) {
   s.controlled = options.reduce((best, p) =>
     switchCost(p, from, netX) < switchCost(best, from, netX) ? p : best,
   ).id;
+  beginAutoSkate(s);
+}
+/** Keep stride toward the body. A full reverse would plant a hockey stop and kill the hit. */
+function autoSkateMove(s: MatchState, p: Skater): Vec2 {
+  const owner = s.puck.owner !== null ? s.skaters[s.puck.owner] : null;
+  const mark = owner ?? s.puck;
+  const toward = normalized(mark.x + mark.vx * 0.14 - p.x, mark.z + mark.vz * 0.14 - p.z);
+  const speed = Math.hypot(p.vx, p.vz);
+  const travelDir =
+    speed > 0.2
+      ? { x: p.vx / speed, z: p.vz / speed }
+      : { x: Math.sin(p.angle), z: Math.cos(p.angle) };
+  if (toward.x === 0 && toward.z === 0) return travelDir;
+  if (speed < 1.4) return toward;
+  const travel = Math.atan2(travelDir.x, travelDir.z);
+  const want = Math.atan2(toward.x, toward.z);
+  const error = Math.atan2(Math.sin(want - travel), Math.cos(want - travel));
+  const turn = clamp(error, -1.15, 1.15);
+  return { x: Math.sin(travel + turn), z: Math.cos(travel + turn) };
+}
+function controlledSkate(s: MatchState, p: Skater, input: InputFrame) {
+  const stick = Math.hypot(input.moveX, input.moveZ);
+  if (s.puck.owner === p.id || stick > 0.18 || input.backskate) endAutoSkate(s);
+  if (!s.autoSkate)
+    return {
+      x: input.moveX,
+      z: input.moveZ,
+      hustle: input.hustle,
+      backskate: input.backskate,
+      push: 1,
+    };
+  const move = autoSkateMove(s, p);
+  return {
+    x: move.x,
+    z: move.z,
+    hustle: p.stamina > 0.08,
+    backskate: false,
+    push: PHYSICS.autoSkatePush,
+  };
 }
 function releasePuck(
   s: MatchState,
@@ -987,9 +1035,10 @@ function moveSkater(
   dt: number,
   carrying = false,
   grip = PHYSICS.edgeGrip,
+  pushScale = 1,
 ) {
   const speedNow = Math.hypot(p.vx, p.vz);
-  skateVelocity(p, x, z, hustle, backskate, dt, carrying, grip);
+  skateVelocity(p, x, z, hustle, backskate, dt, carrying, grip, pushScale);
   p.x += p.vx * dt;
   p.z += p.vz * dt;
   // The goal frame is solid for skaters; keep players out of the net interior.
@@ -1460,14 +1509,25 @@ export function stepMatch(s: MatchState, input: InputFrame = EMPTY_INPUT, dt = R
     }
     if (p.id === controlledThisStep) {
       if (input.block) p.blockTimer = 0.16;
-      moveSkater(p, input.moveX, input.moveZ, input.hustle, input.backskate, dt, carrying, grip);
+      const skate = controlledSkate(s, p, input);
+      moveSkater(
+        p,
+        skate.x,
+        skate.z,
+        skate.hustle,
+        skate.backskate,
+        dt,
+        carrying,
+        grip,
+        skate.push,
+      );
       if (input.dive && s.puck.owner !== p.id) startDive(s, p, input);
       if (input.check && s.puck.owner !== p.id) {
         // RS up is a commitment gesture, not a world-space north aim. Backchecking toward
         // our own goal must drive the shoulder down-ice with the left stick and skating path.
         const aim =
-            Math.hypot(input.moveX, input.moveZ) > 0.18
-              ? normalized(input.moveX, input.moveZ)
+            Math.hypot(skate.x, skate.z) > 0.18
+              ? normalized(skate.x, skate.z)
               : Math.hypot(p.vx, p.vz) > 0.8
                 ? normalized(p.vx, p.vz)
                 : { x: Math.sin(p.angle), z: Math.cos(p.angle) },

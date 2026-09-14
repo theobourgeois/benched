@@ -17,6 +17,7 @@ export function skateVelocity(
   dt: number,
   carrying = false,
   grip = PHYSICS.edgeGrip,
+  pushScale = 1,
 ) {
   const mag = Math.min(1, Math.hypot(x, z));
   const speed = Math.hypot(p.vx, p.vz);
@@ -79,6 +80,7 @@ export function skateVelocity(
       // Sharp cuts load the edges: acceleration resumes as the path lines up with the stick.
       const push =
         PHYSICS.skateAcceleration *
+        pushScale *
         (backskate ? 0.8 : 1) *
         clamp(1 - Math.abs(error) / Math.PI, 0.3, 1);
       const acceleration = clamp(

@@ -78,6 +78,63 @@ a {
   background: #eaff6c;
   box-shadow: 0 0 6px #d5fa64cc;
 }
+.player-locator {
+  position: absolute;
+  left: 0;
+  bottom: 118px;
+  z-index: 2;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  filter: drop-shadow(0 4px 14px #0009);
+}
+.player-locator[hidden] {
+  display: none;
+}
+.player-locator > span {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 48px;
+  padding: 7px 11px 5px;
+  border: 1px solid #e84a4a99;
+  border-top: 3px solid var(--locator, #e84a4a);
+  border-radius: 5px;
+  background: #102423f2;
+  backdrop-filter: blur(10px);
+  animation: locator-bob 0.85s ease-in-out infinite alternate;
+}
+.player-locator b {
+  font-family: var(--condensed);
+  font-style: italic;
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 0.9;
+  color: #f1ffdf;
+}
+.player-locator small {
+  font-size: 6px;
+  font-weight: 800;
+  letter-spacing: 1.4px;
+  color: var(--lime);
+}
+.player-locator i {
+  width: 0;
+  height: 0;
+  border: 8px solid transparent;
+  border-top-color: #e84a4a;
+  margin-top: -1px;
+}
+@keyframes locator-bob {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(3px);
+  }
+}
 .arena-canvas.arena-menu {
   left: 22%;
   width: 83%;
@@ -1622,6 +1679,9 @@ a {
   .shot-meter {
     bottom: 145px;
   }
+  .player-locator {
+    bottom: 168px;
+  }
   .hud {
     min-height: 0;
   }
@@ -2127,6 +2187,10 @@ a {
   border: 1px solid #a4bdd155;
   border-radius: 0;
   padding: 10px 17px;
+}
+.player-locator > span {
+  background: #071323f0;
+  border-radius: 0;
 }
 .player-card small span {
   display: none;

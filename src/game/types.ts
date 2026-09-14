@@ -134,6 +134,8 @@ export interface MatchState {
   skaters: Skater[];
   puck: Puck;
   controlled: number;
+  /** After a defensive switch, keep skating at the play while the left stick is quiet. */
+  autoSkate: boolean;
   homeTeam: Team;
   /** Club on each side; side 0 wears home colors, side 1 away. */
   teams: [Club, Club];

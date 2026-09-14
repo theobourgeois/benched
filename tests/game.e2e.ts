@@ -395,3 +395,14 @@ test('feel tuner changes live physics, shows a readout, and resets', async ({ pa
   await page.keyboard.press('Escape');
   await expect(page.getByRole('heading', { name: 'How it feels' })).toHaveCount(0);
 });
+
+test('shows a bottom locator when you trail the play off-camera', async ({ page }) => {
+  await start(page);
+  await expect(page.locator('.player-locator')).toBeHidden();
+  await changeState(
+    page,
+    'const s=runtime.match,p=s.skaters[s.controlled]; s.puck.x=24; s.puck.z=0; s.puck.owner=6; s.skaters.forEach(q=>{if(q.id!==s.controlled){q.x=22;q.z=(q.id-6)*1.4}}); p.x=-18; p.z=0; p.vx=0; p.vz=0',
+  );
+  await expect(page.locator('.player-locator')).toBeVisible({ timeout: 4000 });
+  await expect(page.locator('.player-locator small')).toHaveText('YOU');
+});
