@@ -1,11 +1,16 @@
 import * as THREE from 'three';
 import { clone as cloneRig } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import type { Uniform } from '../game/clubs';
+import { makeNumberTexture } from './textures';
 
-/** Mixamo-rigged character (see public/models/CREDITS.txt). Any mixamorig_* skeleton can drop in. */
+/** Mixamo-rigged character (see public/models/CREDITS.txt). mixamorig / mixamorig12 both work. */
 export const SKATER_URL = `${import.meta.env.BASE_URL}models/skater.fbx`;
+export const HELMET_PLAYER_URL = `${import.meta.env.BASE_URL}models/helmet-player.glb`;
+export const HELMET_GOALIE_URL = `${import.meta.env.BASE_URL}models/helmet-goalie.glb`;
 const HEIGHT = 2;
 const HAND_REACH = 0.08;
+/** Helmet height in Mixamo centimetres, parented to the head bone. */
+const HELMET_CM = { player: 30, goalie: 30 } as const;
 
 export const SIDES = ['L', 'R'] as const; // L is the skater's left (+x), R their right (-x).
 export type Side = (typeof SIDES)[number];
@@ -42,7 +47,7 @@ const MIXAMO: Record<BoneName, string[]> = {
 export const NAMES = Object.keys(MIXAMO) as BoneName[];
 
 function canonical(name: string) {
-  return name.replace(/^mixamorig[:_]?/i, '');
+  return name.replace(/^mixamorig\d*[:_]?/i, '');
 }
 
 export interface Ragdoll {
@@ -73,35 +78,157 @@ function templateHeight(template: THREE.Object3D) {
   return height;
 }
 
-export function createSkaterRig(template: THREE.Object3D, uniform: Uniform): SkaterRig {
-  const root = cloneRig(template);
-  const scale = HEIGHT / templateHeight(template);
-  root.scale.setScalar(scale);
+function sourceMaterial(mesh: THREE.Mesh) {
+  return (
+    Array.isArray(mesh.material) ? mesh.material[0] : mesh.material
+  ) as THREE.MeshStandardMaterial;
+}
+
+function paintClothes(root: THREE.Object3D, uniform: Uniform) {
   root.traverse((object) => {
     if (!(object as THREE.Mesh).isMesh) return;
     const mesh = object as THREE.Mesh;
     mesh.castShadow = true;
     mesh.frustumCulled = false;
-    const joint = /joint/i.test(mesh.name);
+    const src = sourceMaterial(mesh);
+    if (/shirt/i.test(mesh.name)) {
+      mesh.material = new THREE.MeshStandardMaterial({
+        color: uniform.jersey,
+        roughness: 0.72,
+        metalness: 0,
+      });
+      return;
+    }
+    if (/pant/i.test(mesh.name)) {
+      mesh.material = new THREE.MeshStandardMaterial({
+        color: uniform.trim,
+        roughness: 0.82,
+        metalness: 0,
+      });
+      return;
+    }
+    if (/sneaker|shoe/i.test(mesh.name)) {
+      mesh.material = new THREE.MeshStandardMaterial({
+        color: '#14161a',
+        roughness: 0.45,
+        metalness: 0.12,
+      });
+      return;
+    }
     mesh.material = new THREE.MeshStandardMaterial({
-      color: joint ? uniform.trim : uniform.jersey,
-      roughness: joint ? 0.35 : 0.55,
-      metalness: joint ? 0.25 : 0.05,
+      map: src.map,
+      color: src.color,
+      roughness: 0.62,
+      metalness: 0,
+      transparent: src.transparent,
+      opacity: src.opacity,
+      alphaTest: src.alphaTest,
+      side: src.side,
     });
   });
+}
+
+const _box = new THREE.Box3(),
+  _size = new THREE.Vector3(),
+  _center = new THREE.Vector3(),
+  _world = new THREE.Vector3(),
+  _toward = new THREE.Vector3();
+function cloneMaterials(root: THREE.Object3D) {
+  root.traverse((object) => {
+    if (!(object as THREE.Mesh).isMesh) return;
+    const mesh = object as THREE.Mesh;
+    mesh.castShadow = true;
+    mesh.frustumCulled = false;
+    mesh.material = Array.isArray(mesh.material)
+      ? mesh.material.map((material) => material.clone())
+      : mesh.material.clone();
+  });
+}
+
+function numberInk(jersey: string) {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(jersey.slice(i, i + 2), 16));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 140 ? '#1a1d22' : '#f1f4f8';
+}
+
+/** Centers a Sketchfab prop, scales it to `heightCm`, and hangs it on the head. */
+function attachHelmet(source: THREE.Object3D, head: THREE.Bone, kind: keyof typeof HELMET_CM) {
+  const wrapper = new THREE.Group();
+  const inner = new THREE.Group();
+  const clone = source.clone(true);
+  cloneMaterials(clone);
+  inner.add(clone);
+  wrapper.add(inner);
+  wrapper.updateWorldMatrix(true, true);
+  _box.setFromObject(wrapper);
+  _box.getSize(_size);
+  _box.getCenter(_center);
+  inner.position.sub(_center);
+  wrapper.scale.setScalar(HELMET_CM[kind] / Math.max(_size.y, 1e-3));
+  wrapper.position.set(0, kind === 'goalie' ? 9 : 6, kind === 'goalie' ? 2.4 : 2);
+  wrapper.rotation.x = kind === 'goalie' ? 0.08 : 0.18;
+  head.add(wrapper);
+}
+
+function decal(map: THREE.Texture, width: number, height: number) {
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(width, height),
+    new THREE.MeshStandardMaterial({
+      map,
+      transparent: true,
+      roughness: 0.55,
+      metalness: 0,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -4,
+      side: THREE.DoubleSide,
+    }),
+  );
+  mesh.renderOrder = 2;
+  mesh.frustumCulled = false;
+  return mesh;
+}
+
+/** In bind pose the Mixamo character faces world +Z; this puts a stamp on the chest or back. */
+function stampOnChest(
+  bone: THREE.Bone,
+  mesh: THREE.Mesh,
+  forward: number,
+  distance: number,
+  lift: number,
+) {
+  bone.add(mesh);
+  mesh.position.set(0, lift, 0);
+  bone.updateWorldMatrix(true, true);
+  mesh.getWorldPosition(_world);
+  mesh.lookAt(_toward.set(_world.x, _world.y, _world.z + forward));
+  mesh.translateZ(distance);
+}
+
+export function createSkaterRig(
+  template: THREE.Object3D,
+  helmet: THREE.Object3D,
+  uniform: Uniform,
+  number: number,
+  crest: THREE.Texture,
+  goalie: boolean,
+): SkaterRig {
+  const root = cloneRig(template);
+  const scale = HEIGHT / templateHeight(template);
+  root.scale.setScalar(scale);
+  paintClothes(root, uniform);
 
   let mesh: THREE.SkinnedMesh | undefined;
+  const byName = new Map<string, THREE.Bone>();
   root.traverse((object) => {
     if (!mesh && (object as THREE.SkinnedMesh).isSkinnedMesh) mesh = object as THREE.SkinnedMesh;
+    if ((object as THREE.Bone).isBone) {
+      const key = canonical(object.name);
+      if (!byName.has(key)) byName.set(key, object as THREE.Bone);
+    }
   });
   if (!mesh) throw new Error('Skater model has no skinned mesh');
   const skinned = mesh;
 
-  const byName = new Map<string, THREE.Bone>();
-  for (const bone of skinned.skeleton.bones) {
-    const key = canonical(bone.name);
-    if (!byName.has(key)) byName.set(key, bone);
-  }
   const bones = {} as Record<BoneName, THREE.Bone>;
   const bind = {} as Record<BoneName, THREE.Quaternion>;
   const extra = {} as Record<BoneName, THREE.Quaternion>;
@@ -114,6 +241,13 @@ export function createSkaterRig(template: THREE.Object3D, uniform: Uniform): Ska
     extra[name] = new THREE.Quaternion();
     spin[name] = new THREE.Vector3();
   }
+
+  attachHelmet(helmet, bones.head, goalie ? 'goalie' : 'player');
+  crest.colorSpace = THREE.SRGBColorSpace;
+  stampOnChest(bones.chest, decal(crest, 32, 21), 1, 13, 7);
+  const numberTexture = makeNumberTexture(number, numberInk(uniform.jersey));
+  stampOnChest(bones.chest, decal(numberTexture, 20, 20), -1, 11, 4);
+
   root.updateMatrixWorld(true);
   const ankle = new THREE.Vector3();
   bones.footL.getWorldPosition(ankle);
@@ -131,6 +265,7 @@ export function createSkaterRig(template: THREE.Object3D, uniform: Uniform): Ska
         const mat = (object as THREE.Mesh).material;
         if ((object as THREE.Mesh).isMesh && mat && 'dispose' in mat) mat.dispose();
       });
+      numberTexture.dispose();
       skinned.skeleton.dispose();
     },
   };

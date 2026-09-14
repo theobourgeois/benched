@@ -8,6 +8,7 @@ import {
   Play,
   RotateCcw,
   Settings2,
+  SlidersHorizontal,
   Volume2,
   VolumeX,
 } from 'lucide-react';
@@ -25,6 +26,7 @@ import {
 import { cameraUsesAttackUp } from '../game/types';
 import { Brand, SettingsPanel, TeamLogo } from './Menu';
 import { Controls } from './Controls';
+import { FeelHud } from './FeelHud';
 export function formatClock(seconds: number) {
   const s = Math.ceil(seconds);
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
@@ -41,7 +43,8 @@ function shootoutMark(round: number) {
 export function Hud() {
   const { match: s, settings, controller } = useGame();
   const [controls, setControls] = useState(false),
-    [showSettings, setShowSettings] = useState(false);
+    [showSettings, setShowSettings] = useState(false),
+    [feel, setFeel] = useState(false);
   const player = s.skaters[s.controlled],
     team = s.teams[s.homeTeam],
     dir = attackDirection(s.homeTeam, s.period);
@@ -98,6 +101,14 @@ export function Hud() {
             aria-label={s.phase === 'paused' ? 'Resume game' : 'Pause game'}
           >
             {s.phase === 'paused' ? <Play size={19} /> : <Pause size={19} />}
+          </button>
+          <button
+            className={`icon-button ${feel ? 'active' : ''}`}
+            onClick={() => setFeel((open) => !open)}
+            aria-label={feel ? 'Hide feel tuner' : 'Show feel tuner'}
+            title="Feel tuner (`)"
+          >
+            <SlidersHorizontal size={19} />
           </button>
         </div>
       </header>
@@ -240,7 +251,7 @@ export function Hud() {
           <span>{s.mode === 'shootout' ? 'NEXT SHOOTER' : 'BACK TO CENTER ICE'}</span>
         </div>
       )}
-      {s.phase === 'paused' && !controls && !showSettings && (
+      {s.phase === 'paused' && !controls && !showSettings && !feel && (
         <div className="modal-scrim">
           <section className="pause-modal" role="dialog" aria-modal="true" aria-label="Game paused">
             <div className="eyebrow">{info.eyebrow}</div>
@@ -258,6 +269,9 @@ export function Hud() {
             </button>
             <button className="secondary-button" onClick={() => setShowSettings(true)}>
               <Settings2 size={18} /> Game settings <ArrowUpRight size={16} />
+            </button>
+            <button className="secondary-button" onClick={() => setFeel(true)}>
+              <SlidersHorizontal size={18} /> Feel tuner <ArrowUpRight size={16} />
             </button>
             <button className="text-button" onClick={returnToMenu}>
               {info.endMatch}
@@ -336,6 +350,7 @@ export function Hud() {
       )}
       {controls && <Controls close={() => setControls(false)} />}
       {showSettings && <SettingsPanel close={() => setShowSettings(false)} />}
+      <FeelHud open={feel} onOpenChange={setFeel} />
     </div>
   );
 }

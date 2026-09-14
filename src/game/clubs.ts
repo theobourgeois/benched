@@ -5,6 +5,8 @@ import type { Team } from './types';
 export interface Uniform {
   jersey: string;
   trim: string;
+  /** Team mark that contrasts with this jersey. */
+  crest: string;
 }
 export interface Starter {
   name: string;
@@ -91,6 +93,11 @@ function startersOf(players: LeaguePlayer[]): Starter[] {
   ];
 }
 
+function crestOf(jersey: string, team: LeagueTeam) {
+  const file = luminance(jersey) > 0.45 ? team.logos.light : team.logos.dark;
+  return `${import.meta.env.BASE_URL}${file}`;
+}
+
 function clubOf(league: League, team: LeagueTeam): Club {
   const { primary, secondary } = team.colors;
   return {
@@ -100,8 +107,8 @@ function clubOf(league: League, team: LeagueTeam): Club {
     city: team.city,
     name: team.nickname,
     accent: accentOf(primary, secondary),
-    home: { jersey: primary, trim: secondary },
-    away: { jersey: AWAY_WHITE, trim: primary },
+    home: { jersey: primary, trim: secondary, crest: crestOf(primary, team) },
+    away: { jersey: AWAY_WHITE, trim: primary, crest: crestOf(AWAY_WHITE, team) },
     logo: `${import.meta.env.BASE_URL}${team.logos.dark}`,
     lineup: startersOf(team.players),
   };

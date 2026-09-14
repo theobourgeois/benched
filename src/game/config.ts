@@ -31,9 +31,12 @@ export const PHYSICS = {
   /** Forward push in m/s². Hustle earns a higher top end, never a faster first stride. */
   skateAcceleration: 12,
   /** Edges can only redirect this much velocity per second; pace widens the turning circle. */
-  edgeAcceleration: 24,
+  edgeAcceleration: 40,
+  // Feel tweaks — paste into src/game/config.ts
+
   /** Tight turns spend speed as the skater loads an edge. */
-  carveBleed: 0.16,
+  carveBleed: 0.0,
+
   /** Blade alignment at low speed, independently of the torso facing. */
   pivotRate: 12,
   /** A planted hockey stop sheds metres per second, rather than multiplying velocity away. */
@@ -129,10 +132,13 @@ export const STICK = {
   /** Under 1 leaves follow-through instead of settling on the pose. */
   zeta: 0.68,
   /** How much blade speed pushes the skater sideways. */
+
   cut: 0.55,
   /** Extra edge while skating with the puck held off-center. */
   drift: 1.15,
 };
+export const DEFAULT_PHYSICS = Object.freeze({ ...PHYSICS });
+export const DEFAULT_STICK = Object.freeze({ ...STICK });
 export const EMPTY_INPUT = {
   moveX: 0,
   moveZ: 0,

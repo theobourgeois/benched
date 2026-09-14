@@ -4,8 +4,12 @@ import { GameScene } from './scene/GameScene';
 import { Menu } from './ui/Menu';
 import { Hud } from './ui/Hud';
 import { useGame, runtime, publish } from './game/store';
+import { bootFeel, resetFeel } from './game/feel';
+import { PHYSICS, STICK } from './game/config';
 import './style.css';
-if (import.meta.env.DEV) Object.assign(window, { __BENCHED__: { runtime, publish } });
+bootFeel();
+if (import.meta.env.DEV)
+  Object.assign(window, { __BENCHED__: { runtime, publish, PHYSICS, STICK, resetFeel } });
 function App() {
   const { match } = useGame();
   return (

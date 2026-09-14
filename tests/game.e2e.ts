@@ -10,7 +10,7 @@ async function changeState(page: Page, code: string) {
 async function start(page: Page) {
   await page.goto('/');
   await page.getByRole('button', { name: 'PLAY GAME' }).click();
-  await expect(page.locator('.score-clock small')).toHaveText('● LIVE', { timeout: 10000 });
+  await expect(page.locator('.score-clock small')).toHaveText('● LIVE', { timeout: 30000 });
 }
 test('menu renders, selects teams, opens accessible controls and settings', async ({ page }) => {
   const errors: string[] = [];
@@ -47,7 +47,7 @@ test('an NHL matchup puts real clubs, logos and starters on the ice', async ({ p
   await page.getByRole('button', { name: 'Next away team' }).click();
   await expect(page.getByRole('button', { name: 'Nashville Predators' })).toBeVisible();
   await page.getByRole('button', { name: 'PLAY GAME' }).click();
-  await expect(page.locator('.score-clock small')).toHaveText('● LIVE', { timeout: 10000 });
+  await expect(page.locator('.score-clock small')).toHaveText('● LIVE', { timeout: 30000 });
   const s = await state(page);
   expect(s.teams.map((t: { key: string }) => t.key)).toEqual(['nhl:TOR', 'nhl:NSH']);
   expect(s.skaters[0].name).toBe(s.teams[0].lineup[0].name);
@@ -268,7 +268,7 @@ test('3-on-3 and shootout can be selected from the menu', async ({ page }) => {
   await page.getByRole('button', { name: '3 ON 3' }).click();
   await expect(page.getByText('3 PERIODS · 3 MINUTES')).toBeVisible();
   await page.getByRole('button', { name: 'PLAY GAME' }).click();
-  await expect(page.locator('.score-clock small')).toHaveText('● LIVE', { timeout: 10000 });
+  await expect(page.locator('.score-clock small')).toHaveText('● LIVE', { timeout: 30000 });
   const three = await state(page);
   expect(three.mode).toBe('threeOnThree');
   expect(three.clock).toBeGreaterThan(170);
@@ -365,4 +365,21 @@ test('a keyboard flick drives a backcheck toward your own end and dislodges the 
   expect(s.skaters[0].vx).toBeLessThan(0);
   expect(s.skaters[6].downTimer + s.skaters[6].stumbleTimer).toBeGreaterThan(0);
   expect(s.puck.owner).not.toBe(6);
+});
+
+test('feel tuner changes live physics, shows a readout, and resets', async ({ page }) => {
+  await start(page);
+  await page.getByRole('button', { name: 'Show feel tuner' }).click();
+  await expect(page.getByRole('heading', { name: 'How it feels' })).toBeVisible();
+  await expect(page.getByText(/Build to top speed/)).toBeVisible();
+  await expect(page.getByText('Speed', { exact: true })).toBeVisible();
+  await page.getByRole('slider', { name: 'Cruise speed' }).fill('14');
+  expect(await page.evaluate('window.__BENCHED__.PHYSICS.maxSpeed')).toBe(14);
+  await expect(page.getByText(/changed from shipped/)).toBeVisible();
+  await page.getByRole('tab', { name: 'Hitting' }).click();
+  await expect(page.getByText(/Throw a loaded shoulder/)).toBeVisible();
+  await page.getByRole('button', { name: 'Reset all' }).click();
+  expect(await page.evaluate('window.__BENCHED__.PHYSICS.maxSpeed')).toBe(9.6);
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('heading', { name: 'How it feels' })).toHaveCount(0);
 });

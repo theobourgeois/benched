@@ -133,12 +133,65 @@ export function makeBoardTexture() {
     });
   });
 }
-export function makeNumberTexture(number: number) {
+export function makeNumberTexture(number: number, color = '#f1f4f8') {
   return canvasTexture(128, 128, (ctx) => {
-    ctx.fillStyle = '#f1f4f8';
+    ctx.fillStyle = color;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.font = '900 100px Arial';
     ctx.fillText(String(number), 64, 66);
   });
+}
+
+/** Rasterizes an SVG so Three can stamp it on a jersey (TextureLoader often gets a 0×0 SVG). */
+export class SvgTextureLoader extends THREE.Loader<THREE.CanvasTexture> {
+  load(
+    url: string,
+    onLoad?: (texture: THREE.CanvasTexture) => void,
+    _onProgress?: (event: ProgressEvent) => void,
+    onError?: (err: unknown) => void,
+  ) {
+    this.manager.itemStart(url);
+    fetch(this.manager.resolveURL(url))
+      .then((res) => {
+        if (!res.ok) throw new Error(`${res.status} ${url}`);
+        return res.text();
+      })
+      .then(
+        (svg) =>
+          new Promise<THREE.CanvasTexture>((resolve, reject) => {
+            const sized = svg.replace(/<svg\b/, '<svg width="960" height="640"');
+            const src = URL.createObjectURL(
+              new Blob([sized], { type: 'image/svg+xml;charset=utf-8' }),
+            );
+            const image = new Image();
+            image.onload = () => {
+              const canvas = document.createElement('canvas');
+              canvas.width = 960;
+              canvas.height = 640;
+              canvas.getContext('2d')!.drawImage(image, 0, 0, 960, 640);
+              URL.revokeObjectURL(src);
+              const texture = new THREE.CanvasTexture(canvas);
+              texture.colorSpace = THREE.SRGBColorSpace;
+              texture.anisotropy = 8;
+              texture.needsUpdate = true;
+              resolve(texture);
+            };
+            image.onerror = () => {
+              URL.revokeObjectURL(src);
+              reject(new Error(`SVG image failed: ${url}`));
+            };
+            image.src = src;
+          }),
+      )
+      .then((texture) => {
+        onLoad?.(texture);
+        this.manager.itemEnd(url);
+      })
+      .catch((err) => {
+        onError?.(err);
+        this.manager.itemError(url);
+        this.manager.itemEnd(url);
+      });
+  }
 }

@@ -68,6 +68,9 @@ export class Controller {
   };
   onDisconnect?: () => void;
   private keyDown = (e: KeyboardEvent) => {
+    if (e.code === 'Backquote') return;
+    const target = e.target as { closest?: (selector: string) => Element | null } | null;
+    if (target?.closest?.('input[type="number"], input[type="search"], textarea, select')) return;
     if (document.querySelector('[data-block-game-input]')) return;
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code))
       e.preventDefault();

@@ -19,6 +19,8 @@ describe('leagues', () => {
     expect([home.key, away.key]).toEqual(['nhl:TOR', 'nhl:MTL']);
     expect(uniformFor(home, 0).jersey).toBe(home.home.jersey);
     expect(uniformFor(away, 1).jersey).not.toBe(uniformFor(home, 0).jersey);
+    expect(uniformFor(home, 0).crest).toMatch(/logos\/nhl\/TOR_dark\.svg$/);
+    expect(uniformFor(away, 1).crest).toMatch(/logos\/nhl\/MTL_light\.svg$/);
   });
 
   it('never cycles a club into playing itself', () => {

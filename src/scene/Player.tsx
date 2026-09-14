@@ -2,12 +2,21 @@ import { memo, useEffect, useMemo, useRef } from 'react';
 import { useFrame, useLoader } from '@react-three/fiber';
 import * as THREE from 'three';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { runtime } from '../game/store';
 import { uniformFor } from '../game/clubs';
 import { isOnIce } from '../game/engine';
 import { activeDeke } from '../game/dekes';
-import { SIDES, SKATER_URL, createSkaterRig, reachArm } from './skaterModel';
+import {
+  HELMET_GOALIE_URL,
+  HELMET_PLAYER_URL,
+  SIDES,
+  SKATER_URL,
+  createSkaterRig,
+  reachArm,
+} from './skaterModel';
 import { poseSkater } from './skaterPose';
+import { SvgTextureLoader } from './textures';
 import {
   GOALIE_BLADE,
   SKATER_BLADE,
@@ -20,6 +29,8 @@ import {
 } from './stick';
 
 useLoader.preload(FBXLoader, SKATER_URL);
+useLoader.preload(GLTFLoader, HELMET_PLAYER_URL);
+useLoader.preload(GLTFLoader, HELMET_GOALIE_URL);
 
 /** Player root sits at y=0.03; ice surface is ~0.012. Sink the rocker a hair so it reads as planted. */
 const BLADE_ICE_Y = -0.028;
@@ -43,6 +54,8 @@ const ankle = new THREE.Vector3(),
 
 export const Player = memo(function Player({ id }: { id: number }) {
   const template = useLoader(FBXLoader, SKATER_URL);
+  const playerHelmet = useLoader(GLTFLoader, HELMET_PLAYER_URL);
+  const goalieHelmet = useLoader(GLTFLoader, HELMET_GOALIE_URL);
   const group = useRef<THREE.Group>(null),
     fall = useRef<THREE.Group>(null),
     body = useRef<THREE.Group>(null),
@@ -54,7 +67,13 @@ export const Player = memo(function Player({ id }: { id: number }) {
   const p = runtime.match.skaters[id],
     goalie = p.role === 'G';
   const uniform = uniformFor(runtime.match.teams[p.team], p.team);
-  const rig = useMemo(() => createSkaterRig(template, uniform), [template, uniform]);
+  const crest = useLoader(SvgTextureLoader, uniform.crest);
+  const helmet = goalie ? goalieHelmet.scene : playerHelmet.scene;
+  const rig = useMemo(() => {
+    crest.colorSpace = THREE.SRGBColorSpace;
+    crest.anisotropy = 8;
+    return createSkaterRig(template, helmet, uniform, p.number, crest, goalie);
+  }, [template, helmet, uniform, p.number, crest, goalie]);
   useEffect(() => () => rig.dispose(), [rig]);
   const blade = goalie ? GOALIE_BLADE : SKATER_BLADE,
     bladeParts = bladeGeometries(blade);
