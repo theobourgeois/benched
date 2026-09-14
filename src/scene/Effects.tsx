@@ -51,7 +51,7 @@ export function IceSpray() {
       pool.current.forEach((p) => (p.life = 0));
     }
     spawnTime.current += dt;
-    if (s.phase === 'playing' && spawnTime.current > 0.04) {
+    if ((s.phase === 'playing' || s.phase === 'goal') && spawnTime.current > 0.04) {
       spawnTime.current = 0;
       for (const p of s.skaters) if (Math.hypot(p.vx, p.vz) > 4) spawn(p.x, p.z, p.vx, p.vz, 2.5);
     }

@@ -251,3 +251,54 @@ describe('defending a breakout', () => {
     expect(Math.abs(ai.move.z)).toBeGreaterThan(0.2);
   });
 });
+
+describe('CPU chase feel', () => {
+  function rush() {
+    const s = createMatch(0, 'oneOnOne');
+    s.phase = 'playing';
+    const you = s.skaters[0],
+      cpu = s.skaters[6];
+    return { s, you, cpu };
+  }
+
+  it('wraps beside a stopped carrier instead of parking on their back', () => {
+    const { s, you, cpu } = rush();
+    Object.assign(you, { x: 4, z: 5, vx: 0, vz: 0, angle: Math.PI / 2 });
+    Object.assign(cpu, { x: 2.1, z: 5, vx: 0, vz: 0, angle: Math.PI / 2 });
+    Object.assign(s.puck, { owner: you.id, x: you.x + 0.8, z: you.z, vx: 0, vz: 0 });
+    const ai = decideAI(s, cpu);
+    expect(Math.hypot(ai.move.x, ai.move.z)).toBeGreaterThan(0.45);
+    expect(Math.abs(ai.move.z)).toBeGreaterThan(0.25);
+    expect(ai.hustle).toBe(false);
+  });
+
+  it('shades inside a wide cut instead of mirroring it from behind', () => {
+    const { s, you, cpu } = rush();
+    Object.assign(you, { x: 5, z: 6.5, vx: 8, vz: 5.5, angle: Math.PI / 2 });
+    Object.assign(cpu, { x: 0.8, z: 6.5, vx: 6, vz: 0, angle: Math.PI / 2 });
+    Object.assign(s.puck, { owner: you.id, x: you.x, z: you.z, vx: you.vx, vz: you.vz });
+    const ai = decideAI(s, cpu);
+    expect(ai.move.x).toBeGreaterThan(0.35);
+    expect(ai.move.z).toBeLessThan(0);
+  });
+
+  it('holds the slot instead of matching a wide carrier when still in front', () => {
+    const { s, you, cpu } = rush();
+    Object.assign(you, { x: 0, z: 7, vx: 5, vz: 0, angle: Math.PI / 2 });
+    Object.assign(cpu, { x: 6, z: 7, vx: 0, vz: 0, angle: -Math.PI / 2 });
+    Object.assign(s.puck, { owner: you.id, x: you.x, z: you.z, vx: you.vx });
+    const ai = decideAI(s, cpu);
+    expect(ai.move.z).toBeLessThan(-0.2);
+  });
+
+  it('pokes when it has a hip on a slow carrier, not a shielded stab from behind', () => {
+    const { s, you, cpu } = rush();
+    Object.assign(you, { x: 4, z: 0, vx: 0, vz: 0, angle: Math.PI / 2 });
+    Object.assign(cpu, { x: 4.55, z: 1.15, vx: 1, vz: 0, angle: Math.PI / 2, cooldown: 0 });
+    Object.assign(s.puck, { owner: you.id, x: 4.9, z: 0, vx: 0, vz: 0 });
+    const ai = decideAI(s, cpu);
+    expect(ai.poke).toBe(true);
+    expect(ai.pokeSweep).toBe(true);
+    expect(ai.check).toBe(false);
+  });
+});

@@ -8,7 +8,9 @@ export const SKATER_URL = `${import.meta.env.BASE_URL}models/skater.fbx`;
 export const HELMET_PLAYER_URL = `${import.meta.env.BASE_URL}models/helmet-player.glb`;
 export const HELMET_GOALIE_URL = `${import.meta.env.BASE_URL}models/helmet-goalie.glb`;
 const HEIGHT = 2;
-const HAND_REACH = 0.08;
+/** Wrist to the middle of the palm, and palm thickness, in world units. */
+const PALM_ALONG = 0.068;
+const PALM_THICK = 0.03;
 /** Helmet height in Mixamo centimetres, parented to the head bone. */
 const HELMET_CM = { player: 30, goalie: 30 } as const;
 
@@ -17,11 +19,15 @@ export type Side = (typeof SIDES)[number];
 export type BoneName =
   | 'pelvis'
   | 'spine'
+  | 'spine1'
   | 'chest'
+  | 'neck'
   | 'head'
+  | `shoulder${Side}`
   | `thigh${Side}`
   | `shin${Side}`
   | `foot${Side}`
+  | `toe${Side}`
   | `upperArm${Side}`
   | `forearm${Side}`
   | `hand${Side}`;
@@ -29,22 +35,39 @@ export type BoneName =
 const MIXAMO: Record<BoneName, string[]> = {
   pelvis: ['Hips'],
   spine: ['Spine'],
-  chest: ['Spine2', 'Spine1'],
+  spine1: ['Spine1'],
+  chest: ['Spine2'],
+  neck: ['Neck'],
   head: ['Head'],
+  shoulderL: ['LeftShoulder'],
   thighL: ['LeftUpLeg'],
   shinL: ['LeftLeg'],
   footL: ['LeftFoot'],
+  toeL: ['LeftToeBase'],
   upperArmL: ['LeftArm'],
   forearmL: ['LeftForeArm'],
   handL: ['LeftHand'],
+  shoulderR: ['RightShoulder'],
   thighR: ['RightUpLeg'],
   shinR: ['RightLeg'],
   footR: ['RightFoot'],
+  toeR: ['RightToeBase'],
   upperArmR: ['RightArm'],
   forearmR: ['RightForeArm'],
   handR: ['RightHand'],
 };
 export const NAMES = Object.keys(MIXAMO) as BoneName[];
+export const sideSign = (side: Side) => (side === 'L' ? 1 : -1);
+
+export type Finger = 'thumb' | 'index' | 'middle' | 'ring' | 'pinky';
+export interface FingerBone {
+  bone: THREE.Bone;
+  bind: THREE.Quaternion;
+  finger: Finger;
+  /** 1 at the knuckle, 3 at the last joint. */
+  joint: number;
+}
+const FINGER = /^(Left|Right)Hand(Thumb|Index|Middle|Ring|Pinky)([123])$/;
 
 function canonical(name: string) {
   return name.replace(/^mixamorig\d*[:_]?/i, '');
@@ -60,9 +83,20 @@ export interface SkaterRig {
   mesh: THREE.SkinnedMesh;
   bones: Record<BoneName, THREE.Bone>;
   bind: Record<BoneName, THREE.Quaternion>;
+  fingers: Record<Side, FingerBone[]>;
   ragdoll: Ragdoll;
-  /** Bind-pose ankle height, used to keep the skates on the ice. */
+  /** Model units (Mixamo centimetres) to world units. */
+  scale: number;
+  /** Bind-pose ankle height above the ice: put the ankle here and a flat skate is planted. */
   ankleHeight: number;
+  /** Bind-pose pelvis (Hips) position in model units. */
+  pelvisBind: THREE.Vector3;
+  /** Pelvis origin to the left hip joint, world units, unrotated. Mirror x for the right. */
+  hipOffset: THREE.Vector3;
+  /** Foot orientation relative to the rig root that puts the blade flat on the ice. */
+  footFlat: Record<Side, THREE.Quaternion>;
+  /** Segment lengths in world units. */
+  limbs: { upperArm: number; forearm: number; thigh: number; shin: number };
   armReach: number;
   dispose(): void;
 }
@@ -241,6 +275,17 @@ export function createSkaterRig(
     extra[name] = new THREE.Quaternion();
     spin[name] = new THREE.Vector3();
   }
+  const fingers: Record<Side, FingerBone[]> = { L: [], R: [] };
+  for (const [key, bone] of byName) {
+    const match = FINGER.exec(key);
+    if (!match) continue;
+    fingers[match[1] === 'Left' ? 'L' : 'R'].push({
+      bone,
+      bind: bone.quaternion.clone(),
+      finger: match[2].toLowerCase() as Finger,
+      joint: Number(match[3]),
+    });
+  }
 
   attachHelmet(helmet, bones.head, goalie ? 'goalie' : 'player');
   crest.colorSpace = THREE.SRGBColorSpace;
@@ -251,15 +296,31 @@ export function createSkaterRig(
   root.updateMatrixWorld(true);
   const ankle = new THREE.Vector3();
   bones.footL.getWorldPosition(ankle);
+  const rootQ = root.getWorldQuaternion(new THREE.Quaternion()).invert();
+  const footFlat = {
+    L: rootQ.clone().multiply(bones.footL.getWorldQuaternion(new THREE.Quaternion())),
+    R: rootQ.clone().multiply(bones.footR.getWorldQuaternion(new THREE.Quaternion())),
+  };
+  const limbs = {
+    upperArm: bones.forearmL.position.length() * scale,
+    forearm: bones.handL.position.length() * scale,
+    thigh: bones.shinL.position.length() * scale,
+    shin: bones.footL.position.length() * scale,
+  };
   return {
     root,
     mesh: skinned,
     bones,
     bind,
+    fingers,
     ragdoll: { active: false, extra, spin },
+    scale,
     ankleHeight: ankle.y,
-    armReach:
-      bones.forearmL.position.length() * scale + bones.handL.position.length() * scale + HAND_REACH,
+    pelvisBind: bones.pelvis.position.clone(),
+    hipOffset: bones.thighL.position.clone().multiplyScalar(scale),
+    footFlat,
+    limbs,
+    armReach: limbs.upperArm + limbs.forearm,
     dispose() {
       root.traverse((object) => {
         const mat = (object as THREE.Mesh).material;
@@ -271,46 +332,146 @@ export function createSkaterRig(
   };
 }
 
-const _e = new THREE.Euler();
-const _q = new THREE.Quaternion();
-/** Adds a local pose on top of the Mixamo bind so other characters keep their T-pose rest. */
-export function poseBone(rig: SkaterRig, name: BoneName, x: number, y: number, z: number) {
-  rig.bones[name].quaternion.copy(rig.bind[name]).multiply(_q.setFromEuler(_e.set(x, y, z)));
+const _basis = new THREE.Matrix4(),
+  _worldQ = new THREE.Quaternion(),
+  _parentQ = new THREE.Quaternion();
+/** Sets a bone's world orientation. The parent's world matrix is refreshed first. */
+export function setWorldQuaternion(bone: THREE.Bone, world: THREE.Quaternion) {
+  bone.parent!.getWorldQuaternion(_parentQ);
+  bone.quaternion.copy(_parentQ.invert()).multiply(world);
+}
+function setWorldBasis(bone: THREE.Bone, x: THREE.Vector3, y: THREE.Vector3, z: THREE.Vector3) {
+  setWorldQuaternion(bone, _worldQ.setFromRotationMatrix(_basis.makeBasis(x, y, z)));
 }
 
-const _shoulder = new THREE.Vector3(),
+const _rootPos = new THREE.Vector3(),
   _toTarget = new THREE.Vector3(),
   _bend = new THREE.Vector3(),
-  _elbow = new THREE.Vector3(),
-  _segment = new THREE.Vector3(),
-  _rest = new THREE.Vector3(),
-  _parentQ = new THREE.Quaternion();
-/** Rotates a Mixamo bone so its local +Y (the child) points along a world direction. */
-function aimBone(bone: THREE.Bone, child: THREE.Bone, direction: THREE.Vector3) {
-  _rest.copy(child.position);
-  if (_rest.lengthSq() < 1e-8) return;
-  _rest.normalize();
-  bone.parent!.getWorldQuaternion(_parentQ);
-  _segment.copy(direction).applyQuaternion(_parentQ.invert()).normalize();
-  bone.quaternion.setFromUnitVectors(_rest, _segment);
-}
-/** Two-bone arm IK that places the wrist at `target`, elbow bent towards `pole`. */
-export function reachArm(rig: SkaterRig, side: Side, target: THREE.Vector3, pole: THREE.Vector3) {
-  const upper = rig.bones[`upperArm${side}`],
-    fore = rig.bones[`forearm${side}`],
-    hand = rig.bones[`hand${side}`];
-  const a = fore.position.length() * rig.root.scale.x,
-    b = hand.position.length() * rig.root.scale.x + HAND_REACH;
-  upper.getWorldPosition(_shoulder);
-  _toTarget.subVectors(target, _shoulder);
-  const distance = THREE.MathUtils.clamp(_toTarget.length(), Math.abs(a - b) + 1e-3, a + b - 1e-3);
+  _mid = new THREE.Vector3(),
+  _along = new THREE.Vector3(),
+  _hinge = new THREE.Vector3(),
+  _third = new THREE.Vector3();
+export type Limb = 'arm' | 'leg';
+/**
+ * Two-bone IK. Places the wrist or ankle at `target` (world) with the elbow or knee pushed toward
+ * `pole` (world point). Both segments get a full orientation from the bend plane, so the mesh
+ * never twists about the limb: Mixamo arms hinge on local Z and legs on local X, with local Y
+ * running down the bone toward the child.
+ */
+export function reachLimb(
+  rig: SkaterRig,
+  limb: Limb,
+  side: Side,
+  target: THREE.Vector3,
+  pole: THREE.Vector3,
+) {
+  const upper =
+      rig.bones[limb === 'arm' ? (`upperArm${side}` as const) : (`thigh${side}` as const)],
+    lower = rig.bones[limb === 'arm' ? (`forearm${side}` as const) : (`shin${side}` as const)];
+  const a = limb === 'arm' ? rig.limbs.upperArm : rig.limbs.thigh,
+    b = limb === 'arm' ? rig.limbs.forearm : rig.limbs.shin;
+  upper.getWorldPosition(_rootPos);
+  _toTarget.subVectors(target, _rootPos);
+  const distance = THREE.MathUtils.clamp(
+    _toTarget.length(),
+    Math.abs(a - b) + 1e-3,
+    (a + b) * 0.995,
+  );
   _toTarget.normalize();
   const along = (a * a - b * b + distance * distance) / (2 * distance),
     lift = Math.sqrt(Math.max(a * a - along * along, 0));
-  _bend.subVectors(pole, _shoulder);
-  _bend.addScaledVector(_toTarget, -_bend.dot(_toTarget)).normalize();
-  _elbow.copy(_shoulder).addScaledVector(_toTarget, along).addScaledVector(_bend, lift);
-  aimBone(upper, fore, _segment.subVectors(_elbow, _shoulder));
-  upper.updateWorldMatrix(true, false);
-  aimBone(fore, hand, _segment.subVectors(target, _elbow));
+  _bend.subVectors(pole, _rootPos);
+  _bend.addScaledVector(_toTarget, -_bend.dot(_toTarget));
+  if (_bend.lengthSq() < 1e-8) _bend.set(0, 0, 1).addScaledVector(_toTarget, -_toTarget.z);
+  _bend.normalize();
+  _mid.copy(_rootPos).addScaledVector(_toTarget, along).addScaledVector(_bend, lift);
+  _hinge.crossVectors(_toTarget, _bend).normalize();
+  if (limb === 'arm') _hinge.multiplyScalar(sideSign(side));
+  const orient = (bone: THREE.Bone, from: THREE.Vector3, to: THREE.Vector3) => {
+    _along.subVectors(to, from).normalize();
+    if (limb === 'leg') {
+      _third.crossVectors(_hinge, _along);
+      setWorldBasis(bone, _hinge, _along, _third);
+    } else {
+      _third.crossVectors(_along, _hinge);
+      setWorldBasis(bone, _third, _along, _hinge);
+    }
+  };
+  orient(upper, _rootPos, _mid);
+  orient(lower, _mid, target);
+}
+
+const _yawQ = new THREE.Quaternion(),
+  _frameQ = new THREE.Quaternion(),
+  _e2 = new THREE.Euler();
+/**
+ * Plants the skate flat on the ice: toe turned by `yaw` (+ toward the skater's left), lifted by
+ * `pitch`, and the blade rolled onto its edge by `roll` (+ toward the skater's right).
+ */
+export function plantFoot(
+  rig: SkaterRig,
+  side: Side,
+  frame: THREE.Object3D,
+  yaw: number,
+  pitch: number,
+  roll: number,
+) {
+  frame.getWorldQuaternion(_frameQ);
+  _yawQ.setFromEuler(_e2.set(pitch, yaw, roll, 'YXZ'));
+  _worldQ.copy(_frameQ).multiply(_yawQ).multiply(rig.footFlat[side]);
+  setWorldQuaternion(rig.bones[`foot${side}`], _worldQ);
+}
+
+const _palm = new THREE.Vector3(),
+  _fingersDir = new THREE.Vector3(),
+  _across = new THREE.Vector3(),
+  _wrist = new THREE.Vector3(),
+  _elbowPole = new THREE.Vector3();
+/**
+ * Wraps a hand around the stick. `point` is on the shaft axis, `along` runs up the shaft toward
+ * the knob, and `approach` is where the arm comes from (its shoulder), which sets which way the
+ * palm faces. Thumbs point down the shaft toward the blade, like a real overhand grip.
+ */
+export function holdStick(
+  rig: SkaterRig,
+  side: Side,
+  point: THREE.Vector3,
+  along: THREE.Vector3,
+  approach: THREE.Vector3,
+  pole: THREE.Vector3,
+  curl: number,
+) {
+  _across.copy(along).multiplyScalar(sideSign(side));
+  _palm.subVectors(point, approach);
+  _palm.addScaledVector(along, -_palm.dot(along));
+  if (_palm.lengthSq() < 1e-8) _palm.set(0, -1, 0);
+  _palm.normalize();
+  _fingersDir.crossVectors(_palm, _across).normalize();
+  _wrist.copy(point).addScaledVector(_fingersDir, -PALM_ALONG).addScaledVector(_palm, -PALM_THICK);
+  reachLimb(rig, 'arm', side, _wrist, _elbowPole.copy(pole));
+  setWorldBasis(rig.bones[`hand${side}`], _across, _fingersDir, _palm);
+  curlFingers(rig, side, curl);
+}
+
+const _q = new THREE.Quaternion();
+const _e = new THREE.Euler();
+/** Closes the fingers around a shaft: 0 is the open bind hand, 1 a full grip. */
+export function curlFingers(rig: SkaterRig, side: Side, curl: number) {
+  const s = sideSign(side);
+  for (const { bone, bind, finger, joint } of rig.fingers[side]) {
+    if (finger === 'thumb') {
+      // Thumb folds across the shaft rather than curling with the fingers.
+      if (joint === 1) _e.set(0.15 * curl, -s * 0.35 * curl, s * 0.55 * curl);
+      else _e.set(0.5 * curl, 0, s * 0.15 * curl);
+    } else {
+      const spread = joint === 1 ? (finger === 'index' ? -0.06 : finger === 'pinky' ? 0.08 : 0) : 0;
+      _e.set((joint === 1 ? 1.15 : joint === 2 ? 1.35 : 0.9) * curl, 0, s * spread * curl);
+    }
+    bone.quaternion.copy(bind).multiply(_q.setFromEuler(_e));
+  }
+}
+
+/** Adds a local pose on top of the Mixamo bind so other characters keep their T-pose rest. */
+export function poseBone(rig: SkaterRig, name: BoneName, x: number, y: number, z: number) {
+  rig.bones[name].quaternion.copy(rig.bind[name]).multiply(_q.setFromEuler(_e.set(x, y, z)));
 }

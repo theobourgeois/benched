@@ -185,6 +185,18 @@ test('all periods, goal presentation, final result, and rematch work', async ({ 
   );
   await expect(page.locator('.goal-overlay > strong')).toBeVisible();
   expect((await state(page)).score).toEqual([1, 0]);
+  const celebrating = await state(page);
+  expect(celebrating.phase).toBe('goal');
+  await page.waitForTimeout(400);
+  const stillLive = await state(page);
+  expect(stillLive.phase).toBe('goal');
+  expect(
+    stillLive.skaters.some(
+      (p: { x: number; z: number }, i: number) =>
+        Math.abs(p.x - celebrating.skaters[i].x) > 0.04 ||
+        Math.abs(p.z - celebrating.skaters[i].z) > 0.04,
+    ),
+  ).toBe(true);
   for (let period = 1; period <= 3; period++) {
     await changeState(page, "runtime.match.phase='playing';runtime.match.clock=0.01");
     if (period < 3) {

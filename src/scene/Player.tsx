@@ -10,12 +10,13 @@ import { activeDeke } from '../game/dekes';
 import {
   HELMET_GOALIE_URL,
   HELMET_PLAYER_URL,
-  SIDES,
   SKATER_URL,
   createSkaterRig,
-  reachArm,
+  curlFingers,
+  holdStick,
+  reachLimb,
 } from './skaterModel';
-import { poseSkater } from './skaterPose';
+import { fallenAmount, poseSkater } from './skaterPose';
 import { SvgTextureLoader } from './textures';
 import {
   GOALIE_BLADE,
@@ -34,23 +35,49 @@ useLoader.preload(GLTFLoader, HELMET_GOALIE_URL);
 
 /** Player root sits at y=0.03; ice surface is ~0.012. Sink the rocker a hair so it reads as planted. */
 const BLADE_ICE_Y = -0.028;
-/** How far the bottom hand sits down the shaft from the knob toward the hosel. */
-const BOTTOM_HAND = 0.45;
+/** How far down the shaft from the top hand the bottom hand likes to sit, in world units. */
+const BOTTOM_HAND = 0.4;
+/** The bottom hand slides up the shaft rather than leave it when the arm cannot reach that far. */
+const BOTTOM_HAND_MIN = 0.14;
 /** Forward speed along facing before the bottom hand comes off for a pumping stride. */
 const ONE_HAND_FORWARD = 5.2;
 /** Rearward speed along facing that counts as backskating. */
 const ONE_HAND_BACK = -1.5;
+/** Residual whole-body roll on a deke; most of the lean comes from the hips and torso. */
+const DEKE_ROLL = 0.25;
+/** Only the jump deke leaves the ice; other dekes hop the puck while the skater just unweights. */
+const DEKE_HOP = 0.35;
 
-const ankle = new THREE.Vector3(),
-  topShoulder = new THREE.Vector3(),
+const topShoulder = new THREE.Vector3(),
   lowShoulder = new THREE.Vector3(),
   grip = new THREE.Vector3(),
   tip = new THREE.Vector3(),
   hosel = new THREE.Vector3(),
+  along = new THREE.Vector3(),
+  alongWorld = new THREE.Vector3(),
   lowHand = new THREE.Vector3(),
+  reach = new THREE.Vector3(),
   offset = new THREE.Vector3(),
-  target = new THREE.Vector3(),
-  pole = new THREE.Vector3();
+  point = new THREE.Vector3(),
+  approach = new THREE.Vector3(),
+  pole = new THREE.Vector3(),
+  frameQ = new THREE.Quaternion();
+
+/** Largest distance down the shaft from the top hand, up to `want`, that a shoulder can reach. */
+function reachableDown(
+  shoulder: THREE.Vector3,
+  top: THREE.Vector3,
+  down: THREE.Vector3,
+  radius: number,
+  want: number,
+) {
+  reach.subVectors(top, shoulder);
+  const t = reach.dot(down);
+  const disc = t * t - reach.lengthSq() + radius * radius;
+  if (disc < 0) return THREE.MathUtils.clamp(t, BOTTOM_HAND_MIN, want);
+  const far = t + Math.sqrt(disc);
+  return THREE.MathUtils.clamp(far, BOTTOM_HAND_MIN, want);
+}
 
 export const Player = memo(function Player({ id }: { id: number }) {
   const template = useLoader(FBXLoader, SKATER_URL);
@@ -58,7 +85,6 @@ export const Player = memo(function Player({ id }: { id: number }) {
   const goalieHelmet = useLoader(GLTFLoader, HELMET_GOALIE_URL);
   const group = useRef<THREE.Group>(null),
     fall = useRef<THREE.Group>(null),
-    body = useRef<THREE.Group>(null),
     ring = useRef<THREE.Mesh>(null);
   const stick = useRef<THREE.Group>(null),
     shaft = useRef<THREE.Mesh>(null),
@@ -82,15 +108,14 @@ export const Player = memo(function Player({ id }: { id: number }) {
     const s = runtime.match,
       skater = s.skaters[id];
     const root = group.current,
-      tilt = fall.current,
-      hips = body.current;
-    if (!root || !tilt || !hips) return;
+      tilt = fall.current;
+    if (!root || !tilt) return;
     if (!isOnIce(s, skater)) {
       root.visible = false;
       return;
     }
     root.visible = true;
-    const along = skater.vx * Math.sin(skater.angle) + skater.vz * Math.cos(skater.angle);
+    const along_ = skater.vx * Math.sin(skater.angle) + skater.vz * Math.cos(skater.angle);
     const dekeMove = activeDeke(skater);
     const oneHand =
       !goalie &&
@@ -98,31 +123,31 @@ export const Player = memo(function Player({ id }: { id: number }) {
       skater.liftTimer <= 0 &&
       skater.blockTimer <= 0 &&
       !dekeMove &&
-      (along > ONE_HAND_FORWARD || along < ONE_HAND_BACK);
+      (along_ > ONE_HAND_FORWARD || along_ < ONE_HAND_BACK);
     const twoHand = !oneHand;
-    const { bones } = rig,
-      { stickBlend, fallen } = poseSkater(rig, skater, dt, goalie, twoHand);
+    // The body frame must be current before the pose plants skates and hands in world space.
+    const fallen = fallenAmount(skater);
     const ease = 1 - Math.exp(-dt * 14);
-    root.position.set(skater.x, 0.03 + (dekeMove?.hop ?? 0), skater.z);
+    const hop = (dekeMove?.hop ?? 0) * (skater.dekeKind === 'jump' ? 1 : DEKE_HOP);
+    root.position.set(skater.x, 0.03 + hop, skater.z);
     root.rotation.y = fallen > 0.4 ? skater.fallAngle : skater.angle;
-    tilt.rotation.x = THREE.MathUtils.lerp(tilt.rotation.x, fallen * 1.28, ease);
-    tilt.rotation.z = THREE.MathUtils.lerp(tilt.rotation.z, dekeMove?.lean ?? 0, ease);
-    tilt.position.y = THREE.MathUtils.lerp(tilt.position.y, fallen * 0.22, ease);
-
-    hips.position.y = 0;
+    // A knockdown lies at a bit over 70°; a belly-flop block slides nearly flat on the ice.
+    const diving = skater.diveTimer > 0 && skater.downTimer <= 0;
+    tilt.rotation.x = THREE.MathUtils.lerp(tilt.rotation.x, fallen * (diving ? 1.42 : 1.28), ease);
+    tilt.rotation.z = THREE.MathUtils.lerp(
+      tilt.rotation.z,
+      (dekeMove?.lean ?? 0) * DEKE_ROLL,
+      ease,
+    );
+    tilt.position.y = THREE.MathUtils.lerp(tilt.position.y, fallen * (diving ? 0.1 : 0.22), ease);
     root.updateMatrixWorld(true);
-    if (fallen < 0.55) {
-      const lowest = Math.min(
-        ...SIDES.map((side) => tilt.worldToLocal(bones[`foot${side}`].getWorldPosition(ankle)).y),
-      );
-      hips.position.y = rig.ankleHeight - lowest;
-      hips.updateMatrixWorld(true);
-    }
-
+    const { bones } = rig;
     const shooting = skater.shotTimer / 0.34;
     const charge = s.controlled === id ? s.shotCharge : 0;
     const lift = s.controlled === id ? s.shotLift : 0;
-    const pump = Math.sin(skater.stride) * Math.min(Math.hypot(skater.vx, skater.vz) / 8.2, 1);
+    const posture = poseSkater(rig, skater, dt, goalie, twoHand, charge, tilt);
+    const { stickBlend, pelvis, swing } = posture;
+
     // Left-stick net aim keeps shotLift around 0.5 at rest; only raise the blade on a real windup.
     const windup = Math.max(charge, shooting);
     const raise = windup > 0.04 ? windup * (0.55 + lift * 0.7) : 0;
@@ -133,12 +158,13 @@ export const Player = memo(function Player({ id }: { id: number }) {
     );
     tilt.worldToLocal(bones.upperArmR.getWorldPosition(topShoulder));
     tilt.worldToLocal(bones.upperArmL.getWorldPosition(lowShoulder));
+    // Top hand rides in front of the right hip; it follows the blade a little and lifts on a windup.
     if (twoHand) {
       grip
-        .copy(topShoulder)
-        .add(offset.set(-0.04 + skater.stickSide * 0.05, -0.56, 0.16 + pump * 0.03));
+        .copy(pelvis)
+        .add(offset.set(-0.2 + skater.stickSide * 0.06, -0.02 + raise * 0.25, 0.34 + swing * 0.03));
     } else {
-      grip.copy(topShoulder).add(offset.set(-0.16, -0.5, 0.1));
+      grip.copy(pelvis).add(offset.set(-0.26, -0.02 + swing * 0.03, 0.26));
     }
     grip.lerp(offset.set(-0.12, 0.08, -0.45), 1 - stickBlend);
     placeStick(
@@ -150,21 +176,60 @@ export const Player = memo(function Player({ id }: { id: number }) {
       hosel,
     );
     if (stickBlend > 0.4) {
-      reachArm(
+      tilt.getWorldQuaternion(frameQ);
+      along.subVectors(grip, hosel).normalize();
+      alongWorld.copy(along).applyQuaternion(frameQ);
+      holdStick(
         rig,
         'R',
-        tilt.localToWorld(target.copy(grip)),
-        tilt.localToWorld(pole.copy(topShoulder).add(offset.set(-0.6, -0.5, -0.4))),
+        tilt.localToWorld(point.copy(grip)),
+        alongWorld,
+        tilt.localToWorld(approach.copy(topShoulder)),
+        tilt.localToWorld(pole.copy(topShoulder).add(offset.set(-0.55, -0.25, -0.4))),
+        1,
       );
       if (twoHand) {
-        lowHand.lerpVectors(grip, hosel, BOTTOM_HAND);
-        reachArm(
+        const down = reachableDown(
+          lowShoulder,
+          grip,
+          along,
+          rig.armReach * 0.98 + 0.05,
+          BOTTOM_HAND,
+        );
+        lowHand.copy(grip).addScaledVector(along, -down);
+        holdStick(
           rig,
           'L',
-          tilt.localToWorld(target.copy(lowHand)),
-          tilt.localToWorld(pole.copy(lowShoulder).add(offset.set(0.6, -0.5, -0.4))),
+          tilt.localToWorld(point.copy(lowHand)),
+          alongWorld,
+          tilt.localToWorld(approach.copy(lowShoulder)),
+          tilt.localToWorld(pole.copy(lowShoulder).add(offset.set(0.55, -0.05, -0.3))),
+          1,
         );
+      } else {
+        // Free arm pumps across the body with the stride.
+        reachLimb(
+          rig,
+          'arm',
+          'L',
+          tilt.localToWorld(
+            point
+              .copy(lowShoulder)
+              .add(
+                offset.set(
+                  0.05 - 0.16 * Math.max(0, swing),
+                  -0.27 + 0.1 * swing,
+                  0.04 + 0.32 * swing,
+                ),
+              ),
+          ),
+          tilt.localToWorld(pole.copy(lowShoulder).add(offset.set(0.5, -0.15, -0.45))),
+        );
+        curlFingers(rig, 'L', 0.55);
       }
+    } else {
+      curlFingers(rig, 'L', 0.3);
+      curlFingers(rig, 'R', 0.3);
     }
     ring.current!.visible = s.controlled === id || (s.passHeld && s.passTarget === id);
     const marker = ring.current!.material;
@@ -182,9 +247,7 @@ export const Player = memo(function Player({ id }: { id: number }) {
         <meshBasicMaterial color="#10293d" transparent opacity={0.2} depthWrite={false} />
       </mesh>
       <group ref={fall}>
-        <group ref={body}>
-          <primitive object={rig.root} />
-        </group>
+        <primitive object={rig.root} />
         <group ref={stick}>
           <mesh geometry={bladeParts.blade} material={STICK_MATERIALS.blade} castShadow />
           <mesh geometry={bladeParts.tape} material={STICK_MATERIALS.tape} />

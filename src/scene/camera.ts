@@ -69,7 +69,20 @@ const ANGLES: Record<Exclude<CameraMode, 'wide'>, TrackingAngle> = {
   },
 };
 
+type Framing = {
+  position: readonly [number, number, number];
+  target: readonly [number, number, number];
+  fov: number;
+};
+/** Dev hook: `window.__CAMERA__ = { position, target, fov }` pins the camera for animation close-ups. */
+function debugFraming(): Framing | null {
+  if (!import.meta.env.DEV || typeof window === 'undefined') return null;
+  return (window as unknown as { __CAMERA__?: Framing }).__CAMERA__ ?? null;
+}
+
 export function cameraFraming(match: MatchState, camera: Settings['camera'], aspect: number) {
+  const debug = debugFraming();
+  if (debug) return debug;
   if (match.phase === 'menu')
     return { position: [35, 39, 45] as const, target: [0, 0, -1] as const, fov: 43 };
   switch (camera) {

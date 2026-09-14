@@ -94,6 +94,26 @@ describe('puck physics', () => {
     expect(s.phase).toBe('faceoff');
     expect(s.puck.x).toBe(0);
   });
+  it('keeps skating after a goal instead of freezing the play', () => {
+    const s = openIce();
+    Object.assign(s.puck, { x: 25.8, z: 0.8, y: 0.4, vx: 44, lockout: 1 });
+    for (const p of s.skaters) {
+      p.vx = 5;
+      p.cooldown = 10;
+    }
+    stepMatch(s);
+    expect(s.phase).toBe('goal');
+    expect(s.puck.vx).not.toBe(0);
+    const clock = s.clock;
+    const before = s.skaters.map((p) => p.x);
+    tick(s, 0.45);
+    expect(s.phase).toBe('goal');
+    expect(s.clock).toBe(clock);
+    expect(s.score).toEqual([1, 0]);
+    expect(s.puck.x).toBeGreaterThan(RINK.goalX);
+    expect(s.puck.x).toBeLessThan(RINK.goalX + 1.55);
+    expect(s.skaters.some((p, i) => Math.abs(p.x - before[i]) > 0.05)).toBe(true);
+  });
   it('credits the correct team after switching ends', () => {
     const s = openIce();
     s.period = 2;

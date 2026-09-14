@@ -1113,20 +1113,43 @@ function separatePlayers(s: MatchState, previous: Vec2[]) {
   }
 }
 function goal(s: MatchState, scoringTeam: Team) {
+  if (s.phase === 'goal') return false;
   if (s.mode === 'freeSkate' && scoringTeam !== s.homeTeam) return false;
   if (s.mode === 'shootout' && scoringTeam !== s.shootoutShooter) return false;
   if (s.mode !== 'freeSkate') s.score[scoringTeam]++;
   s.scoringTeam = scoringTeam;
   s.phase = 'goal';
   s.countdown = s.mode === 'freeSkate' ? 1.6 : s.mode === 'shootout' ? 2.2 : RULES.goalSeconds;
-  s.puck.vx = 0;
-  s.puck.vz = 0;
-  s.puck.vy = 0;
   emit(s, 'goal');
   return true;
 }
 function teamAttackingNet(sign: number, period: number): Team {
   return (attackDirection(0, period) === sign ? 0 : 1) as Team;
+}
+function containGoalPuck(s: MatchState) {
+  if (s.phase !== 'goal' || s.scoringTeam === null) return;
+  const p = s.puck;
+  if (p.owner !== null) return;
+  const sign = attackDirection(s.scoringTeam, s.period);
+  const depth = p.x * sign;
+  const front = RINK.goalX + 0.12;
+  const back = RINK.goalX + 1.42;
+  if (depth < front) {
+    p.x = sign * front;
+    if (p.vx * sign < 0) p.vx *= -0.28;
+  } else if (depth > back) {
+    p.x = sign * back;
+    if (p.vx * sign > 0) p.vx *= -0.32;
+  }
+  const side = RINK.goalHalfWidth - 0.12;
+  if (Math.abs(p.z) > side) {
+    p.z = Math.sign(p.z || 1) * side;
+    p.vz *= -0.35;
+  }
+  if (p.y > RINK.goalHeight - 0.08) {
+    p.y = RINK.goalHeight - 0.08;
+    if (p.vy > 0) p.vy *= -0.28;
+  }
 }
 function goalieSave(s: MatchState, player: Skater) {
   const p = s.puck,
@@ -1197,9 +1220,8 @@ function advancePuck(s: MatchState, dt: number) {
         z = oldZ + (p.z - oldZ) * t,
         y = oldY + (p.y - oldY) * t;
       if (Math.abs(z) < RINK.goalHalfWidth - 0.12 && y < RINK.goalHeight - 0.06) {
-        if (goal(s, teamAttackingNet(sign, s.period))) return;
-      }
-      if (
+        goal(s, teamAttackingNet(sign, s.period));
+      } else if (
         (Math.abs(Math.abs(z) - RINK.goalHalfWidth) < 0.22 && y < RINK.goalHeight + 0.1) ||
         (Math.abs(z) < RINK.goalHalfWidth && Math.abs(y - RINK.goalHeight) < 0.18)
       ) {
@@ -1220,13 +1242,17 @@ function advancePuck(s: MatchState, dt: number) {
       if (oldX * sign >= RINK.goalX + 1.5) {
         p.x = sign * (RINK.goalX + 1.52);
         p.vx *= -0.4;
-      } else {
+      } else if (Math.abs(oldZ) >= RINK.goalHalfWidth) {
+        p.z = Math.sign(oldZ || 1) * (RINK.goalHalfWidth + 0.12);
+        p.vz *= -0.4;
+      } else if (s.phase !== 'goal') {
         p.z = Math.sign(oldZ || 1) * (RINK.goalHalfWidth + 0.12);
         p.vz *= -0.4;
       }
     }
   }
   if (shootoutAttemptOver(s)) return;
+  containGoalPuck(s);
   const normal = constrainToRink(p, 0.16);
   if (normal) {
     const dot = p.vx * normal.x + p.vz * normal.z;
@@ -1236,23 +1262,25 @@ function advancePuck(s: MatchState, dt: number) {
       if (Math.abs(dot) > 8) emit(s, 'hit', 0.15);
     }
   }
-  for (const player of s.skaters) {
-    if (
-      player.role !== 'G' ||
-      !isOnIce(s, player) ||
-      player.downTimer > 0 ||
-      player.stumbleTimer > 0 ||
-      p.y > 1.7 ||
-      p.lockout > 0
-    )
-      continue;
-    const dist = distance(player, p),
-      lateral = Math.abs(p.z - player.z);
-    if (dist > 1.52) continue;
-    const reach = 1.08 + Math.min(0.28, Math.hypot(p.vx, p.vz) * 0.006);
-    if (lateral > reach && dist > 0.9) continue;
-    goalieSave(s, player);
-    return;
+  if (s.phase !== 'goal') {
+    for (const player of s.skaters) {
+      if (
+        player.role !== 'G' ||
+        !isOnIce(s, player) ||
+        player.downTimer > 0 ||
+        player.stumbleTimer > 0 ||
+        p.y > 1.7 ||
+        p.lockout > 0
+      )
+        continue;
+      const dist = distance(player, p),
+        lateral = Math.abs(p.z - player.z);
+      if (dist > 1.52) continue;
+      const reach = 1.08 + Math.min(0.28, Math.hypot(p.vx, p.vz) * 0.006);
+      if (lateral > reach && dist > 0.9) continue;
+      goalieSave(s, player);
+      return;
+    }
   }
   for (const player of s.skaters) {
     if (
@@ -1346,14 +1374,14 @@ export function stepMatch(s: MatchState, input: InputFrame = EMPTY_INPUT, dt = R
         resetFormation(s);
         startMatch(s);
       }
+      return;
     }
-    return;
   }
-  if (s.hitstop > 0) {
+  if (s.hitstop > 0 && s.phase !== 'goal') {
     s.hitstop = Math.max(0, s.hitstop - dt);
     return;
   }
-  if (modeInfo(s.mode).timed) {
+  if (s.phase !== 'goal' && modeInfo(s.mode).timed) {
     s.clock = Math.max(0, s.clock - dt);
     if (s.clock <= 0) {
       if (s.mode === 'shootout') {
@@ -1475,7 +1503,7 @@ export function stepMatch(s: MatchState, input: InputFrame = EMPTY_INPUT, dt = R
       }
       if (ai.shoot) shootPuck(s, p, ai.shotPower, ai.shotAim, ai.shotHeight);
       else if (ai.pass) passPuck(s, p, ai.passDir.x, ai.passDir.z);
-      if (ai.poke) pokeCheck(s, p);
+      if (ai.poke) pokeCheck(s, p, ai.pokeSweep);
     }
     updateRush(p, dt);
   }

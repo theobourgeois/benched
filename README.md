@@ -73,8 +73,9 @@ src/
     sound.ts       Recorded puck strikes and speed-responsive skate loop, synthesized arena signals
   scene/
     Arena.tsx      Procedural rink, rounded boards, glass, stands, crowds, nets
-    Player.tsx     Skating crouch, stride, stick grip and fall/recovery posed from the simulation
-    skaterModel.ts Runtime skeleton and skin weights for the skater model, team jersey recolor, crest/number decals, arm IK
+    Player.tsx     Places each skater, plants the stick and wraps both hands around the shaft
+    skaterPose.ts  Skating posture: stride cycle with planted leg IK, hip sway, torso lean, knockdown ragdoll
+    skaterModel.ts Runtime skeleton for the skater model, team jersey recolor, crest/number decals, limb IK, hand grip
     stick.ts       Curved, taped blade geometry and stick placement from grip and puck position
     Effects.tsx    Pooled ice spray and impact particles
     textures.ts   Canvas-generated ice graphics, board ads and jersey numbers

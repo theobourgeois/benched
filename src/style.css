@@ -1023,14 +1023,17 @@ a {
 .goal-overlay {
   position: absolute;
   left: 50%;
-  top: 46%;
-  transform: translate(-50%, -50%);
   display: flex;
   flex-direction: column;
   align-items: center;
   text-align: center;
   text-shadow: 0 3px 35px #000a;
   white-space: nowrap;
+  pointer-events: none;
+}
+.faceoff-overlay {
+  top: 46%;
+  transform: translate(-50%, -50%);
 }
 .faceoff-overlay > strong {
   font-family: var(--condensed);
@@ -1053,15 +1056,17 @@ a {
   letter-spacing: 0.5px;
 }
 .goal-overlay {
+  top: 118px;
+  transform: translateX(-50%);
   width: 100%;
-  padding: 30px;
-  background: linear-gradient(90deg, transparent, #0b2213dc, transparent);
+  padding: 12px 30px 18px;
+  background: linear-gradient(90deg, transparent, #0b2213c4, transparent);
 }
 .goal-overlay > strong {
   font-family: var(--condensed);
   font-style: italic;
   font-weight: 900;
-  font-size: clamp(70px, 10vw, 140px);
+  font-size: clamp(48px, 7vw, 92px);
   color: var(--lime);
   line-height: 1.1;
   animation: count-in 0.4s ease-out;
@@ -1071,7 +1076,7 @@ a {
 }
 .goal-overlay > div {
   font-family: var(--condensed);
-  font-size: 50px;
+  font-size: 32px;
   font-weight: 800;
 }
 .goal-overlay > div span {
@@ -1524,6 +1529,9 @@ a {
   .game-header {
     justify-content: flex-end;
     padding: 15px 12px;
+  }
+  .goal-overlay {
+    top: 84px;
   }
   .scoreboard {
     left: 12px;

@@ -163,7 +163,9 @@ function Puck() {
     positions.current.unshift(new THREE.Vector3(p.x, p.y, p.z));
     positions.current.pop();
     const fast =
-      Math.hypot(p.vx, p.vz) > 12 && p.owner === null && runtime.match.phase === 'playing';
+      Math.hypot(p.vx, p.vz) > 12 &&
+      p.owner === null &&
+      (runtime.match.phase === 'playing' || runtime.match.phase === 'goal');
     const airborne = p.y > 0.35;
     positions.current.forEach((pos, i) => {
       dummy.current.position.copy(pos);
