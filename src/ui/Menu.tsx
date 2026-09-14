@@ -1,5 +1,7 @@
 import {
   ArrowRight,
+  ChevronLeft,
+  ChevronRight,
   Gamepad2,
   Keyboard,
   Maximize,
@@ -8,8 +10,8 @@ import {
   VolumeX,
   X,
 } from 'lucide-react';
-import { useState } from 'react';
-import { TEAMS, TEAM_MARKS } from '../game/config';
+import { useState, type CSSProperties } from 'react';
+import { cycleClub, LEAGUES, leagueOf, openingMatchup, uniformFor, type Club } from '../game/clubs';
 import { CAMERA_OPTIONS } from '../scene/camera';
 import { beginGame, updateSettings, useGame } from '../game/store';
 import { MODES, modeInfo } from '../game/modes';
@@ -30,15 +32,10 @@ export function Brand({ small = false }: { small?: boolean }) {
     </div>
   );
 }
-export function TeamLogo({ team, small = false }: { team: Team; small?: boolean }) {
-  const mark = TEAM_MARKS[team];
+export function TeamLogo({ club, small = false }: { club: Club; small?: boolean }) {
   return (
-    <div className={`team-logo team-${team} ${small ? 'logo-small' : ''}`}>
-      <svg viewBox="0 0 80 80" fill="none" aria-hidden="true">
-        <path d={mark.body} fill="currentColor" />
-        <path d={mark.inner} fill={mark.innerColor} />
-        {mark.underline && <path d={mark.underline} stroke="currentColor" strokeWidth="4" />}
-      </svg>
+    <div className={`team-logo ${small ? 'logo-small' : ''}`}>
+      <img src={club.logo} alt="" draggable={false} />
     </div>
   );
 }
@@ -125,13 +122,21 @@ export function SettingsPanel({ close }: { close: () => void }) {
   );
 }
 export function Menu() {
-  const { controller, settings } = useGame();
+  const { controller, settings, match } = useGame();
   const [controllerSetup, setControllerSetup] = useState(false);
-  const [team, setTeam] = useState<Team>(0),
+  const [team, setTeam] = useState<Team>(match.homeTeam),
+    [teams, setTeams] = useState<[Club, Club]>(match.teams),
     [mode, setMode] = useState<GameMode>('exhibition'),
     [controls, setControls] = useState(false),
     [showSettings, setShowSettings] = useState(false);
   const info = modeInfo(mode);
+  const league = leagueOf(teams[0]);
+  const cycle = (side: Team, step: 1 | -1) =>
+    setTeams((pair) => {
+      const next: [Club, Club] = [...pair];
+      next[side] = cycleClub(league, pair[side], pair[1 - side], step);
+      return next;
+    });
   return (
     <div className="menu">
       <header className="site-header">
@@ -168,30 +173,76 @@ export function Menu() {
         <div className="matchup-panel">
           <div className="matchup-topline">
             <span>{info.eyebrow}</span>
-            <span>NORTHSTAR ARENA</span>
+            {LEAGUES.length > 1 && (
+              <div className="league-picker" role="group" aria-label="League">
+                {LEAGUES.map((l) => (
+                  <button
+                    key={l.id}
+                    className="league-option"
+                    aria-pressed={l.id === league.id}
+                    onClick={() => l.id !== league.id && setTeams(openingMatchup(l))}
+                  >
+                    {l.name}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <div className="team-picker">
-            {TEAMS.map((t, i) => (
-              <button
-                key={t.abbr}
-                className={`team-option matchup-team side-${i} ${team === i ? 'selected' : ''}`}
-                onClick={() => setTeam(i as Team)}
-                aria-pressed={team === i}
-                aria-label={`${t.city} ${t.name}`}
-              >
-                <span className="side-label">{i === 0 ? 'HOME' : 'AWAY'}</span>
-                <TeamLogo team={i as Team} />
-                <span className="team-option-name">
-                  <small>{t.city}</small>
-                  <strong>{t.name}</strong>
-                </span>
-                <span className="uniform-label">{i === 0 ? 'NAVY / WHITE' : 'RED / NAVY'}</span>
-                <span className="team-assignment">
-                  <Gamepad2 size={22} />
-                  {team === i ? 'PLAYER 1' : info.practice ? 'GOALIE' : 'CPU'}
-                </span>
-              </button>
-            ))}
+            {teams.map((club, i) => {
+              const side = i as Team,
+                sideName = side === 0 ? 'home' : 'away',
+                uniform = uniformFor(club, side);
+              return (
+                <div
+                  key={side}
+                  className="matchup-slot"
+                  style={{ '--club': club.accent } as CSSProperties}
+                >
+                  <button
+                    className={`team-option matchup-team side-${side} ${team === side ? 'selected' : ''}`}
+                    onClick={() => setTeam(side)}
+                    aria-pressed={team === side}
+                    aria-label={`${club.city} ${club.name}`}
+                  >
+                    <span className="side-label">{sideName.toUpperCase()}</span>
+                    <TeamLogo club={club} />
+                    <span className="team-option-name">
+                      <small>{club.city}</small>
+                      <strong>{club.name}</strong>
+                    </span>
+                    <span className="uniform-label">
+                      <i style={{ background: uniform.jersey }} />
+                      <i style={{ background: uniform.trim }} />
+                      {sideName.toUpperCase()} JERSEY
+                    </span>
+                    <span className="team-assignment">
+                      <Gamepad2 size={22} />
+                      {team === side ? 'PLAYER 1' : info.practice ? 'GOALIE' : 'CPU'}
+                    </span>
+                  </button>
+                  {league.clubs.length > 2 && (
+                    <div className="club-switcher">
+                      <button
+                        className="club-cycle prev"
+                        aria-label={`Previous ${sideName} team`}
+                        onClick={() => cycle(side, -1)}
+                      >
+                        <ChevronLeft size={20} />
+                      </button>
+                      <span className="club-switcher-label">CHANGE TEAM</span>
+                      <button
+                        className="club-cycle next"
+                        aria-label={`Next ${sideName} team`}
+                        onClick={() => cycle(side, 1)}
+                      >
+                        <ChevronRight size={20} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
             <div className="versus" aria-hidden="true">
               VS
             </div>
@@ -204,15 +255,25 @@ export function Menu() {
         </div>
         <div className="match-start">
           <span>{info.prompt}</span>
-          <button className="primary-button play-button" onClick={() => beginGame(team, mode)}>
+          <button
+            className="primary-button play-button"
+            onClick={() => beginGame(team, mode, teams)}
+          >
             {info.play} <ArrowRight size={22} />
           </button>
         </div>
       </main>
       <footer className="menu-footer">
         <div className="footer-left">
-          <span className="button-cue">A</span> PLAY <span className="direction-cue">← →</span>{' '}
-          SELECT SIDE <span className="direction-cue">↑ ↓</span> MODE
+          <span className="button-cue">A</span> PLAY <span className="direction-cue">← →</span> SIDE{' '}
+          <span className="direction-cue">↑ ↓</span> TEAM{' '}
+          <span className="direction-cue">LB RB</span> MODE
+          {LEAGUES.length > 1 && (
+            <>
+              {' '}
+              <span className="direction-cue">LT RT</span> LEAGUE
+            </>
+          )}
         </div>
         <div className="footer-actions">
           <button onClick={() => setControls(true)}>

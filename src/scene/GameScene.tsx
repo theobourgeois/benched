@@ -333,8 +333,9 @@ export function GameScene() {
             <IceSpray />
           </Suspense>
           <Suspense fallback={null}>
+            {/* Keyed by matchup so jerseys are rebuilt when the clubs change. */}
             {Array.from({ length: 12 }, (_, i) => (
-              <Player key={i} id={i} />
+              <Player key={`${match.teams[0].key}|${match.teams[1].key}|${i}`} id={i} />
             ))}
           </Suspense>
           <Simulation />

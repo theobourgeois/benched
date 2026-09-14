@@ -1,3 +1,4 @@
+import type { Club } from './clubs';
 export type Team = 0 | 1;
 export type GameMode = 'exhibition' | 'threeOnThree' | 'oneOnOne' | 'shootout' | 'freeSkate';
 export type Phase = 'menu' | 'faceoff' | 'playing' | 'goal' | 'intermission' | 'paused' | 'final';
@@ -134,6 +135,8 @@ export interface MatchState {
   puck: Puck;
   controlled: number;
   homeTeam: Team;
+  /** Club on each side; side 0 wears home colors, side 1 away. */
+  teams: [Club, Club];
   scoringTeam: Team | null;
   shotCharge: number;
   /** Left-stick shot aim across the net, −1 (right post from behind) to 1. */

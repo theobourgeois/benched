@@ -159,6 +159,29 @@ describe('readable committed contact', () => {
     expect(a.checkLanded).toBe(false);
     expect(s.hits[0]).toBe(0);
   });
+  it('lands a matching-speed shoulder check from the side and dumps the carrier', () => {
+    const s = contactRink(),
+      a = s.skaters[0],
+      b = s.skaters[6];
+    Object.assign(a, { x: 0, z: 0, vx: 8, vz: 0, angle: Math.PI / 2, cooldown: 0 });
+    Object.assign(b, {
+      x: 0.15,
+      z: 1.0,
+      vx: 8,
+      vz: 0,
+      angle: Math.PI / 2,
+      cooldown: 10,
+      stumbleTimer: 0,
+    });
+    Object.assign(s.puck, { owner: 6, x: b.x, z: b.z });
+    stepMatch(s, { ...EMPTY_INPUT, check: true, moveX: 1, checkPower: 1 });
+    for (let i = 0; i < 8 && s.hits[0] === 0; i++) stepMatch(s, { ...EMPTY_INPUT, moveX: 1 });
+    expect(a.checkLanded).toBe(true);
+    expect(s.hits[0]).toBe(1);
+    expect(b.downTimer).toBeGreaterThan(0);
+    expect(s.puck.owner).toBeNull();
+    expect(s.notice).toBe('BIG HIT');
+  });
   it.each([350, 1000])(
     'sweeps a fast contact at %s m/s instead of tunneling through bodies',
     (velocity) => {

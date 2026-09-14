@@ -459,6 +459,20 @@ describe('contact, elevation and puck handling', () => {
     expect(a.vx).toBeGreaterThan(5);
     expect(s.hits[0]).toBe(0);
   });
+  it('a committed shoulder check at matching speed is a knockdown, not a rub', () => {
+    const s = openIce(),
+      a = s.skaters[0],
+      b = s.skaters[6];
+    Object.assign(a, { x: 0, z: 0, vx: 8, vz: 0, angle: Math.PI / 2, cooldown: 0 });
+    Object.assign(b, { x: 0, z: 0.9, vx: 8, vz: 0, angle: Math.PI / 2, cooldown: 10 });
+    s.puck.owner = b.id;
+    stepMatch(s, { ...EMPTY_INPUT, check: true, moveX: 1, checkPower: 1 });
+    for (let i = 0; i < 8 && s.hits[0] === 0; i++) stepMatch(s, { ...EMPTY_INPUT, moveX: 1 });
+    expect(s.hits[0]).toBe(1);
+    expect(b.downTimer).toBeGreaterThan(0);
+    expect(s.puck.owner).not.toBe(b.id);
+    expect(s.notice).toBe('BIG HIT');
+  });
   it('running down a breakaway and connecting knocks the puck loose; loaded, it drops them', () => {
     const chase = collision(12, { check: true, victimVx: 8.8, victimAngle: Math.PI / 2 });
     expect(chase.b.downTimer).toBe(0);

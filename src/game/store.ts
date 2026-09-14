@@ -2,6 +2,7 @@ import { useSyncExternalStore } from 'react';
 import { createMatch, nextPeriod, startMatch, togglePause } from './engine';
 import { ArenaAudio } from '../audio/sound';
 import { Controller } from '../input/controller';
+import type { Club } from './clubs';
 import type { GameMode, Settings, Team } from './types';
 export const runtime = {
   match: createMatch(),
@@ -25,9 +26,13 @@ export function useGame() {
   );
   return runtime;
 }
-export function beginGame(team: Team, mode: GameMode = 'exhibition') {
+export function beginGame(
+  team: Team,
+  mode: GameMode = 'exhibition',
+  teams: [Club, Club] = runtime.match.teams,
+) {
   runtime.audio.unlock();
-  runtime.match = createMatch(team, mode);
+  runtime.match = createMatch(team, mode, teams);
   startMatch(runtime.match);
   publish();
 }
@@ -40,7 +45,7 @@ export function continueGame() {
   publish();
 }
 export function returnToMenu() {
-  runtime.match = createMatch(runtime.match.homeTeam);
+  runtime.match = createMatch(runtime.match.homeTeam, 'exhibition', runtime.match.teams);
   publish();
 }
 export function updateSettings(settings: Partial<Settings>) {

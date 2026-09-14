@@ -42,6 +42,10 @@ export class Controller {
     up: false,
     down: false,
     menu: false,
+    prevMode: false,
+    nextMode: false,
+    prevLeague: false,
+    nextLeague: false,
   };
   ui = {
     confirm: false,
@@ -51,6 +55,10 @@ export class Controller {
     up: false,
     down: false,
     menu: false,
+    prevMode: false,
+    nextMode: false,
+    prevLeague: false,
+    nextLeague: false,
   };
   private lastPad: Gamepad | null = null;
   status: ControllerStatus = { ...WAITING_STATUS };
@@ -198,6 +206,10 @@ export class Controller {
       up: button(12) || axis(1) < -0.6,
       down: button(13) || axis(1) > 0.6,
       menu: button(9),
+      prevMode: button(4),
+      nextMode: button(5),
+      prevLeague: button(6),
+      nextLeague: button(7),
     };
     for (const name of Object.keys(uiHeld) as (keyof typeof uiHeld)[])
       this.ui[name] = uiHeld[name] && !this.previousUI[name];

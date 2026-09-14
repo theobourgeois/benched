@@ -45,15 +45,29 @@ export function navigateWithController() {
     return Object.values(ui).some(Boolean);
   }
   if (match.phase === 'menu') {
-    if (ui.up || ui.down) {
+    if (ui.prevMode || ui.nextMode) {
       const tabs = Array.from(document.querySelectorAll<HTMLButtonElement>('.mode-tab'));
       const selected = tabs.findIndex((t) => t.classList.contains('nav-active'));
-      tabs[(selected + (ui.up ? -1 : 1) + tabs.length) % tabs.length]?.click();
+      tabs[(selected + (ui.prevMode ? -1 : 1) + tabs.length) % tabs.length]?.click();
     }
     if (ui.left || ui.right) {
       const teams = Array.from(document.querySelectorAll<HTMLButtonElement>('.team-option'));
       const selected = teams.findIndex((t) => t.getAttribute('aria-pressed') === 'true');
       teams[(selected + 1) % teams.length]?.click();
+    }
+    if (ui.up || ui.down) {
+      const slot = document
+        .querySelector('.team-option[aria-pressed="true"]')
+        ?.closest('.matchup-slot');
+      slot
+        ?.querySelector<HTMLButtonElement>(ui.up ? '.club-cycle.prev' : '.club-cycle.next')
+        ?.click();
+    }
+    if (ui.prevLeague || ui.nextLeague) {
+      const leagues = Array.from(document.querySelectorAll<HTMLButtonElement>('.league-option'));
+      const selected = leagues.findIndex((l) => l.getAttribute('aria-pressed') === 'true');
+      const step = ui.prevLeague ? -1 : 1;
+      leagues[(selected + step + leagues.length) % leagues.length]?.click();
     }
     if (ui.confirm || ui.menu) document.querySelector<HTMLButtonElement>('.play-button')?.click();
     return true;

@@ -33,10 +33,34 @@ test('menu renders, selects teams, opens accessible controls and settings', asyn
   await page.getByLabel('Camera angle').selectOption('tight');
   await page.getByLabel('Camera angle').selectOption('wide');
   await page.keyboard.press('Escape');
-  await page.getByRole('button', { name: /MONTRÉAL Redline/ }).click();
+  await page.getByRole('button', { name: 'Montréal Canadiens' }).click();
   await page.getByRole('button', { name: 'PLAY GAME' }).click();
   expect((await state(page)).homeTeam).toBe(1);
   await expect(page.locator('canvas')).toHaveCount(1);
+  expect(errors).toEqual([]);
+});
+test('an NHL matchup puts real clubs, logos and starters on the ice', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto('/');
+  await expect(page.getByRole('button', { name: 'Toronto Maple Leafs' })).toBeVisible();
+  await page.getByRole('button', { name: 'Next away team' }).click();
+  await expect(page.getByRole('button', { name: 'Nashville Predators' })).toBeVisible();
+  await page.getByRole('button', { name: 'PLAY GAME' }).click();
+  await expect(page.locator('.score-clock small')).toHaveText('● LIVE', { timeout: 10000 });
+  const s = await state(page);
+  expect(s.teams.map((t: { key: string }) => t.key)).toEqual(['nhl:TOR', 'nhl:NSH']);
+  expect(s.skaters[0].name).toBe(s.teams[0].lineup[0].name);
+  const logos = page.locator('.score-team img');
+  await expect(logos).toHaveCount(2);
+  await expect
+    .poll(() =>
+      logos.evaluateAll((imgs) => imgs.every((i) => (i as HTMLImageElement).naturalWidth > 0)),
+    )
+    .toBe(true);
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'End match & return to menu' }).click();
+  await expect(page.getByRole('button', { name: 'Nashville Predators' })).toBeVisible();
   expect(errors).toEqual([]);
 });
 test('keyboard skates, skill stick shoots, pause freezes play and help stays paused', async ({
@@ -104,11 +128,28 @@ test('virtual Xbox connects, skates, shoots with RS, and safely disconnects', as
     await page.waitForTimeout(90);
   };
   await pressPad(15);
-  await expect(page.getByRole('button', { name: /MONTRÉAL Redline/ })).toHaveAttribute(
+  await expect(page.getByRole('button', { name: 'Montréal Canadiens' })).toHaveAttribute(
     'aria-pressed',
     'true',
   );
   await pressPad(14);
+  // D-pad or left stick changes the selected side's team; bumpers change mode.
+  await pressPad(13);
+  await expect(page.getByRole('button', { name: 'Utah Mammoth' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await page.evaluate('window.testPad.axes[1]=-1');
+  await page.waitForTimeout(90);
+  await page.evaluate('window.testPad.axes[1]=0');
+  await page.waitForTimeout(90);
+  await expect(page.getByRole('button', { name: 'Toronto Maple Leafs' })).toBeVisible();
+  await pressPad(5);
+  await expect(page.getByRole('button', { name: '3 ON 3' })).toHaveAttribute(
+    'aria-current',
+    'page',
+  );
+  await pressPad(4);
   await pressPad(0);
   await expect(page.locator('.score-clock small')).toHaveText('● LIVE');
   await changeState(

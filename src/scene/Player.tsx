@@ -3,6 +3,7 @@ import { useFrame, useLoader } from '@react-three/fiber';
 import * as THREE from 'three';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { runtime } from '../game/store';
+import { uniformFor } from '../game/clubs';
 import { isOnIce } from '../game/engine';
 import { activeDeke } from '../game/dekes';
 import { SIDES, SKATER_URL, createSkaterRig, reachArm } from './skaterModel';
@@ -52,7 +53,8 @@ export const Player = memo(function Player({ id }: { id: number }) {
     paddle = useRef<THREE.Mesh>(null);
   const p = runtime.match.skaters[id],
     goalie = p.role === 'G';
-  const rig = useMemo(() => createSkaterRig(template, p.team), [template, p.team]);
+  const uniform = uniformFor(runtime.match.teams[p.team], p.team);
+  const rig = useMemo(() => createSkaterRig(template, uniform), [template, uniform]);
   useEffect(() => () => rig.dispose(), [rig]);
   const blade = goalie ? GOALIE_BLADE : SKATER_BLADE,
     bladeParts = bladeGeometries(blade);

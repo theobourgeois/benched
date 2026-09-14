@@ -1,6 +1,7 @@
 import { attackDirection, EMPTY_INPUT, PHYSICS, PUCK, RINK, RULES, STICK } from './config';
 import { activeDeke, classifyOneTouch, clearDeke, startDeke, stepDeke } from './dekes';
 import { decideAI } from './ai';
+import { DEFAULT_MATCHUP, type Club } from './clubs';
 import { skateVelocity } from './skating';
 import { clamp, constrainToRink, distance, normalized } from './math';
 import { isOnIce, modeInfo, SHOOTOUT_ROUNDS } from './modes';
@@ -17,15 +18,11 @@ import type {
 } from './types';
 export { isOnIce } from './modes';
 const ROLES = ['C', 'LW', 'RW', 'LD', 'RD', 'G'] as const;
-const NAMES = [
-  ['Mercer', 'Roy', 'Clarke', 'Bishop', 'Ellis', 'Price'],
-  ['Dubois', 'Laurent', 'Côté', 'Moreau', 'Gagnon', 'Fortin'],
-];
-const NUMBERS = [
-  [19, 88, 29, 8, 44, 31],
-  [91, 14, 27, 6, 55, 30],
-];
-export function createMatch(homeTeam: Team = 0, mode: GameMode = 'exhibition'): MatchState {
+export function createMatch(
+  homeTeam: Team = 0,
+  mode: GameMode = 'exhibition',
+  teams: [Club, Club] = DEFAULT_MATCHUP,
+): MatchState {
   const s: MatchState = {
     mode,
     phase: 'menu',
@@ -51,6 +48,7 @@ export function createMatch(homeTeam: Team = 0, mode: GameMode = 'exhibition'): 
     },
     controlled: homeTeam * 6,
     homeTeam,
+    teams,
     scoringTeam: null,
     shotCharge: 0,
     shotAim: 0,
@@ -76,8 +74,8 @@ export function createMatch(homeTeam: Team = 0, mode: GameMode = 'exhibition'): 
         id: t * 6 + i,
         team: t as Team,
         role: ROLES[i],
-        number: NUMBERS[t][i],
-        name: NAMES[t][i],
+        number: teams[t].lineup[i].number,
+        name: teams[t].lineup[i].name,
         x: 0,
         z: 0,
         vx: 0,
@@ -670,7 +668,10 @@ export function launchCheck(s: MatchState, p: Skater, aimX: number, aimZ: number
     if (dist > PHYSICS.hitLockRange) continue;
     const to = normalized(q.x - p.x, q.z - p.z);
     const dot = aim.x * to.x + aim.z * to.z;
-    if (dot < PHYSICS.hitLockCone) continue;
+    // Someone on your hip is a shoulder check, not a miss: lock them when they are
+    // close enough to hit even if they sit outside the forward aim cone.
+    const beside = dist < PHYSICS.playerRadius * 2 + 0.85 && dot > -0.12;
+    if (dot < PHYSICS.hitLockCone && !beside) continue;
     const score =
       dot * 0.8 + (1 - dist / PHYSICS.hitLockRange) * 1.2 + (s.puck.owner === q.id ? 0.3 : 0);
     if (score > bestScore) {
@@ -750,20 +751,20 @@ function closingSpeed(hitter: Skater, victim: Skater, nx: number, nz: number) {
   return Math.max(0, (hitter.vx - victim.vx) * nx + (hitter.vz - victim.vz) * nz);
 }
 /**
- * NHL 14 style collision power: it is the momentum you bring *into* the other body that counts.
- * Closing speed along the contact, scaled by how square the hitter is, discounted when the victim
- * is skating away (a hit from behind is a shove) or has squared up, and boosted when they are
- * mid-deke or already off balance. A committed check adds its lunge and a flat commitment.
+ * Collision power: closing along the contact, plus skating speed through a committed shoulder.
+ * A bump is only relative momentum. A check also counts the speed you drove in with, and a
+ * side-on shoulder (the contact is on your hip, not your chest) spends that speed into them —
+ * matching pace along the boards is a dump, not a rub. Hits from behind stay a shove; a
+ * squared-up victim still takes something off; a deke or stumble leaves them exposed.
  */
 function hitPower(hitter: Skater, victim: Skater, nx: number, nz: number, committed: boolean) {
   const relative = closingSpeed(hitter, victim, nx, nz);
   const drive = Math.max(0, hitter.vx * nx + hitter.vz * nz);
-  // A bump is pure relative momentum. A committed check also counts the speed you drove in with,
-  // so running a carrier down and connecting means something.
   const closing = committed
     ? relative * (1 - PHYSICS.checkDrive) + drive * PHYSICS.checkDrive
     : relative;
-  const square = 0.55 + 0.45 * clamp(facing(hitter, nx, nz), 0, 1);
+  const face = clamp(facing(hitter, nx, nz), 0, 1);
+  const square = 0.55 + 0.45 * face;
   const away = victim.vx * nx + victim.vz * nz;
   const fromBehind = away > 2.5 && facing(victim, nx, nz) > 0.5 ? PHYSICS.checkFromBehind : 1;
   const exposed = victim.stumbleTimer > 0 || !!activeDeke(victim);
@@ -771,7 +772,12 @@ function hitPower(hitter: Skater, victim: Skater, nx: number, nz: number, commit
   const commit = committed
     ? PHYSICS.checkCommit * (1 + PHYSICS.checkLoadBonus * clamp(hitter.checkPower, 0, 1))
     : 0;
-  const power = (closing * square * brace + commit) * fromBehind;
+  // Contact on the shoulder, not the chest: your skating speed is the hit. Head-on already
+  // has closing; this is what makes a parallel board check the heaviest play.
+  const shoulder = committed
+    ? Math.hypot(hitter.vx, hitter.vz) * PHYSICS.checkShoulderDrive * (1 - face)
+    : 0;
+  const power = (closing * square * brace + commit + shoulder) * fromBehind;
   return victim.role === 'G' ? Math.min(power, PHYSICS.checkKnockdown - 0.01) : power;
 }
 function knockDown(
@@ -1037,18 +1043,20 @@ function updateRush(p: Skater, dt: number) {
   const speed = Math.hypot(p.vx, p.vz);
   p.rush += (speed - p.rush) * (1 - Math.exp(-6 * dt));
 }
-/** The shoulder has a forward contact cone. Brushing a hip or being touched from behind
- * cannot spend a check, and a receding opponent cannot be hit by the reach allowance. */
+/** Chest or shoulder can spend a live check. The back cannot: a hip brush from behind is
+ * not a hit. Matching speed beside someone still counts — the throw is the contact. */
 function shoulderContact(s: MatchState, a: Skater, b: Skater, nx: number, nz: number) {
-  return (
-    liveCheck(a) &&
-    s.puck.owner !== a.id &&
-    a.team !== b.team &&
-    a.downTimer <= 0 &&
-    b.downTimer <= 0 &&
-    facing(a, nx, nz) > 0.35 &&
-    closingSpeed(a, b, nx, nz) > 0.1
-  );
+  if (
+    !liveCheck(a) ||
+    s.puck.owner === a.id ||
+    a.team === b.team ||
+    a.downTimer > 0 ||
+    b.downTimer > 0
+  )
+    return false;
+  // cos(95°) ≈ -0.09: the forward half plus a sliver behind the shoulder, not the spine.
+  if (facing(a, nx, nz) <= -0.08) return false;
+  return closingSpeed(a, b, nx, nz) > 0.1 || Math.hypot(a.vx, a.vz) > 2.8;
 }
 function separatePlayers(s: MatchState, previous: Vec2[]) {
   const contacts: { a: Skater; b: Skater; t: number; nx: number; nz: number; body: boolean }[] = [];

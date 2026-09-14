@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { clone as cloneRig } from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { TEAMS } from '../game/config';
-import type { Team } from '../game/types';
+import type { Uniform } from '../game/clubs';
 
 /** Mixamo-rigged character (see public/models/CREDITS.txt). Any mixamorig_* skeleton can drop in. */
 export const SKATER_URL = `${import.meta.env.BASE_URL}models/skater.fbx`;
@@ -74,7 +73,7 @@ function templateHeight(template: THREE.Object3D) {
   return height;
 }
 
-export function createSkaterRig(template: THREE.Object3D, team: Team): SkaterRig {
+export function createSkaterRig(template: THREE.Object3D, uniform: Uniform): SkaterRig {
   const root = cloneRig(template);
   const scale = HEIGHT / templateHeight(template);
   root.scale.setScalar(scale);
@@ -85,7 +84,7 @@ export function createSkaterRig(template: THREE.Object3D, team: Team): SkaterRig
     mesh.frustumCulled = false;
     const joint = /joint/i.test(mesh.name);
     mesh.material = new THREE.MeshStandardMaterial({
-      color: joint ? TEAMS[team].dark : TEAMS[team].color,
+      color: joint ? uniform.trim : uniform.jersey,
       roughness: joint ? 0.35 : 0.55,
       metalness: joint ? 0.25 : 0.05,
     });

@@ -12,7 +12,7 @@ import {
   VolumeX,
 } from 'lucide-react';
 import { useState } from 'react';
-import { attackDirection, TEAMS } from '../game/config';
+import { attackDirection } from '../game/config';
 import { modeInfo } from '../game/modes';
 import {
   beginGame,
@@ -22,7 +22,7 @@ import {
   updateSettings,
   useGame,
 } from '../game/store';
-import { cameraUsesAttackUp, type Team } from '../game/types';
+import { cameraUsesAttackUp } from '../game/types';
 import { Brand, SettingsPanel, TeamLogo } from './Menu';
 import { Controls } from './Controls';
 export function formatClock(seconds: number) {
@@ -43,7 +43,7 @@ export function Hud() {
   const [controls, setControls] = useState(false),
     [showSettings, setShowSettings] = useState(false);
   const player = s.skaters[s.controlled],
-    team = TEAMS[s.homeTeam],
+    team = s.teams[s.homeTeam],
     dir = attackDirection(s.homeTeam, s.period);
   const info = modeInfo(s.mode);
   const practice = info.practice;
@@ -63,12 +63,12 @@ export function Hud() {
             </div>
           ) : (
             <>
-              {TEAMS.map((t, i) => (
-                <div key={t.abbr} className={`score-team score-team-${i}`}>
-                  <TeamLogo team={i as Team} small />
+              {s.teams.map((t, i) => (
+                <div key={i} className={`score-team score-team-${i}`}>
+                  <TeamLogo club={t} small />
                   <span>{t.abbr}</span>
                   <strong>{s.score[i]}</strong>
-                  <i style={{ background: t.color }} />
+                  <i style={{ background: t.accent }} />
                 </div>
               ))}
               <div className="score-clock">
@@ -132,7 +132,7 @@ export function Hud() {
       )}
       <footer className="game-footer">
         <div className="player-card">
-          <span className="player-number" style={{ color: team.color }}>
+          <span className="player-number" style={{ color: team.accent }}>
             {player.number}
           </span>
           <div>
@@ -144,7 +144,7 @@ export function Hud() {
               <i
                 style={{
                   width: `${player.stamina * 100}%`,
-                  background: player.stamina < 0.25 ? '#fa644f' : team.color,
+                  background: player.stamina < 0.25 ? '#fa644f' : team.accent,
                 }}
               />
             </div>
@@ -229,7 +229,7 @@ export function Hud() {
               ? info.eyebrow
               : s.scoringTeam === null
                 ? info.eyebrow
-                : `${TEAMS[s.scoringTeam].city} ${TEAMS[s.scoringTeam].name}`}
+                : `${s.teams[s.scoringTeam].city} ${s.teams[s.scoringTeam].name}`}
           </span>
           <strong>{s.scoringTeam === null ? s.notice || 'NO GOAL' : 'GOAL'}</strong>
           {!practice && (
@@ -286,17 +286,17 @@ export function Hud() {
                 : 'Intermission'}
             </h2>
             <div className="results-score">
-              <TeamLogo team={0} />
+              <TeamLogo club={s.teams[0]} />
               <strong>
                 {s.score[0]} <span>:</span> {s.score[1]}
               </strong>
-              <TeamLogo team={1} />
+              <TeamLogo club={s.teams[1]} />
             </div>
             <div className="stats-table">
               <div>
-                <b>{TEAMS[0].abbr}</b>
+                <b>{s.teams[0].abbr}</b>
                 <span>TEAM STATS</span>
-                <b>{TEAMS[1].abbr}</b>
+                <b>{s.teams[1].abbr}</b>
               </div>
               <div>
                 <strong>{s.shots[0]}</strong>

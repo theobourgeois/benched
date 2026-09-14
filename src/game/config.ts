@@ -67,6 +67,8 @@ export const PHYSICS = {
   checkRecovery: 0.12,
   /** A committed check counts its own drive into the body, not only the relative closing speed. */
   checkDrive: 0.4,
+  /** Skating speed that a committed shoulder (side contact) adds as hit power. */
+  checkShoulderDrive: 1.18,
   /** Extra shoulder reach while a check is live. */
   checkReach: 0.24,
   /** A flick thrown during a cooldown is held this long and fires when it can. */
@@ -131,39 +133,6 @@ export const STICK = {
   /** Extra edge while skating with the puck held off-center. */
   drift: 1.15,
 };
-export const TEAMS = [
-  {
-    name: 'Northstar',
-    city: 'HALIFAX',
-    abbr: 'NTH',
-    color: '#8bb8e8',
-    dark: '#173d65',
-    short: 'N',
-  },
-  {
-    name: 'Redline',
-    city: 'MONTRÉAL',
-    abbr: 'RED',
-    color: '#e74b59',
-    dark: '#651c2a',
-    short: 'R',
-  },
-] as const;
-/** Team crest vector paths on an 80×80 grid, shared by the HUD logos and jersey crests. */
-export const TEAM_MARKS = [
-  {
-    body: 'M40 7L47 27L69 21L55 40L71 57L49 54L40 75L32 54L10 58L24 40L11 22L33 27Z',
-    inner: 'M30 48L36 29H42L39 39L49 29H55L42 49H36L39 40L32 49Z',
-    innerColor: '#25342a',
-    underline: null,
-  },
-  {
-    body: 'M18 13H51L68 27L58 43L66 65H46L38 47H31L26 65H9Z',
-    inner: 'M34 26H49L44 34H32Z',
-    innerColor: '#4a2b29',
-    underline: 'M5 70H64',
-  },
-] as const;
 export const EMPTY_INPUT = {
   moveX: 0,
   moveZ: 0,
