@@ -140,6 +140,7 @@ export class Controller {
       saucer = false,
       poke = false,
       check = false,
+      checkPower = 0,
       deke = false,
       dekeSpecial: InputFrame['dekeSpecial'] = null;
     if (hasPuck) {
@@ -172,6 +173,7 @@ export class Controller {
     } else {
       poke = rb && !this.previous.rb && !both;
       check = stickFlick && !rb && !both;
+      if (check) checkPower = this.windup;
       this.bumperTime = 0;
       this.bumperChipped = false;
     }
@@ -219,13 +221,14 @@ export class Controller {
       dekeSpecial,
       dive,
       check,
+      checkPower,
       block: lb && !rb && !hasPuck,
       switchPlayer: held.switchPlayer && !this.previous.switchPlayer,
       pause: held.pause && !this.previous.pause,
       hustle: button(10) || key('ShiftLeft') || key('ShiftRight'),
       backskate,
     };
-    if (shoot) this.windup = 0;
+    if (shoot || check) this.windup = 0;
     this.previous = held;
     this.stickMag = stickMag;
     this.moveMag = moveMag;

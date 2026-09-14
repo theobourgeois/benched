@@ -15,6 +15,10 @@ export interface AIDecision {
   shotPower: number;
   stickX: number;
   toeDrag: boolean;
+  /** Commit to a body check this step. */
+  check: boolean;
+  checkAim: Vec2;
+  checkPower: number;
 }
 const idle = (): AIDecision => ({
   move: { x: 0, z: 0 },
@@ -29,6 +33,9 @@ const idle = (): AIDecision => ({
   shotPower: 0.4,
   stickX: 0,
   toeDrag: false,
+  check: false,
+  checkAim: { x: 0, z: 0 },
+  checkPower: 0,
 });
 const laneOf = (p: Skater) =>
   p.role === 'LW' || p.role === 'LD' ? -1 : p.role === 'RW' || p.role === 'RD' ? 1 : 0;
@@ -287,6 +294,26 @@ function shootoutBreakaway(s: MatchState, p: Skater, decision: AIDecision): Vec2
   decision.shoot = p.cooldown <= 0 && facingNet && tight && zone > 19.2;
   return target;
 }
+/** A defender in the lane: pull the puck to the open side and cut around them instead of into them. */
+function sidestep(s: MatchState, p: Skater, target: Vec2, decision: AIDecision) {
+  const speed = Math.hypot(p.vx, p.vz);
+  if (speed < 2) return;
+  const hx = p.vx / speed,
+    hz = p.vz / speed;
+  for (const foe of foes(s, p)) {
+    const dx = foe.x - p.x,
+      dz = foe.z - p.z,
+      ahead = dx * hx + dz * hz,
+      across = dx * hz - dz * hx;
+    if (ahead < 0.6 || ahead > 3.6 || Math.abs(across) > 1.6) continue;
+    const side = across >= 0 ? 1 : -1;
+    // Player-space right is −across; the skill stick's +X is the player's right.
+    decision.stickX = side * 0.85;
+    target.x = p.x + hx * 4 - side * hz * 3.2;
+    target.z = p.z + hz * 4 + side * hx * 3.2;
+    return;
+  }
+}
 /** Team-aware positioning: angling, support lanes, slot coverage, rebound crashes, and patient looks. */
 export function decideAI(s: MatchState, p: Skater): AIDecision {
   if (p.downTimer > 0) return idle();
@@ -307,6 +334,7 @@ export function decideAI(s: MatchState, p: Skater): AIDecision {
     const facingNet = facing(p, dir, 0) > 0.08;
     if (s.mode === 'shootout') target = shootoutBreakaway(s, p, decision);
     else {
+      sidestep(s, p, target, decision);
       const outletLook = outlet ? scoringLook(s, outlet) : 0;
       decision.shoot =
         p.cooldown <= 0 &&
@@ -337,8 +365,23 @@ export function decideAI(s: MatchState, p: Skater): AIDecision {
     else if (!ours && chaser?.id === p.id) {
       target = chaseTarget(s, p, owner);
       if (owner && owner.role !== 'G' && p.cooldown <= 0 && distance(p, owner) < 2.8) {
-        const toward = normalized(owner.x - p.x, owner.z - p.z);
-        decision.poke = distance(p, puck) < 1.15 && facing(p, toward.x, toward.z) > 0.35;
+        const toward = normalized(owner.x - p.x, owner.z - p.z),
+          gap = distance(p, owner);
+        const face = facing(p, toward.x, toward.z);
+        decision.poke = distance(p, puck) < 1.15 && face > 0.35;
+        // A real check needs closing speed, not a chase from behind, and some restraint: this
+        // defender is in a hitting mood a little over half the time.
+        const closing = (p.vx - owner.vx) * toward.x + (p.vz - owner.vz) * toward.z;
+        const mood = Math.sin(s.tick * 0.011 + p.id * 2.3) > 0.4;
+        decision.check =
+          !decision.poke &&
+          mood &&
+          gap < 2.2 &&
+          closing > (isDefense(p) ? 3.2 : 4.5) &&
+          face > 0.55 &&
+          p.stamina > 0.15;
+        decision.checkAim = toward;
+        decision.checkPower = isDefense(p) && closing > 6 ? 0.5 : 0;
       }
       decision.hustle =
         p.stamina > 0.18 && (distance(p, puck) > 4.5 || Math.hypot(puck.vx, puck.vz) > 6);

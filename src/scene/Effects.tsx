@@ -60,7 +60,9 @@ export function IceSpray() {
         if (['shot', 'hit', 'save', 'post'].includes(event.type)) {
           const burst = event.type === 'hit' ? (event.power >= 0.5 ? 32 : 18) : 12;
           const force = event.type === 'hit' ? 6 + event.power * 8 : 6;
-          for (let i = 0; i < burst; i++) spawn(s.puck.x, s.puck.z, 0, 0, force);
+          const x = event.x ?? s.puck.x,
+            z = event.z ?? s.puck.z;
+          for (let i = 0; i < burst; i++) spawn(x, z, 0, 0, force);
         }
         lastEvent.current = event.id;
       }

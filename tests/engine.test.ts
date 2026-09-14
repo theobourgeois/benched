@@ -169,6 +169,46 @@ describe('skating and defense', () => {
     expect(p.vx).toBeLessThan(speed);
     expect(p.stamina).toBeGreaterThan(0.998);
   });
+  it('pivots on the spot at a standstill and carves a wide arc at speed', () => {
+    const still = openIce(),
+      p = still.skaters[still.controlled];
+    Object.assign(p, { x: 0, z: 0, vx: 0, vz: 0, angle: Math.PI / 2 });
+    for (let i = 0; i < 30; i++) stepMatch(still, { ...EMPTY_INPUT, moveZ: 1 });
+    expect(Math.abs(p.angle)).toBeLessThan(0.15);
+    const fast = openIce(),
+      q = fast.skaters[fast.controlled];
+    Object.assign(q, { x: -10, z: 0, vx: PHYSICS.maxSpeed, vz: 0, angle: Math.PI / 2 });
+    for (let i = 0; i < 30; i++) stepMatch(fast, { ...EMPTY_INPUT, moveZ: 1 });
+    expect(q.angle).toBeGreaterThan(0.4);
+    expect(Math.hypot(q.vx, q.vz)).toBeGreaterThan(PHYSICS.maxSpeed * 0.7);
+    // The velocity follows the skates: little sideways slip relative to the facing.
+    const slip = q.vx * -Math.cos(q.angle) + q.vz * Math.sin(q.angle);
+    expect(Math.abs(slip)).toBeLessThan(Math.hypot(q.vx, q.vz) * 0.35);
+  });
+  it('a hard carve at pace scrubs speed but keeps rolling', () => {
+    const s = openIce(),
+      p = s.skaters[s.controlled];
+    Object.assign(p, { x: -10, z: 0, vx: PHYSICS.maxSpeed, vz: 0, angle: Math.PI / 2 });
+    for (let i = 0; i < 60; i++) stepMatch(s, { ...EMPTY_INPUT, moveZ: 1 });
+    const speed = Math.hypot(p.vx, p.vz);
+    expect(speed).toBeLessThan(PHYSICS.maxSpeed);
+    expect(speed).toBeGreaterThan(PHYSICS.maxSpeed * 0.6);
+    expect(p.vz).toBeGreaterThan(p.vx);
+  });
+  it('reaches a higher top speed while hustling and carrying the puck costs a little', () => {
+    const run = (hustle: boolean, carry: boolean) => {
+      const s = openIce(),
+        p = s.skaters[s.controlled];
+      Object.assign(p, { x: -20, z: 0, vx: 0, vz: 0, angle: Math.PI / 2, stamina: 1 });
+      if (carry) s.puck.owner = p.id;
+      else Object.assign(s.puck, { owner: null, x: 0, z: -12 });
+      for (let i = 0; i < 240; i++) stepMatch(s, { ...EMPTY_INPUT, moveX: 1, hustle });
+      return Math.hypot(p.vx, p.vz);
+    };
+    expect(run(true, false)).toBeGreaterThan(run(false, false) + 1.5);
+    expect(run(false, false)).toBeGreaterThan(run(false, true));
+    expect(run(false, false)).toBeGreaterThan(PHYSICS.maxSpeed * 0.9);
+  });
   it('switches to a nearby teammate on defensive trigger input', () => {
     const s = openIce();
     Object.assign(s.skaters[2], { x: 0, z: 1 });
@@ -336,32 +376,78 @@ describe('skating and defense', () => {
 });
 
 describe('contact, elevation and puck handling', () => {
-  /** Skater 0 runs into a puck carrier. `rush` is the open-ice speed they carried in. */
-  function collision(speed: number, { teammate = false, rush = 0, braced = false } = {}) {
+  /**
+   * Skater 0 skates at a puck carrier standing a body-length away. `check` flicks the skill stick
+   * at them; `load` is how far it was pulled back first. `braced` squares the carrier up to the hit.
+   */
+  function collision(
+    speed: number,
+    {
+      teammate = false,
+      check = false,
+      load = 0,
+      braced = false,
+      victimVx = 0,
+      victimAngle = braced ? -Math.PI / 2 : 0,
+      hasPuck = true,
+    } = {},
+  ) {
     const s = openIce(),
       a = s.skaters[0],
       b = s.skaters[teammate ? 1 : 6];
-    Object.assign(a, { x: 0, z: 0, vx: speed, vz: 0, angle: Math.PI / 2, rush });
-    Object.assign(b, { x: 1, z: 0, vx: 0, vz: 0, angle: braced ? -Math.PI / 2 : 0 });
-    s.puck.owner = b.id;
-    stepMatch(s);
+    Object.assign(a, { x: 0, z: 0, vx: speed, vz: 0, angle: Math.PI / 2, cooldown: 0 });
+    Object.assign(b, { x: 1, z: 0, vx: victimVx, vz: 0, angle: victimAngle });
+    if (hasPuck) s.puck.owner = b.id;
+    else Object.assign(s.puck, { owner: null, x: -12, z: -8 });
+    const input = check
+      ? { ...EMPTY_INPUT, check: true, checkPower: load, stickIceX: 1 }
+      : EMPTY_INPUT;
+    stepMatch(s, input);
+    for (let i = 0; i < 6 && s.hits[0] === 0 && b.hitImmunity <= 0; i++) stepMatch(s);
     return { s, a, b };
   }
-  it('skating through a carrier at full rush knocks them down and counts one hit', () => {
-    const { s, b } = collision(10, { rush: 10 });
+  it('a committed check at speed knocks a carrier down and counts one hit', () => {
+    const { s, a, b } = collision(9, { check: true });
     expect(b.downTimer).toBeGreaterThan(1);
     expect(b.vx).toBeGreaterThan(5);
+    expect(a.vx).toBeGreaterThan(3);
     expect(s.puck.owner).not.toBe(b.id);
     expect(s.hits[0]).toBe(1);
-    stepMatch(s);
+    expect(s.notice).toBe('BIG HIT');
+    tick(s, 0.5);
     expect(s.hits[0]).toBe(1);
+  });
+  it('a knockdown holds the frame for a beat', () => {
+    const { s } = collision(10, { check: true });
+    expect(s.hitstop).toBeGreaterThan(0);
+    Object.assign(s.puck, { vx: 8, lockout: 5 });
+    const x = s.puck.x,
+      tickBefore = s.tick;
+    stepMatch(s);
+    expect(s.puck.x).toBe(x);
+    expect(s.tick).toBe(tickBefore + 1);
+    tick(s, PHYSICS.hitstop + 0.05);
+    expect(s.hitstop).toBe(0);
+    expect(s.puck.x).toBeGreaterThan(x);
+  });
+  it('skating into a carrier without checking can rock them but never puts them down', () => {
+    const bump = collision(10);
+    expect(bump.b.downTimer).toBe(0);
+    expect(bump.b.stumbleTimer).toBeGreaterThan(0);
+    expect(bump.s.puck.owner).not.toBe(bump.b.id);
+    const rub = collision(5);
+    expect(rub.b.stumbleTimer).toBe(0);
+    expect(rub.b.downTimer).toBe(0);
+    expect(rub.s.puck.owner).toBe(rub.b.id);
+    expect(rub.s.hits[0]).toBe(0);
+    expect(rub.b.vx).toBeGreaterThan(0.3);
   });
   it('rubbing a carrier at matching speed only jostles', () => {
     const s = openIce(),
       a = s.skaters[0],
       b = s.skaters[6];
-    Object.assign(a, { x: 0, z: 0, vx: 8, vz: 0, angle: Math.PI / 2, rush: 8 });
-    Object.assign(b, { x: 0, z: 0.9, vx: 8, vz: 0, angle: Math.PI / 2, rush: 8 });
+    Object.assign(a, { x: 0, z: 0, vx: 8, vz: 0, angle: Math.PI / 2 });
+    Object.assign(b, { x: 0, z: 0.9, vx: 8, vz: 0, angle: Math.PI / 2 });
     s.puck.owner = b.id;
     stepMatch(s);
     expect(b.downTimer).toBe(0);
@@ -370,187 +456,163 @@ describe('contact, elevation and puck handling', () => {
     expect(a.vx).toBeGreaterThan(5);
     expect(s.hits[0]).toBe(0);
   });
-  it('a skating rush staggers the carrier and knocks the puck loose', () => {
-    const { s, b } = collision(7, { rush: 7 });
-    expect(b.downTimer).toBe(0);
-    expect(b.stumbleTimer).toBeGreaterThan(0.4);
-    expect(s.puck.owner).not.toBe(b.id);
-    expect(s.hits[0]).toBe(1);
+  it('running down a breakaway from behind is a shove, not a hit', () => {
+    const chase = collision(12, { check: true, victimVx: 8.8, victimAngle: Math.PI / 2 });
+    expect(chase.b.downTimer).toBe(0);
+    expect(chase.b.stumbleTimer).toBe(0);
+    expect(chase.s.puck.owner).toBe(chase.b.id);
+    expect(chase.s.hits[0]).toBe(0);
+    expect(chase.b.vx).toBeGreaterThan(8.8);
+    const bump = collision(12, { victimVx: 8.8, victimAngle: Math.PI / 2 });
+    expect(bump.b.stumbleTimer).toBe(0);
+    expect(bump.s.puck.owner).toBe(bump.b.id);
   });
-  it('a short run-up only shoves; a real skating check dumps them', () => {
-    const shove = collision(5, { rush: 5 });
-    expect(shove.b.stumbleTimer).toBe(0);
-    expect(shove.b.downTimer).toBe(0);
-    expect(shove.s.hits[0]).toBe(0);
-    expect(shove.s.puck.owner).toBe(shove.b.id);
-    expect(shove.b.vx).toBeGreaterThan(0.5);
-    expect(collision(7.5, { rush: 7.5 }).b.downTimer).toBeGreaterThan(1);
-    const open = collision(10, { rush: 10 });
-    const braced = collision(10, { rush: 10, braced: true });
-    expect(open.b.downTimer).toBeGreaterThan(0);
-    expect(braced.b.downTimer).toBeGreaterThan(0);
-  });
-  it('a check lands from the front, side, or behind', () => {
-    const side = collision(8, { rush: 8 });
-    const front = collision(8, { rush: 8, braced: true });
-    const back = openIce();
-    const hitter = back.skaters[0],
-      victim = back.skaters[6];
-    Object.assign(hitter, { x: 0, z: 0, vx: 8, vz: 0, angle: Math.PI / 2, rush: 8 });
-    Object.assign(victim, { x: 1, z: 0, vx: 0, vz: 0, angle: Math.PI / 2 });
-    back.puck.owner = victim.id;
-    stepMatch(back);
-    expect(side.s.hits[0]).toBe(1);
-    expect(front.s.hits[0]).toBe(1);
-    expect(back.hits[0]).toBe(1);
-    expect(side.b.downTimer + side.b.stumbleTimer).toBeGreaterThan(0.4);
-    expect(front.b.downTimer + front.b.stumbleTimer).toBeGreaterThan(0.4);
-    expect(victim.downTimer + victim.stumbleTimer).toBeGreaterThan(0.4);
-  });
-  it('rushing someone skating at you still lands your hit', () => {
-    const s = openIce(),
-      a = s.skaters[0],
-      b = s.skaters[6];
-    Object.assign(a, {
-      x: 0,
-      z: 0,
-      vx: 8,
-      vz: 0,
-      angle: Math.PI / 2,
-      rush: 8,
-      hitLock: b.id,
-    });
-    Object.assign(b, { x: 1, z: 0, vx: -9, vz: 0, angle: -Math.PI / 2, rush: 10 });
-    s.puck.owner = null;
-    Object.assign(s.puck, { x: -12, z: -8 });
-    stepMatch(s);
-    expect(a.downTimer).toBe(0);
-    expect(b.downTimer + b.stumbleTimer).toBeGreaterThan(0.4);
-    expect(s.hits[0]).toBe(1);
-  });
-  it('checking a rushing puck carrier dumps them instead of getting run over', () => {
-    const s = openIce(),
-      a = s.skaters[0],
-      b = s.skaters[6];
-    Object.assign(a, { x: 0, z: 0, vx: 8, vz: 0, angle: Math.PI / 2, rush: 8 });
-    Object.assign(b, { x: 1, z: 0, vx: -9, vz: 0, angle: -Math.PI / 2, rush: 10 });
-    s.puck.owner = b.id;
-    stepMatch(s);
-    expect(a.downTimer).toBe(0);
-    expect(a.vx).toBeGreaterThan(0);
-    expect(b.downTimer).toBeGreaterThan(1);
-    expect(s.hits[0]).toBe(1);
-    expect(s.puck.owner).not.toBe(b.id);
-  });
-  it('skating into a rushing carrier still lands your hit without pre-built rush', () => {
-    const s = openIce(),
-      a = s.skaters[0],
-      b = s.skaters[6];
-    Object.assign(a, { x: 0, z: 0, vx: 8, vz: 0, angle: Math.PI / 2, rush: 0 });
-    Object.assign(b, { x: 1, z: 0, vx: -9, vz: 0, angle: -Math.PI / 2, rush: 10 });
-    s.puck.owner = b.id;
-    stepMatch(s);
-    expect(a.downTimer).toBe(0);
-    expect(a.vx).toBeGreaterThan(0);
-    expect(b.downTimer + b.stumbleTimer).toBeGreaterThan(0.4);
-    expect(s.hits[0]).toBe(1);
-    expect(s.puck.owner).not.toBe(b.id);
-  });
-  it('a committed check on a faster carrier still lands', () => {
-    const s = openIce(),
-      a = s.skaters[0],
-      b = s.skaters[6];
-    Object.assign(a, {
-      x: 0,
-      z: 0,
-      vx: 6,
-      vz: 0,
-      angle: Math.PI / 2,
-      rush: 4,
-      cooldown: 0,
-      checkTimer: 0.4,
-      hitLock: 6,
-    });
-    Object.assign(b, { x: 1, z: 0, vx: -10, vz: 0, angle: -Math.PI / 2, rush: 10 });
-    s.puck.owner = b.id;
-    stepMatch(s);
-    expect(a.downTimer).toBe(0);
-    expect(a.vx).toBeGreaterThan(-1);
-    expect(s.hits[0]).toBe(1);
-    expect(s.puck.owner).not.toBe(b.id);
-  });
-  it('a glancing clip does not reverse the skater who ran into them', () => {
-    const s = openIce(),
-      a = s.skaters[0],
-      b = s.skaters[6];
-    Object.assign(a, { x: 0, z: 0, vx: 9, vz: 0, angle: Math.PI / 2, rush: 9 });
-    Object.assign(b, { x: 0.3, z: 0.95, vx: 0, vz: 0, angle: 0 });
-    s.puck.owner = null;
-    Object.assign(s.puck, { x: -12, z: -8 });
-    stepMatch(s);
-    expect(a.downTimer).toBe(0);
-    expect(a.vx).toBeGreaterThan(5);
-    expect(s.hits[0]).toBe(0);
-  });
-  it('a check with no skating speed only shoves', () => {
-    const standing = collision(0, { rush: 10 });
-    expect(standing.b.downTimer).toBe(0);
-    expect(standing.b.stumbleTimer).toBe(0);
-    expect(standing.s.puck.owner).toBe(standing.b.id);
-    expect(standing.s.hits[0]).toBe(0);
-    const creeping = collision(3, { rush: 3 });
+  it('a standing flick is a shove on a braced carrier and never a knockdown', () => {
+    const braced = collision(0, { check: true, braced: true });
+    expect(braced.b.downTimer).toBe(0);
+    expect(braced.b.stumbleTimer).toBe(0);
+    expect(braced.s.puck.owner).toBe(braced.b.id);
+    expect(braced.s.hits[0]).toBe(0);
+    expect(braced.b.vx).toBeGreaterThan(0.5);
+    const blindside = collision(0, { check: true });
+    expect(blindside.b.downTimer).toBe(0);
+    const creeping = collision(3);
     expect(creeping.b.stumbleTimer).toBe(0);
     expect(creeping.s.puck.owner).toBe(creeping.b.id);
     expect(creeping.s.hits[0]).toBe(0);
   });
-  it('a chase or side check still knocks the puck loose', () => {
-    const s = openIce(),
-      a = s.skaters[0],
-      b = s.skaters[6];
-    Object.assign(a, {
-      x: 0,
-      z: 0,
-      vx: 9,
-      vz: 2,
-      angle: Math.PI / 2,
-      rush: 9,
-    });
-    Object.assign(b, { x: 0.95, z: 0.2, vx: 7, vz: 0, angle: Math.PI / 2 });
-    s.puck.owner = b.id;
-    stepMatch(s);
-    expect(s.hits[0]).toBe(1);
-    expect(s.puck.owner).not.toBe(b.id);
+  it('closing speed decides the hit: shove, stagger, then knockdown', () => {
+    const shove = collision(0, { check: true, braced: true });
+    expect(shove.s.hits[0]).toBe(0);
+    expect(shove.b.stumbleTimer).toBe(0);
+    const stagger = collision(3, { check: true, braced: true });
+    expect(stagger.b.downTimer).toBe(0);
+    expect(stagger.b.stumbleTimer).toBeGreaterThan(0.4);
+    expect(stagger.s.puck.owner).not.toBe(stagger.b.id);
+    expect(stagger.s.hits[0]).toBe(1);
+    expect(stagger.s.notice).toBe('HIT');
+    const dump = collision(8, { check: true, braced: true });
+    expect(dump.b.downTimer).toBeGreaterThan(1);
   });
-  it('a committed check locks onto a near miss and still connects', () => {
+  it('loading a check before the flick hits harder', () => {
+    const quick = collision(4, { check: true, braced: true, load: 0 }),
+      loaded = collision(4, { check: true, braced: true, load: 1 });
+    expect(loaded.b.stumbleTimer + loaded.b.downTimer).toBeGreaterThan(
+      quick.b.stumbleTimer + quick.b.downTimer,
+    );
+    expect(loaded.a.stamina).toBeLessThan(quick.a.stamina);
+  });
+  it('squaring up softens a hit and a carrier mid-deke is exposed', () => {
+    const open = collision(8, { check: true });
+    const braced = collision(8, { check: true, braced: true });
     const s = openIce(),
       a = s.skaters[0],
       b = s.skaters[6];
-    Object.assign(a, { x: 0, z: 0, vx: 10, vz: 0, angle: Math.PI / 2, rush: 10, cooldown: 0 });
-    Object.assign(b, { x: 4.2, z: 1.32, vx: 0, vz: 0, angle: 0, cooldown: 10 });
-    s.puck.owner = null;
-    Object.assign(s.puck, { x: -12, z: -8 });
-    for (let i = 0; i < 80 && s.hits[0] === 0; i++)
-      stepMatch(s, { ...EMPTY_INPUT, moveX: 1, hustle: true });
+    Object.assign(a, { x: 0, z: 0, vx: 8, vz: 0, angle: Math.PI / 2, cooldown: 0 });
+    Object.assign(b, { x: 1, z: 0, vx: 0, vz: 0, angle: 0, dekeKind: 'stride', dekeTimer: 0.1 });
+    s.puck.owner = b.id;
+    stepMatch(s, { ...EMPTY_INPUT, check: true, stickIceX: 1 });
+    expect(braced.b.downTimer).toBeGreaterThan(0);
+    expect(open.b.downTimer).toBeGreaterThan(braced.b.downTimer);
+    expect(b.downTimer).toBeGreaterThan(open.b.downTimer);
+  });
+  it('a check lands from the front or the side, but from behind it only pushes', () => {
+    const side = collision(8, { check: true });
+    const front = collision(8, { check: true, braced: true });
+    const back = collision(8, { check: true, victimVx: 7, victimAngle: Math.PI / 2 });
+    expect(side.s.hits[0]).toBe(1);
+    expect(front.s.hits[0]).toBe(1);
+    expect(side.b.downTimer).toBeGreaterThan(0);
+    expect(front.b.downTimer).toBeGreaterThan(0);
+    expect(back.b.downTimer).toBe(0);
+    expect(back.b.vx).toBeGreaterThan(7);
+  });
+  it('a check that finds nothing leaves you overextended', () => {
+    const s = openIce(),
+      a = s.skaters[0];
+    Object.assign(a, { x: 0, z: 0, vx: 6, vz: 0, angle: Math.PI / 2, cooldown: 0, stamina: 1 });
+    stepMatch(s, { ...EMPTY_INPUT, check: true, stickIceX: 1 });
+    expect(a.checkTimer).toBeGreaterThan(0.3);
+    expect(a.vx).toBeGreaterThan(9);
+    expect(a.stamina).toBeLessThan(1);
+    tick(s, PHYSICS.checkWindow);
+    expect(a.checkTimer).toBe(0);
+    expect(a.stumbleTimer).toBeGreaterThan(0.2);
+    expect(a.cooldown).toBeGreaterThan(0.2);
+  });
+  it('a live check steers onto a near miss and still connects', () => {
+    const s = openIce(),
+      a = s.skaters[0],
+      b = s.skaters[6];
+    Object.assign(a, { x: 0, z: 0, vx: 9, vz: 0, angle: Math.PI / 2, cooldown: 0 });
+    Object.assign(b, { x: 3, z: 0.95, vx: 0, vz: 0, angle: 0, cooldown: 10 });
+    s.puck.owner = b.id;
+    stepMatch(s, { ...EMPTY_INPUT, check: true, stickIceX: 1 });
+    expect(a.hitLock).toBe(b.id);
+    for (let i = 0; i < 60 && s.hits[0] === 0; i++) stepMatch(s, { ...EMPTY_INPUT, moveX: 1 });
     expect(s.hits[0]).toBe(1);
     expect(b.downTimer + b.stumbleTimer).toBeGreaterThan(0.4);
   });
-  it('a check can dump any opponent, including a goalie, not only the puck carrier', () => {
+  it('nobody is steered into a hit they did not throw', () => {
     const s = openIce(),
       a = s.skaters[0],
       b = s.skaters[6];
-    Object.assign(a, { x: 0, z: 0, vx: 10, vz: 0, angle: Math.PI / 2, rush: 10 });
-    Object.assign(b, { x: 1, z: 0, vx: 0, vz: 0, angle: 0 });
-    s.puck.owner = 8;
-    stepMatch(s);
-    expect(b.downTimer).toBeGreaterThan(1);
+    Object.assign(a, { x: 0, z: 0, vx: 9, vz: 0, angle: Math.PI / 2, cooldown: 0 });
+    Object.assign(b, { x: 3, z: 1.4, vx: 0, vz: 0, angle: 0, cooldown: 10 });
+    s.puck.owner = b.id;
+    for (let i = 0; i < 60; i++) stepMatch(s, { ...EMPTY_INPUT, moveX: 1 });
+    expect(a.hitLock).toBe(-1);
+    expect(Math.abs(a.z)).toBeLessThan(0.15);
+    expect(s.hits[0]).toBe(0);
+  });
+  it('two committed checks head-on: the heavier momentum wins', () => {
+    const s = openIce(),
+      a = s.skaters[0],
+      b = s.skaters[6];
+    Object.assign(a, { x: 0, z: 0, vx: 10, vz: 0, angle: Math.PI / 2, cooldown: 0 });
+    Object.assign(b, {
+      x: 1,
+      z: 0,
+      vx: -5,
+      vz: 0,
+      angle: -Math.PI / 2,
+      checkTimer: PHYSICS.checkWindow,
+      checkLanded: false,
+    });
+    Object.assign(s.puck, { owner: null, x: -12, z: -8 });
+    stepMatch(s, { ...EMPTY_INPUT, check: true, stickIceX: 1 });
+    expect(a.downTimer).toBe(0);
+    expect(b.downTimer + b.stumbleTimer).toBeGreaterThan(0.4);
     expect(s.hits[0]).toBe(1);
+    expect(s.hits[1]).toBe(0);
+  });
+  it('a carrier who skates into a set defender loses the puck', () => {
+    const s = openIce(),
+      d = s.skaters[0],
+      c = s.skaters[6];
+    Object.assign(d, { x: 0, z: 0, vx: 0, vz: 0, angle: Math.PI / 2, cooldown: 10 });
+    Object.assign(c, { x: 1, z: 0, vx: -9, vz: 0, angle: -Math.PI / 2 });
+    s.puck.owner = c.id;
+    stepMatch(s);
+    expect(c.stumbleTimer).toBeGreaterThan(0);
+    expect(c.downTimer).toBe(0);
+    expect(s.puck.owner).not.toBe(c.id);
+    expect(d.stumbleTimer).toBe(0);
+    expect(s.hits[0]).toBe(1);
+    expect(s.notice).toBe('STOOD UP');
+  });
+  it('a check can dump any opponent, not only the carrier, and a goalie only gets rocked', () => {
+    const open = collision(10, { check: true, hasPuck: false });
+    expect(open.b.downTimer).toBeGreaterThan(1);
+    expect(open.s.hits[0]).toBe(1);
     const g = openIce(),
       hitter = g.skaters[0],
       goalie = g.skaters.find((p) => p.team === 1 && p.role === 'G')!;
-    Object.assign(hitter, { x: 0, z: 0, vx: 10, vz: 0, angle: Math.PI / 2, rush: 10 });
+    Object.assign(hitter, { x: 0, z: 0, vx: 10, vz: 0, angle: Math.PI / 2, cooldown: 0 });
     Object.assign(goalie, { x: 1, z: 0, vx: 0, vz: 0, angle: 0, cooldown: 0 });
-    stepMatch(g);
-    expect(goalie.downTimer + goalie.stumbleTimer).toBeGreaterThan(0.5);
+    stepMatch(g, { ...EMPTY_INPUT, check: true, stickIceX: 1 });
+    expect(goalie.downTimer).toBe(0);
+    expect(goalie.stumbleTimer).toBeGreaterThan(0.4);
     expect(g.hits[0]).toBe(1);
   });
   it('the poke button does not turn a nearby bump into a hit', () => {
@@ -579,36 +641,24 @@ describe('contact, elevation and puck handling', () => {
     expect(b.stumbleTimer).toBe(0);
     expect(s.puck.owner).toBe(6);
   });
-  it('skating in from open ice lands a hit without a button', () => {
-    const s = openIce(),
-      a = s.skaters[0],
-      b = s.skaters[6];
-    Object.assign(a, { x: 0, z: 0, vx: 10, vz: 0, angle: Math.PI / 2, cooldown: 0 });
-    Object.assign(b, { x: 6, z: 0, vx: 0, vz: 0, angle: 0 });
-    s.puck.owner = b.id;
-    for (let i = 0; i < 90 && s.hits[0] === 0; i++)
-      stepMatch(s, { ...EMPTY_INPUT, moveX: 1, hustle: true });
-    expect(s.hits[0]).toBe(1);
-    expect(s.puck.owner).not.toBe(b.id);
-  });
   it('harder checks send the victim farther and keep them down longer', () => {
-    const slow = collision(10, { rush: 10 }),
-      fast = collision(12, { rush: 12 });
+    const slow = collision(8, { check: true }),
+      fast = collision(11, { check: true });
     expect(fast.b.downTimer).toBeGreaterThan(slow.b.downTimer);
     expect(fast.b.vx).toBeGreaterThan(slow.b.vx);
     // Observe a quarter second of the actual slide, while the victim cannot skate.
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 40; i++) {
       stepMatch(slow.s);
       stepMatch(fast.s);
     }
-    expect(fast.b.x).toBeGreaterThan(slow.b.x + 0.4);
+    expect(fast.b.x).toBeGreaterThan(slow.b.x + 0.25);
   });
   it('gentle contact and teammates do not cause knockdowns', () => {
     expect(collision(1).b.downTimer).toBe(0);
-    expect(collision(10, { teammate: true, rush: 10 }).b.downTimer).toBe(0);
+    expect(collision(10, { teammate: true, check: true }).b.downTimer).toBe(0);
   });
   it('downed players cannot shoot or collect the puck, then recover', () => {
-    const { s, b } = collision(10, { rush: 10 });
+    const { s, b } = collision(10, { check: true });
     s.controlled = b.id;
     s.homeTeam = b.team;
     s.puck.owner = b.id;
@@ -616,6 +666,7 @@ describe('contact, elevation and puck handling', () => {
     expect(s.shots[b.team]).toBe(0);
     s.puck.owner = null;
     s.puck.lockout = 10;
+    s.hitstop = 0;
     const timer = b.downTimer;
     stepMatch(s, { ...EMPTY_INPUT, moveX: -1, shoot: true, pass: true });
     expect(b.downTimer).toBeLessThan(timer);

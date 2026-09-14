@@ -12,6 +12,7 @@ import type {
   Phase,
   Skater,
   Team,
+  Vec2,
 } from './types';
 export { isOnIce } from './modes';
 const ROLES = ['C', 'LW', 'RW', 'LD', 'RD', 'G'] as const;
@@ -58,6 +59,7 @@ export function createMatch(homeTeam: Team = 0, mode: GameMode = 'exhibition'): 
     passTarget: null,
     passRange: 0,
     tick: 0,
+    hitstop: 0,
     events: [],
     notice: '',
     noticeTimer: 0,
@@ -88,6 +90,8 @@ export function createMatch(homeTeam: Team = 0, mode: GameMode = 'exhibition'): 
         stumbleTimer: 0,
         rush: 0,
         hitLock: -1,
+        checkPower: 0,
+        checkLanded: false,
         hitImmunity: 0,
         fallAngle: 0,
         stickSide: STICK.restSide,
@@ -129,6 +133,8 @@ export function resetFormation(s: MatchState) {
     p.stumbleTimer = 0;
     p.rush = 0;
     p.hitLock = -1;
+    p.checkPower = 0;
+    p.checkLanded = false;
     p.hitImmunity = 0;
     p.stickSide = STICK.restSide;
     p.stickReach = STICK.restReach;
@@ -161,6 +167,7 @@ export function resetFormation(s: MatchState) {
   s.passTarget = null;
   s.passRange = 0;
   s.drawInput = -1;
+  s.hitstop = 0;
   for (const p of s.skaters) {
     if (isOnIce(s, p)) continue;
     p.x = 0;
@@ -174,8 +181,8 @@ export function resetFormation(s: MatchState) {
   }
   if (s.mode === 'shootout') setupShootoutAttempt(s);
 }
-export function emit(s: MatchState, type: GameEvent['type'], power = 1) {
-  s.events.push({ id: (s.events.at(-1)?.id ?? 0) + 1, type, power });
+export function emit(s: MatchState, type: GameEvent['type'], power = 1, at?: Vec2) {
+  s.events.push({ id: (s.events.at(-1)?.id ?? 0) + 1, type, power, x: at?.x, z: at?.z });
   if (s.events.length > 32) s.events.shift();
 }
 export function startMatch(s: MatchState) {
@@ -648,34 +655,57 @@ function startDive(s: MatchState, p: Skater, input: InputFrame) {
   p.stamina = clamp(p.stamina - 0.14, 0, 1);
   notice(s, 'DIVE');
 }
-function launchCheck(p: Skater, input: InputFrame, s: MatchState) {
-  if (p.role === 'G' || p.cooldown > 0 || p.downTimer > 0 || p.diveTimer > 0) return;
-  const aim = actionAim(p, input, s);
-  p.vx += aim.x * 5.8;
-  p.vz += aim.z * 5.8;
+/**
+ * A committed body check: a short lunge in the aim direction with a live window in which contact
+ * resolves as a hit. Pulling the stick back first loads a bigger lunge. Miss, and you are
+ * overextended for a beat.
+ */
+export function launchCheck(s: MatchState, p: Skater, aimX: number, aimZ: number, load = 0) {
+  if (
+    p.role === 'G' ||
+    p.cooldown > 0 ||
+    p.downTimer > 0 ||
+    p.diveTimer > 0 ||
+    p.stumbleTimer > 0 ||
+    s.puck.owner === p.id
+  )
+    return false;
+  let aim = normalized(aimX, aimZ);
+  if (Math.hypot(aim.x, aim.z) < 0.2) aim = { x: Math.sin(p.angle), z: Math.cos(p.angle) };
+  load = clamp(load, 0, 1);
+  const lunge = PHYSICS.checkLunge + load * PHYSICS.checkLoadLunge;
+  p.vx += aim.x * lunge;
+  p.vz += aim.z * lunge;
   const speed = Math.hypot(p.vx, p.vz),
-    cap = PHYSICS.hustleSpeed + 0.6;
+    cap = PHYSICS.hustleSpeed + PHYSICS.checkLungeCap;
   if (speed > cap) {
     p.vx *= cap / speed;
     p.vz *= cap / speed;
   }
-  p.rush = Math.max(p.rush, PHYSICS.checkMinRush + 2.2);
-  p.checkTimer = 0.46;
   p.angle = Math.atan2(aim.x, aim.z);
-  p.cooldown = 0.28;
+  p.checkTimer = PHYSICS.checkWindow;
+  p.checkPower = load;
+  p.checkLanded = false;
+  p.cooldown = 0.5;
+  p.stamina = clamp(p.stamina - (PHYSICS.checkStamina + load * 0.04), 0, 1);
   let best: Skater | null = null,
-    bestDot = 0.15;
+    bestScore = -Infinity;
   for (const q of s.skaters) {
     if (q.id === p.id || q.team === p.team || !isOnIce(s, q) || q.downTimer > 0) continue;
-    if (distance(p, q) > PHYSICS.hitLockRange + 1.2) continue;
+    const dist = distance(p, q);
+    if (dist > PHYSICS.hitLockRange) continue;
     const to = normalized(q.x - p.x, q.z - p.z);
     const dot = aim.x * to.x + aim.z * to.z;
-    if (dot > bestDot) {
-      bestDot = dot;
+    if (dot < PHYSICS.hitLockCone) continue;
+    const score =
+      dot + (1 - dist / PHYSICS.hitLockRange) * 0.5 + (s.puck.owner === q.id ? 0.15 : 0);
+    if (score > bestScore) {
+      bestScore = score;
       best = q;
     }
   }
-  if (best) p.hitLock = best.id;
+  p.hitLock = best ? best.id : -1;
+  return true;
 }
 function stickLift(s: MatchState, p: Skater) {
   if (p.role === 'G' || p.cooldown > 0 || p.downTimer > 0 || p.diveTimer > 0) return false;
@@ -702,50 +732,83 @@ function freePuck(s: MatchState, victim: Skater) {
   s.puck.lockout = 0.22;
   s.puck.shot = false;
 }
+const facing = (p: Skater, x: number, z: number) => Math.sin(p.angle) * x + Math.cos(p.angle) * z;
+function squaredUp(victim: Skater, nx: number, nz: number) {
+  return victim.stumbleTimer <= 0 && !activeDeke(victim) && facing(victim, -nx, -nz) > 0.5;
+}
+function closingSpeed(hitter: Skater, victim: Skater, nx: number, nz: number) {
+  return Math.max(0, (hitter.vx - victim.vx) * nx + (hitter.vz - victim.vz) * nz);
+}
+/**
+ * NHL 14 style collision power: it is the momentum you bring *into* the other body that counts.
+ * Closing speed along the contact, scaled by how square the hitter is, discounted when the victim
+ * is skating away (a hit from behind is a shove) or has squared up, and boosted when they are
+ * mid-deke or already off balance. A committed check adds its lunge and a flat commitment.
+ */
+function hitPower(hitter: Skater, victim: Skater, nx: number, nz: number, committed: boolean) {
+  const closing = closingSpeed(hitter, victim, nx, nz);
+  const square = 0.55 + 0.45 * clamp(facing(hitter, nx, nz), 0, 1);
+  const away = victim.vx * nx + victim.vz * nz;
+  const fromBehind = away > 2.5 && facing(victim, nx, nz) > 0.5 ? PHYSICS.checkFromBehind : 1;
+  const exposed = victim.stumbleTimer > 0 || !!activeDeke(victim);
+  const brace = exposed ? PHYSICS.checkExposed : squaredUp(victim, nx, nz) ? PHYSICS.checkBrace : 1;
+  const commit = committed
+    ? PHYSICS.checkCommit * (1 + PHYSICS.checkLoadBonus * clamp(hitter.checkPower, 0, 1))
+    : 0;
+  const power = (closing * square * brace + commit) * fromBehind;
+  return victim.role === 'G' ? Math.min(power, PHYSICS.checkKnockdown - 0.01) : power;
+}
 function knockDown(
   s: MatchState,
   hitter: Skater,
   victim: Skater,
-  impact: number,
+  power: number,
   nx: number,
   nz: number,
 ) {
-  if (victim.downTimer > 0 || victim.hitImmunity > 0) return;
-  const impulse = clamp(impact * 1.22, 4.6, 18);
-  victim.vx += nx * impulse + hitter.vx * 0.2;
-  victim.vz += nz * impulse + hitter.vz * 0.2;
-  victim.downTimer = clamp(1.05 + impact * 0.12, 1.25, 2.9);
-  victim.hitImmunity = victim.downTimer + 0.8;
+  const impulse = clamp(power * 0.85, 5, 14);
+  victim.vx += nx * impulse + hitter.vx * 0.1;
+  victim.vz += nz * impulse + hitter.vz * 0.1;
+  victim.downTimer = clamp(0.9 + power * 0.09, 1.1, 2.3);
+  victim.hitImmunity = victim.downTimer + 0.6;
   victim.stumbleTimer = 0;
   victim.fallAngle = Math.atan2(nx, nz);
   victim.cooldown = victim.downTimer;
   victim.diveTimer = 0;
   victim.blockTimer = 0;
-  hitter.vx *= 0.86;
-  hitter.vz *= 0.86;
+  hitter.vx *= 0.8;
+  hitter.vz *= 0.8;
   freePuck(s, victim);
   s.hits[hitter.team]++;
-  emit(s, 'hit', clamp(impact / 10, 0.55, 1));
+  s.hitstop = PHYSICS.hitstop;
+  emit(s, 'hit', clamp(0.75 + (power - PHYSICS.checkKnockdown) * 0.05, 0.75, 1), victim);
+  notice(s, 'BIG HIT');
 }
-const facing = (p: Skater, x: number, z: number) => Math.sin(p.angle) * x + Math.cos(p.angle) * z;
-/** How much this skater is skating at the other — front, side, or back are all fine. */
-function approach(p: Skater, other: Skater) {
-  const to = normalized(other.x - p.x, other.z - p.z),
-    speed = Math.hypot(p.vx, p.vz);
-  const velAt = speed > 0.2 ? (p.vx * to.x + p.vz * to.z) / speed : 0;
-  return { velAt, face: facing(p, to.x, to.z), speed };
+function stagger(
+  s: MatchState,
+  hitter: Skater,
+  victim: Skater,
+  power: number,
+  nx: number,
+  nz: number,
+) {
+  const push = clamp(power * 0.7, 3.5, 9);
+  victim.vx += nx * push;
+  victim.vz += nz * push;
+  hitter.vx *= 0.86;
+  hitter.vz *= 0.86;
+  victim.hitImmunity = 0.45;
+  victim.stumbleTimer = clamp(0.45 + (power - PHYSICS.checkStumble) * 0.12, 0.45, 0.9);
+  victim.cooldown = Math.max(victim.cooldown, victim.stumbleTimer);
+  freePuck(s, victim);
 }
-function squaredUp(victim: Skater, nx: number, nz: number) {
-  return victim.stumbleTimer <= 0 && facing(victim, -nx, -nz) > 0.5;
-}
-/**
- * NHL 14 collision physics: speed, relative momentum, and how square you are.
- * A late cut still hits if you are actually skating through them.
- */
-function checkImpact(hitter: Skater, closing: number, nx: number, nz: number) {
-  const drive = Math.max(0, hitter.vx * nx + hitter.vz * nz);
-  const carried = Math.max(hitter.rush, drive);
-  return carried * 0.72 + Math.max(0, closing) * 0.32 + drive * 0.18;
+function shove(hitter: Skater, victim: Skater, power: number, nx: number, nz: number) {
+  const push = clamp(power * 0.5, 1.2, 3.2);
+  victim.vx += nx * push;
+  victim.vz += nz * push;
+  hitter.vx *= 0.94;
+  hitter.vz *= 0.94;
+  victim.hitImmunity = Math.max(victim.hitImmunity, 0.15);
 }
 /** Keep the checker moving through a body they already hit instead of bouncing off. */
 function keepSkatingThrough(hitter: Skater, victim: Skater, nx: number, nz: number) {
@@ -756,14 +819,6 @@ function keepSkatingThrough(hitter: Skater, victim: Skater, nx: number, nz: numb
   victim.vx += nx * closing * 0.55;
   victim.vz += nz * closing * 0.55;
 }
-function glanceOff(hitter: Skater, victim: Skater, nx: number, nz: number, closing: number) {
-  const push = Math.max(0, closing);
-  hitter.vx -= nx * push * 0.16;
-  hitter.vz -= nz * push * 0.16;
-  victim.vx += nx * push * 0.62;
-  victim.vz += nz * push * 0.62;
-  hitter.rush *= 0.75;
-}
 function jostle(a: Skater, b: Skater, nx: number, nz: number, closing: number) {
   if (closing <= 0) return;
   const bleed = closing * 0.22;
@@ -772,110 +827,103 @@ function jostle(a: Skater, b: Skater, nx: number, nz: number, closing: number) {
   b.vx += nx * bleed;
   b.vz += nz * bleed;
 }
+/** The check is live: the flick happened and the follow-through has not started. */
+const liveCheck = (p: Skater) => p.checkTimer > PHYSICS.checkRecovery && !p.checkLanded;
 function bodyCheck(
   s: MatchState,
   hitter: Skater,
   victim: Skater,
-  closing: number,
   nx: number,
   nz: number,
+  scale = 1,
 ) {
+  hitter.checkLanded = true;
+  hitter.hitLock = -1;
   if (victim.hitImmunity > 0) {
     keepSkatingThrough(hitter, victim, nx, nz);
     return;
   }
-  const { velAt, face } = approach(hitter, victim);
-  const targeted = hitter.hitLock === victim.id;
-  const launched = hitter.checkTimer >= 0.4;
-  const square = clamp(velAt, 0, 1) * (0.5 + 0.5 * clamp(face, 0, 1));
-  const glancing =
-    !targeted &&
-    !launched &&
-    s.puck.owner !== victim.id &&
-    square < PHYSICS.checkGlance &&
-    velAt < 0.5;
-  if (glancing) {
-    glanceOff(hitter, victim, nx, nz, closing);
-    return;
-  }
-  let power = checkImpact(hitter, closing, nx, nz);
-  if (launched) power += 1.15;
-  hitter.rush *= 0.35;
-  hitter.checkTimer = Math.max(hitter.checkTimer, 0.38);
-  victim.stamina = clamp(victim.stamina - clamp(power * 0.02, 0.04, 0.2), 0, 1);
-  const dump =
-    power >= PHYSICS.checkKnockdown + (squaredUp(victim, nx, nz) ? PHYSICS.checkBrace : 0);
-  if (dump) {
+  const power = hitPower(hitter, victim, nx, nz, true) * scale;
+  victim.stamina = clamp(victim.stamina - clamp(power * 0.02, 0.03, 0.18), 0, 1);
+  if (power >= PHYSICS.checkKnockdown) {
     knockDown(s, hitter, victim, power, nx, nz);
-    notice(s, 'BIG HIT');
     return;
   }
-  if (power < PHYSICS.checkStumble && !launched) {
-    const push = Math.max(2.4, power) * 0.62;
-    victim.vx += nx * push;
-    victim.vz += nz * push;
-    hitter.vx *= 0.9;
-    hitter.vz *= 0.9;
-    victim.hitImmunity = 0.2;
+  if (power >= PHYSICS.checkStumble) {
+    stagger(s, hitter, victim, power, nx, nz);
+    s.hits[hitter.team]++;
+    emit(s, 'hit', clamp(power / 13, 0.45, 0.7), victim);
+    notice(s, 'HIT');
     return;
   }
-  const push = Math.max(PHYSICS.checkStumble, power) * 0.78;
-  victim.vx += nx * push;
-  victim.vz += nz * push;
-  hitter.vx *= 0.86;
-  hitter.vz *= 0.86;
-  victim.hitImmunity = 0.45;
-  victim.stumbleTimer = clamp(0.55 + (power - PHYSICS.checkStumble) * 0.1, 0.55, 1.05);
-  victim.cooldown = Math.max(victim.cooldown, victim.stumbleTimer);
-  freePuck(s, victim);
-  s.hits[hitter.team]++;
-  emit(s, 'hit', clamp(power / 10, 0.4, 0.85));
-  notice(s, 'HIT');
+  shove(hitter, victim, power, nx, nz);
+  emit(s, 'hit', 0.3, victim);
 }
 /**
- * You hit whoever you are skating at. Carrying the puck is handling, not a check.
- * Speed and alignment matter; a pre-built rush meter does not.
+ * Skating into someone without checking: whoever is driving into the other delivers a bump.
+ * It can put a skater on their heels, but only two sprinters head-on go down. A carrier who
+ * runs into a defender that has squared up loses that battle.
  */
-function throwingCheck(s: MatchState, p: Skater, other: Skater) {
-  if (p.role === 'G' || s.puck.owner === p.id) return false;
-  const { velAt, face, speed } = approach(p, other);
-  if (p.diveTimer > 0) return speed > 1.4 && velAt > 0.05 && face > -0.3;
-  if (speed < 2) return false;
-  if (p.hitLock === other.id || p.checkTimer > 0.08) return velAt > 0.02 && face > -0.35;
-  return velAt > PHYSICS.checkMinApproach && face > 0.08;
-}
-function checkScore(p: Skater, other: Skater) {
-  const { velAt, face, speed } = approach(p, other);
-  return (
-    velAt * Math.max(p.rush, speed) +
-    Math.max(0, face) * 2 +
-    (p.hitLock === other.id ? 10 : 0) +
-    p.checkTimer * 4
-  );
-}
-function chooseHitter(s: MatchState, a: Skater, b: Skater, nx: number, nz: number) {
-  const aThrows = throwingCheck(s, a, b),
-    bThrows = throwingCheck(s, b, a);
-  if (aThrows && s.puck.owner === b.id) return a;
-  if (bThrows && s.puck.owner === a.id) return b;
-  if (aThrows !== bThrows) return aThrows ? a : b;
-  if (!aThrows) return null;
-  if (a.hitLock === b.id && b.hitLock !== a.id) return a;
-  if (b.hitLock === a.id && a.hitLock !== b.id) return b;
-  if (a.id === s.controlled && a.hitLock === b.id) return a;
-  if (b.id === s.controlled && b.hitLock === a.id) return b;
+function incidental(s: MatchState, a: Skater, b: Skater, nx: number, nz: number, closing: number) {
+  if (closing <= 0.05) return;
+  let driver = a,
+    other = b,
+    dx = nx,
+    dz = nz;
   const aDrive = a.vx * nx + a.vz * nz,
     bDrive = -(b.vx * nx + b.vz * nz);
-  if (aDrive > bDrive + 1.4) return a;
-  if (bDrive > aDrive + 1.4) return b;
-  return checkScore(a, b) >= checkScore(b, a) ? a : b;
-}
-/** Opponents in contact: the skater driving into the other hits; rubs just jostle. */
-function contact(s: MatchState, a: Skater, b: Skater, nx: number, nz: number, closing: number) {
-  const hitter = chooseHitter(s, a, b, nx, nz);
-  if (hitter === a) return bodyCheck(s, a, b, closing, nx, nz);
-  if (hitter === b) return bodyCheck(s, b, a, closing, -nx, -nz);
+  if (bDrive > aDrive) {
+    driver = b;
+    other = a;
+    dx = -nx;
+    dz = -nz;
+  }
+  if (s.puck.owner === driver.id && squaredUp(other, dx, dz)) {
+    [driver, other] = [other, driver];
+    dx = -dx;
+    dz = -dz;
+  }
+  if (driver.role === 'G' || other.role === 'G' || other.hitImmunity > 0) {
+    jostle(a, b, nx, nz, closing);
+    return;
+  }
+  const power = hitPower(driver, other, dx, dz, false);
+  if (power >= PHYSICS.bumpKnockdown) {
+    knockDown(s, driver, other, power, dx, dz);
+    return;
+  }
+  if (power >= PHYSICS.bumpStumble) {
+    const hadPuck = s.puck.owner === other.id;
+    stagger(s, driver, other, power, dx, dz);
+    if (hadPuck) {
+      s.hits[driver.team]++;
+      notice(s, 'STOOD UP');
+    }
+    emit(s, 'hit', hadPuck ? 0.45 : 0.32, other);
+    return;
+  }
   jostle(a, b, nx, nz, closing);
+}
+/** Opponents in contact: a live check lands as a hit; anything else is a bump. */
+function contact(s: MatchState, a: Skater, b: Skater, nx: number, nz: number, closing: number) {
+  const aLive = liveCheck(a) && s.puck.owner !== a.id,
+    bLive = liveCheck(b) && s.puck.owner !== b.id;
+  if (aLive && bLive) {
+    // Two committed checks: the heavier momentum wins and the other eats it at a discount.
+    const aDrive = a.vx * nx + a.vz * nz,
+      bDrive = -(b.vx * nx + b.vz * nz);
+    if (aDrive >= bDrive) {
+      b.checkLanded = true;
+      bodyCheck(s, a, b, nx, nz, 0.85);
+    } else {
+      a.checkLanded = true;
+      bodyCheck(s, b, a, -nx, -nz, 0.85);
+    }
+    return;
+  }
+  if (aLive) return bodyCheck(s, a, b, nx, nz);
+  if (bLive) return bodyCheck(s, b, a, -nx, -nz);
+  incidental(s, a, b, nx, nz, closing);
 }
 function pokeCheck(s: MatchState, p: Skater, sweep = false) {
   if (p.cooldown > 0 || p.downTimer > 0 || p.stumbleTimer > 0 || p.diveTimer > 0) return;
@@ -903,6 +951,11 @@ function pokeCheck(s: MatchState, p: Skater, sweep = false) {
   emit(s, 'hit', 0.2);
   notice(s, 'POKE CHECK');
 }
+/**
+ * NHL 14 style skating. The heading turns toward the stick at a rate that falls with speed, thrust
+ * runs along the heading, and the edges bite off sideways slip: a turn at pace is a carve, not a
+ * slide. Pushing against your own momentum is a hockey stop that pivots you around to push off.
+ */
 function moveSkater(
   p: Skater,
   x: number,
@@ -910,6 +963,8 @@ function moveSkater(
   hustle: boolean,
   backskate: boolean,
   dt: number,
+  carrying = false,
+  grip = PHYSICS.edgeGrip,
 ) {
   const down = p.downTimer > 0,
     diving = p.diveTimer > 0;
@@ -918,39 +973,94 @@ function moveSkater(
     z = 0;
     hustle = false;
   }
-  const mag = Math.hypot(x, z);
+  let mag = Math.hypot(x, z);
   if (mag > 1) {
     x /= mag;
     z /= mag;
+    mag = 1;
   }
-  const boosting = hustle && p.stamina > 0.08 && mag > 0.3;
-  const stumbling = p.stumbleTimer > 0;
-  p.stamina = clamp(p.stamina + (boosting ? -0.22 : 0.13) * dt, 0, 1);
+  const stumbling = p.stumbleTimer > 0,
+    goalie = p.role === 'G';
+  const boosting = hustle && p.stamina > 0.08 && mag > 0.3 && !stumbling;
+  p.stamina = clamp(
+    p.stamina + (boosting ? -PHYSICS.hustleDrain : PHYSICS.staminaRecover) * dt,
+    0,
+    1,
+  );
   const max =
     (boosting ? PHYSICS.hustleSpeed : PHYSICS.maxSpeed) *
-    (p.role === 'G' ? 0.64 : 1) *
-    (backskate ? 0.7 : 1) *
-    (stumbling ? 0.55 : 1);
+    (goalie ? 0.64 : 1) *
+    (backskate ? PHYSICS.backskateSpeed : 1) *
+    (stumbling ? 0.55 : 1) *
+    (carrying && !goalie ? PHYSICS.carrySpeed : 1);
   const speedNow = Math.hypot(p.vx, p.vz);
-  let rate: number;
-  if (down) rate = 1.35;
-  else if (diving) rate = 0.82;
-  else if (stumbling) rate = 1.1;
-  else if (mag > 0.05) {
-    const align = speedNow > 0.45 ? (p.vx * x + p.vz * z) / speedNow : 1;
-    if (align < -0.12) rate = PHYSICS.stopDrag;
-    else {
-      const launch = 0.74 + 0.26 * clamp(speedNow / 4, 0, 1);
-      rate = (PHYSICS.acceleration / max) * launch;
+  const spinning = p.dekeKind === 'spin';
+  if (down || diving || stumbling || goalie) {
+    // Nobody is steering here: the goalie shuffles across the crease, the rest ride it out.
+    const rate = down
+      ? 2.4
+      : diving
+        ? 0.82
+        : stumbling
+          ? 1.1
+          : mag > 0.05
+            ? 2.6
+            : PHYSICS.coastDrag;
+    p.vx += (x * max - p.vx) * Math.min(1, rate * dt);
+    p.vz += (z * max - p.vz) * Math.min(1, rate * dt);
+    if (stumbling && speedNow > 1.2) p.angle = turnToward(p.angle, Math.atan2(p.vx, p.vz), dt * 4);
+  } else if (mag > 0.05) {
+    const ratio = clamp(speedNow / PHYSICS.maxSpeed, 0, 1);
+    const ix = x / mag,
+      iz = z / mag;
+    const align = speedNow > 0.4 ? (p.vx * ix + p.vz * iz) / speedNow : 1;
+    const stopping = align < PHYSICS.stopAlign && speedNow > 1.2;
+    let turned = 0;
+    if (!spinning) {
+      const want = Math.atan2(x, z) + (backskate ? Math.PI : 0);
+      let turnRate =
+        (PHYSICS.turnRateLow + (PHYSICS.turnRateHigh - PHYSICS.turnRateLow) * ratio) *
+        (boosting ? PHYSICS.hustleTurn : 1) *
+        (backskate ? 0.8 : 1);
+      if (stopping) turnRate *= PHYSICS.stopPivot;
+      const before = p.angle;
+      p.angle = turnToward(p.angle, want, turnRate * dt);
+      turned = Math.abs(Math.atan2(Math.sin(p.angle - before), Math.cos(p.angle - before)));
     }
-    if (align < 0.62 && speedNow > 3.2) {
-      const bleed = (0.62 - align) * PHYSICS.cutDrag * dt;
+    const heading = p.angle + (backskate ? Math.PI : 0);
+    const hx = spinning && speedNow > 0.4 ? p.vx / speedNow : Math.sin(heading),
+      hz = spinning && speedNow > 0.4 ? p.vz / speedNow : Math.cos(heading);
+    if (stopping) {
+      const decay = Math.exp(-PHYSICS.stopDrag * dt);
+      p.vx *= decay;
+      p.vz *= decay;
+    } else {
+      // The first stride from a standstill goes wherever the stick points; after that, thrust
+      // follows the heading and turning is what the edges are for.
+      const free = 1 - clamp(speedNow / 2.5, 0, 1);
+      const thrust = normalized(hx * (1 - free) + ix * free, hz * (1 - free) + iz * free);
+      const along = p.vx * hx + p.vz * hz;
+      const rate = PHYSICS.launchRate - PHYSICS.topEndTaper * clamp(along / max, 0, 1);
+      const dv = (mag * max - along) * Math.min(1, rate * dt);
+      p.vx += thrust.x * dv;
+      p.vz += thrust.z * dv;
+    }
+    const slip = p.vx * -hz + p.vz * hx;
+    const bite = slip * (1 - Math.exp(-grip * dt));
+    p.vx += hz * bite;
+    p.vz -= hx * bite;
+    if (turned > 0 && !stopping) {
+      const bleed = clamp(turned * PHYSICS.carveBleed * ratio, 0, 0.5);
       p.vx *= 1 - bleed;
       p.vz *= 1 - bleed;
     }
-  } else rate = PHYSICS.coastDrag;
-  p.vx += (x * max - p.vx) * Math.min(1, rate * dt);
-  p.vz += (z * max - p.vz) * Math.min(1, rate * dt);
+  } else {
+    const decay = Math.exp(-PHYSICS.coastDrag * dt);
+    p.vx *= decay;
+    p.vz *= decay;
+    if (!spinning && speedNow > 1.2 && !backskate)
+      p.angle = turnToward(p.angle, Math.atan2(p.vx, p.vz), dt * 3);
+  }
   p.x += p.vx * dt;
   p.z += p.vz * dt;
   // The goal frame is solid for skaters; keep players out of the net interior.
@@ -985,117 +1095,46 @@ function moveSkater(
       p.vz -= dot * normal.z;
     }
   }
-  if (p.dekeKind !== 'spin') {
-    if (mag > 0.08 && !stumbling)
-      p.angle = turnToward(
-        p.angle,
-        Math.atan2(x, z) + (backskate ? Math.PI : 0),
-        dt * (7.6 - clamp(speedNow / Math.max(max, 1), 0, 1) * 3.4),
-      );
-    else if (speedNow > 1.2) p.angle = turnToward(p.angle, Math.atan2(p.vx, p.vz), dt * 4);
-  }
   p.stride += speedNow * dt * 1.05;
 }
-function interceptPoint(p: Skater, target: Skater) {
-  const towardUs = (p.x - target.x) * target.vx + (p.z - target.z) * target.vz;
-  // Head-on: aim at the body. Leading a closing skater puts the lock behind you.
-  if (towardUs > 0.4) return { x: target.x, z: target.z };
-  const dist = distance(p, target);
-  const speed = Math.hypot(p.vx, p.vz);
-  const t = clamp(dist / Math.max(speed, 4.2), 0.04, 0.2);
-  const look = { x: target.x + target.vx * t, z: target.z + target.vz * t };
-  if ((look.x - p.x) * p.vx + (look.z - p.z) * p.vz < 0) return { x: target.x, z: target.z };
-  return look;
-}
-function hitLockTarget(s: MatchState, p: Skater, intentX: number, intentZ: number) {
-  const speed = Math.hypot(p.vx, p.vz);
-  if (p.role === 'G' || s.puck.owner === p.id || speed < 3.2) {
+/** A live check steers onto the opponent it was flicked at. No lock, no magnet. */
+function steerCheck(s: MatchState, p: Skater, dt: number) {
+  if (!liveCheck(p) || p.hitLock < 0) return;
+  const target = s.skaters[p.hitLock];
+  if (!isOnIce(s, target) || target.downTimer > 0) {
     p.hitLock = -1;
-    return null;
+    return;
   }
-  const intentMag = Math.hypot(intentX, intentZ);
-  const ix = intentMag > 0.18 ? intentX / intentMag : p.vx / speed,
-    iz = intentMag > 0.18 ? intentZ / intentMag : p.vz / speed;
-  let best: Skater | null = null,
-    bestScore = -Infinity;
-  for (const q of s.skaters) {
-    if (q.id === p.id || q.team === p.team || !isOnIce(s, q) || q.downTimer > 0) continue;
-    const dist = distance(p, q);
-    if (dist > PHYSICS.hitLockRange) continue;
-    const look = interceptPoint(p, q),
-      to = normalized(look.x - p.x, look.z - p.z);
-    const face = facing(p, to.x, to.z),
-      velA = (p.vx * to.x + p.vz * to.z) / speed,
-      stickA = ix * to.x + iz * to.z;
-    if (face < PHYSICS.hitLockCone || velA < 0.22 || stickA < 0.12) continue;
-    let score = face * 1.2 + velA * 1.1 + stickA * 0.85 + (1 - dist / PHYSICS.hitLockRange);
-    if (s.puck.owner === q.id) score += 0.18;
-    if (q.id === p.hitLock) score += 0.55;
-    if (score > bestScore) {
-      bestScore = score;
-      best = q;
-    }
-  }
-  p.hitLock = best ? best.id : -1;
-  return best;
-}
-/** Steer a committed check onto the opponent you are already skating at. */
-function steerHitLock(s: MatchState, p: Skater, intentX: number, intentZ: number, dt: number) {
-  const target = hitLockTarget(s, p, intentX, intentZ);
-  if (!target) return;
   const speed = Math.hypot(p.vx, p.vz);
-  if (speed < 0.4) return;
-  const look = interceptPoint(p, target),
-    to = normalized(look.x - p.x, look.z - p.z);
-  const dist = distance(p, target),
-    closeness = clamp(1 - dist / PHYSICS.hitLockRange, 0, 1);
-  const align = clamp((p.vx * to.x + p.vz * to.z) / speed, 0, 1);
-  const pull = closeness * closeness * 0.35 + closeness * 0.65 * align;
-  const blend = 1 - Math.exp(-PHYSICS.hitLockSteer * pull * dt);
-  const dir = normalized(p.vx, p.vz);
+  if (speed < 0.5) return;
+  const to = normalized(target.x - p.x, target.z - p.z),
+    dir = normalized(p.vx, p.vz);
+  if (dir.x * to.x + dir.z * to.z < 0.2) {
+    p.hitLock = -1;
+    return;
+  }
+  const blend = 1 - Math.exp(-PHYSICS.hitLockSteer * dt);
   const steered = normalized(dir.x + (to.x - dir.x) * blend, dir.z + (to.z - dir.z) * blend);
   p.vx = steered.x * speed;
   p.vz = steered.z * speed;
-  const ahead = (target.x - p.x) * steered.x + (target.z - p.z) * steered.z;
-  const lateral = (target.z - p.z) * steered.x - (target.x - p.x) * steered.z;
-  if (ahead > 0.2 && ahead < 2.8 && Math.abs(lateral) < PHYSICS.hitLockCatch) {
-    const catchUp =
-      (1 - Math.abs(lateral) / PHYSICS.hitLockCatch) * clamp(1.15 - ahead / 2.6, 0.2, 1);
-    const corr = lateral * catchUp * PHYSICS.hitLockSnap * dt;
-    p.vx -= steered.z * corr;
-    p.vz += steered.x * corr;
-    const next = Math.hypot(p.vx, p.vz) || 1;
-    p.vx *= speed / next;
-    p.vz *= speed / next;
-  }
-  p.angle = turnToward(p.angle, Math.atan2(p.vx, p.vz), dt * (4.5 + pull * 7));
-  p.checkTimer = Math.max(p.checkTimer, 0.16 + closeness * 0.22);
+  p.angle = Math.atan2(steered.x, steered.z);
 }
-function updateRush(s: MatchState, p: Skater, dt: number) {
-  if (p.downTimer > 0 || p.role === 'G') {
+/** A check that finds nothing but air leaves you overextended: no puck, no second swing, for a beat. */
+function whiffCheck(p: Skater) {
+  p.hitLock = -1;
+  p.stumbleTimer = Math.max(p.stumbleTimer, 0.3);
+  p.cooldown = Math.max(p.cooldown, 0.35);
+  p.vx *= 0.85;
+  p.vz *= 0.85;
+}
+function updateRush(p: Skater, dt: number) {
+  if (p.downTimer > 0) {
     p.rush = 0;
     p.hitLock = -1;
     return;
   }
   const speed = Math.hypot(p.vx, p.vz);
-  let crowded = false;
-  for (const other of s.skaters) {
-    if (other.id === p.id || other.team === p.team || !isOnIce(s, other)) continue;
-    if (distance(p, other) < PHYSICS.rushClear) {
-      crowded = true;
-      break;
-    }
-  }
-  const rate = crowded
-    ? speed >= p.rush
-      ? 4.2
-      : PHYSICS.rushCrowdDecay
-    : speed >= p.rush
-      ? 8
-      : 3.2;
-  p.rush += (speed - p.rush) * (1 - Math.exp(-rate * dt));
-  if (p.hitLock >= 0 || (crowded && speed > 3.5 && p.rush >= PHYSICS.checkMinRush * 0.7))
-    p.checkTimer = Math.max(p.checkTimer, 0.14);
+  p.rush += (speed - p.rush) * (1 - Math.exp(-6 * dt));
 }
 function separatePlayers(s: MatchState) {
   for (let i = 0; i < s.skaters.length; i++)
@@ -1357,6 +1396,10 @@ export function stepMatch(s: MatchState, input: InputFrame = EMPTY_INPUT, dt = R
     }
     return;
   }
+  if (s.hitstop > 0) {
+    s.hitstop = Math.max(0, s.hitstop - dt);
+    return;
+  }
   if (modeInfo(s.mode).timed) {
     s.clock = Math.max(0, s.clock - dt);
     if (s.clock <= 0) {
@@ -1373,17 +1416,17 @@ export function stepMatch(s: MatchState, input: InputFrame = EMPTY_INPUT, dt = R
     if (!stickLift(s, s.skaters[s.controlled])) switchSkater(s);
   } else if (input.pass && (s.puck.owner === null || s.skaters[s.puck.owner].team !== s.homeTeam))
     switchSkater(s);
-  const carrying = s.puck.owner === s.controlled;
+  const youCarry = s.puck.owner === s.controlled;
   s.shotCharge =
     !input.toeDrag &&
     !input.deke &&
     !input.dekeSpecial &&
     !s.skaters[s.controlled].dekeKind &&
     input.stickY > 0.3 &&
-    carrying
+    youCarry
       ? clamp(s.shotCharge + dt * 1.8, 0, 1)
       : Math.max(0, s.shotCharge - dt * 2);
-  if (carrying && !input.toeDrag) {
+  if (youCarry && !input.toeDrag) {
     s.shotAim = clamp(input.aimZ ?? 0, -1, 1);
     s.shotLift = clamp(input.shotHeight ?? 0, 0, 1);
   } else {
@@ -1395,7 +1438,10 @@ export function stepMatch(s: MatchState, input: InputFrame = EMPTY_INPUT, dt = R
   for (const p of s.skaters) {
     if (!isOnIce(s, p)) continue;
     p.cooldown = Math.max(0, p.cooldown - dt);
-    p.checkTimer = Math.max(0, p.checkTimer - dt);
+    if (p.checkTimer > 0) {
+      p.checkTimer = Math.max(0, p.checkTimer - dt);
+      if (p.checkTimer === 0 && !p.checkLanded) whiffCheck(p);
+    }
     p.downTimer = Math.max(0, p.downTimer - dt);
     p.stumbleTimer = Math.max(0, p.stumbleTimer - dt);
     p.hitImmunity = Math.max(0, p.hitImmunity - dt);
@@ -1411,7 +1457,13 @@ export function stepMatch(s: MatchState, input: InputFrame = EMPTY_INPUT, dt = R
     const drag = controlled && input.toeDrag && s.puck.owner === p.id;
     const side = controlled ? input.stickX : Math.sin(s.tick * 0.025 + p.id) * 0.35;
     const pull = drag ? clamp(input.stickY, 0, 1) : 0;
-    advanceStick(p, side, pull, dt, s.puck.owner === p.id);
+    const carrying = s.puck.owner === p.id;
+    advanceStick(p, side, pull, dt, carrying);
+    const grip = activeDeke(p)
+      ? PHYSICS.dekeGrip
+      : carrying
+        ? PHYSICS.edgeGrip - clamp(Math.abs(p.stickSideVel) * 0.6, 0, 4)
+        : PHYSICS.edgeGrip;
     if (s.puck.owner === p.id && Math.hypot(p.vx, p.vz) < 2.8)
       p.stride += dt * (1.8 + Math.abs(p.stickSide - STICK.restSide) * 1.2);
     if (p.downTimer > 0 || p.diveTimer > 0) {
@@ -1421,9 +1473,12 @@ export function stepMatch(s: MatchState, input: InputFrame = EMPTY_INPUT, dt = R
     }
     if (p.id === controlledThisStep) {
       if (input.block) p.blockTimer = 0.16;
-      moveSkater(p, input.moveX, input.moveZ, input.hustle, input.backskate, dt);
+      moveSkater(p, input.moveX, input.moveZ, input.hustle, input.backskate, dt, carrying, grip);
       if (input.dive && s.puck.owner !== p.id) startDive(s, p, input);
-      if (input.check && s.puck.owner !== p.id) launchCheck(p, input, s);
+      if (input.check && s.puck.owner !== p.id) {
+        const aim = actionAim(p, input, s);
+        launchCheck(s, p, aim.x, aim.z, input.checkPower ?? 0);
+      }
       if (input.chip) {
         if (s.puck.owner === p.id) chipPuck(s, p, input);
         else chopPuck(s, p, input);
@@ -1435,20 +1490,23 @@ export function stepMatch(s: MatchState, input: InputFrame = EMPTY_INPUT, dt = R
       if (input.passRelease && s.puck.owner === p.id) passPuck(s, p, input.moveX, input.moveZ);
       if (input.poke) pokeCheck(s, p);
       else if (input.pokeHeld) pokeCheck(s, p, true);
-      steerHitLock(s, p, input.moveX, input.moveZ, dt);
+      steerCheck(s, p, dt);
     } else {
       const ai = decideAI(s, p);
       if (s.puck.owner === p.id && (ai.toeDrag || Math.abs(ai.stickX) > 0.04))
         advanceStick(p, ai.stickX, ai.toeDrag ? 0.82 : 0, dt, true);
-      moveSkater(p, ai.move.x, ai.move.z, ai.hustle, ai.backskate, dt);
+      moveSkater(p, ai.move.x, ai.move.z, ai.hustle, ai.backskate, dt, carrying, grip);
       if (p.role === 'G')
         p.angle = attackDirection(p.team, s.period) > 0 ? Math.PI / 2 : -Math.PI / 2;
-      else steerHitLock(s, p, ai.move.x, ai.move.z, dt);
+      else {
+        if (ai.check) launchCheck(s, p, ai.checkAim.x, ai.checkAim.z, ai.checkPower);
+        steerCheck(s, p, dt);
+      }
       if (ai.shoot) shootPuck(s, p, ai.shotPower, ai.shotAim, ai.shotHeight);
       else if (ai.pass) passPuck(s, p, ai.passDir.x, ai.passDir.z);
       if (ai.poke) pokeCheck(s, p);
     }
-    updateRush(s, p, dt);
+    updateRush(p, dt);
   }
   separatePlayers(s);
   advancePuck(s, dt);

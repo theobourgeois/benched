@@ -25,10 +25,14 @@ export interface Skater extends Vec2 {
   downTimer: number;
   /** Knocked off balance by a check: coasting with little control, unable to play the puck. */
   stumbleTimer: number;
-  /** Smoothed skating speed. Feeds hit power; it is not a gate on who can check. */
+  /** Smoothed skating speed, for animation and audio. Hit power comes from real closing speed. */
   rush: number;
   /** Opponent the current check is locked onto, or -1. */
   hitLock: number;
+  /** How far the current check was loaded, 0 to 1. */
+  checkPower: number;
+  /** The live check already connected; the follow-through is not a whiff. */
+  checkLanded: boolean;
   hitImmunity: number;
   fallAngle: number;
   /** Blade offset to the skater's left (+) or right (−). */
@@ -91,6 +95,8 @@ export interface InputFrame {
   dive: boolean;
   /** Skill-stick flick without the puck: committed body check. */
   check: boolean;
+  /** How far the stick was pulled back before the flick, 0 to 1. */
+  checkPower?: number;
   /** LB held without the puck: block a pass or shot. */
   block: boolean;
   /** Right stick in rink space, used for chips and checks. */
@@ -105,6 +111,9 @@ export interface GameEvent {
   id: number;
   type: 'shot' | 'pass' | 'hit' | 'goal' | 'post' | 'save' | 'faceoff' | 'horn';
   power: number;
+  /** Where it happened on the ice, when it was not the puck. */
+  x?: number;
+  z?: number;
 }
 export interface MatchState {
   mode: GameMode;
@@ -135,6 +144,8 @@ export interface MatchState {
   /** Ice-arrow length while aiming a pass. */
   passRange: number;
   tick: number;
+  /** Seconds the simulation holds still after a knockdown, for impact. */
+  hitstop: number;
   events: GameEvent[];
   notice: string;
   noticeTimer: number;

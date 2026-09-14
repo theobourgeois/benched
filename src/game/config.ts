@@ -21,51 +21,86 @@ export const PUCK = {
   restY: 0.031,
 };
 export const PHYSICS = {
-  acceleration: 21,
-  maxSpeed: 8.8,
-  hustleSpeed: 11.5,
+  /** Top skating speed. Real NHL pace is about 9 m/s; this runs a touch hotter for arcade feel. */
+  maxSpeed: 9.6,
+  hustleSpeed: 12.2,
+  /** Carrying the puck costs a little top end, so a chaser can close but not walk them down. */
+  carrySpeed: 0.965,
+  /** Exponential approach rate toward the stick's speed at a standstill; the first strides bite. */
+  launchRate: 2.4,
+  /** How much of that rate is lost as you near top speed; the last metre per second is earned. */
+  topEndTaper: 1.0,
+  /** Heading turn rate near a standstill (rad/s): pivots are instant. */
+  turnRateLow: 12,
+  /** Heading turn rate at top speed (rad/s): about a 2.5 m carve radius. */
+  turnRateHigh: 3.6,
+  /** Extra turn-rate loss while hustling; a sprinting skater is a train. */
+  hustleTurn: 0.8,
+  /** How quickly sideways slip is bitten off by the edges. Lower lets the skater drift. */
+  edgeGrip: 10,
+  /** Grip while the puck is being thrown wide on a deke; the skater rides an edge. */
+  dekeGrip: 2.2,
+  /** Speed scrubbed per radian of carve at top speed. */
+  carveBleed: 0.16,
   /** Glide when the stick is released. Ice should carry you; it should not feel like running. */
-  coastDrag: 0.58,
+  coastDrag: 0.42,
   /** Opposite-stick hockey stop. */
-  stopDrag: 9.2,
-  /** Speed bled on a hard cut at pace. */
-  cutDrag: 1.55,
+  stopDrag: 7.5,
+  /** Turn-rate multiplier while stopping, so the skater swings around as they bite. */
+  stopPivot: 2.4,
+  /** Fraction of speed that must oppose the stick to read as a stop instead of a carve. */
+  stopAlign: -0.35,
   drag: 2.8,
+  backskateSpeed: 0.68,
+  hustleDrain: 0.2,
+  staminaRecover: 0.14,
   puckDrag: 0.24,
   playerRadius: 0.58,
   pickupRadius: 0.88,
   shotSpeed: 34,
-  passSpeed: 20,
+  passSpeed: 21,
   /** Dump a pass this far when no teammate is in the aim cone. */
   passDump: 10,
   /** Cosine of the pass aim-assist cone (~47° from the stick). */
   passAssist: 0.68,
-  /** Distance at which another skater counts as traffic for rush catch-up. */
-  rushClear: 2.15,
-  /** How fast unused rush eases toward current speed in traffic. */
-  rushCrowdDecay: 2.6,
-  /** Speed that starts to look like a real check for lean / lock animation. */
-  checkMinRush: 6.0,
-  /** Fraction of speed that must point at the opponent to throw a left-stick hit. */
-  checkMinApproach: 0.16,
-  /** Body-check power that knocks the puck loose and staggers. */
-  checkStumble: 7.2,
-  /** Open-ice power that puts the victim on the ice. */
-  checkKnockdown: 8.8,
-  /** Squaring up shortens the slide; it does not cancel the hit. */
+  /** Lunge a committed check adds to the checker's speed, before loading. */
+  checkLunge: 3.8,
+  /** Extra lunge from a fully loaded (pulled-back) check. */
+  checkLoadLunge: 2.2,
+  /** Ceiling on speed during a lunge. */
+  checkLungeCap: 1.4,
+  /** How long a committed check is live for, from the flick. */
+  checkWindow: 0.42,
+  /** The last part of the window is follow-through; contact there is only a bump. */
+  checkRecovery: 0.12,
+  /** Flat power a committed check adds on top of closing momentum. */
+  checkCommit: 1.6,
+  /** How much a fully loaded check scales that commitment. */
+  checkLoadBonus: 0.6,
+  /** Closing power that staggers the victim and knocks the puck loose. */
+  checkStumble: 6.0,
+  /** Closing power that puts the victim on the ice. */
+  checkKnockdown: 9.5,
+  /** Incidental collisions never exceed a stumble unless closing this hard (two sprinters head-on). */
+  bumpKnockdown: 13,
+  /** Incidental closing that staggers whoever was on their heels. */
+  bumpStumble: 7,
+  /** Squaring up to a hit takes this much off it; it does not cancel the hit. */
   checkBrace: 0.85,
-  /** Alignment below this, without a committed check, is a glancing blow. */
-  checkGlance: 0.34,
-  /** How far a committed check will magnet toward an opponent. */
-  hitLockRange: 5.8,
-  /** Cosine of the lock cone — skating at them, not past them. */
-  hitLockCone: 0.32,
-  /** Lateral miss a finishing check will still catch. */
-  hitLockCatch: 1.7,
-  /** How quickly velocity turns onto the lock. */
-  hitLockSteer: 13,
-  /** Close-range snap that turns an inch-miss into a hit. */
-  hitLockSnap: 17,
+  /** A victim mid-deke or already off balance takes this much more. */
+  checkExposed: 1.15,
+  /** Hitting someone skating away from you is a shove, not a hit. */
+  checkFromBehind: 0.65,
+  /** How far a committed check will pick a target. */
+  hitLockRange: 3.4,
+  /** Cosine of the lock cone; you have to be flicking at them. */
+  hitLockCone: 0.45,
+  /** How quickly a live check steers onto its target. */
+  hitLockSteer: 9,
+  /** Stamina a committed check costs; loading costs a little more. */
+  checkStamina: 0.06,
+  /** Time frozen on a knockdown for impact. */
+  hitstop: 0.07,
   /** Blade must be this close to the puck for a poke to lift it. */
   pokeReach: 0.62,
   /** Stick jab on a poke; not a steal from across a body-length. */
@@ -147,6 +182,7 @@ export const EMPTY_INPUT = {
   dekeSpecial: null,
   dive: false,
   check: false,
+  checkPower: 0,
   block: false,
   stickIceX: 0,
   stickIceZ: 0,

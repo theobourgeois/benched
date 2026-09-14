@@ -12,6 +12,8 @@ import { cameraFraming } from './camera';
 import { PUCK, RULES } from '../game/config';
 import type { InputFrame } from '../game/types';
 const _aimNdc = new THREE.Vector3();
+/** Impact feedback shared between the simulation loop and the camera: a big hit shakes the frame. */
+const impact = { shake: 0 };
 const noEdges = (input: InputFrame) => ({
   ...input,
   shoot: false,
@@ -108,6 +110,7 @@ function Simulation() {
         runtime.audio.play(event);
         if (['shot', 'hit', 'goal', 'post', 'save'].includes(event.type)) {
           const bigHit = event.type === 'hit' && event.power >= 0.5;
+          if (bigHit) impact.shake = Math.max(impact.shake, event.power >= 0.75 ? 1 : 0.45);
           runtime.controller.rumble(
             event.type === 'goal' ? 1 : bigHit ? Math.max(0.7, event.power) : event.power * 0.7,
             event.type === 'goal' ? 650 : bigHit ? 280 : event.type === 'hit' ? 160 : 100,
@@ -136,6 +139,13 @@ function CameraRig() {
     perspective.fov = THREE.MathUtils.lerp(perspective.fov, framing.fov, smoothing);
     perspective.updateProjectionMatrix();
     camera.lookAt(look.current);
+    if (impact.shake > 0.01) {
+      const amplitude = impact.shake * 0.28;
+      camera.position.x += (Math.random() - 0.5) * amplitude;
+      camera.position.y += (Math.random() - 0.5) * amplitude * 0.7;
+      camera.position.z += (Math.random() - 0.5) * amplitude;
+      impact.shake *= Math.exp(-Math.min(dt, 0.1) * 11);
+    } else impact.shake = 0;
   });
   return null;
 }
