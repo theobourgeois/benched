@@ -2,6 +2,7 @@ import { attackDirection, EMPTY_INPUT, PHYSICS, PUCK, RINK, RULES, STICK } from 
 import { activeDeke, classifyOneTouch, clearDeke, startDeke, stepDeke } from './dekes';
 import { decideAI } from './ai';
 import { DEFAULT_MATCHUP, type Club } from './clubs';
+import { cpuTune, DEFAULT_DIFFICULTY } from './difficulty';
 import { skateVelocity } from './skating';
 import { clamp, constrainToRink, distance, normalized } from './math';
 import { isOnIce, modeInfo, SHOOTOUT_ROUNDS } from './modes';
@@ -50,6 +51,7 @@ export function createMatch(
     autoSkate: false,
     homeTeam,
     teams,
+    difficulty: DEFAULT_DIFFICULTY,
     scoringTeam: null,
     shotCharge: 0,
     shotAim: 0,
@@ -1036,9 +1038,10 @@ function moveSkater(
   carrying = false,
   grip = PHYSICS.edgeGrip,
   pushScale = 1,
+  speedScale = 1,
 ) {
   const speedNow = Math.hypot(p.vx, p.vz);
-  skateVelocity(p, x, z, hustle, backskate, dt, carrying, grip, pushScale);
+  skateVelocity(p, x, z, hustle, backskate, dt, carrying, grip, pushScale, speedScale);
   p.x += p.vx * dt;
   p.z += p.vz * dt;
   // The goal frame is solid for skaters; keep players out of the net interior.
@@ -1240,7 +1243,10 @@ function advancePuck(s: MatchState, dt: number) {
         const defendingGoalie = s.skaters.find(
           (q) => q.role === 'G' && isOnIce(s, q) && attackDirection(q.team, s.period) === -sign,
         );
-        if (!defendingGoalie || distance(defendingGoalie, p) > 1.28) {
+        if (
+          !defendingGoalie ||
+          distance(defendingGoalie, p) > 1.28 * cpuTune(s, defendingGoalie).save
+        ) {
           p.owner = null;
           goal(s, teamAttackingNet(sign, s.period));
         }
@@ -1324,9 +1330,10 @@ function advancePuck(s: MatchState, dt: number) {
         continue;
       const dist = distance(player, p),
         lateral = Math.abs(p.z - player.z);
-      if (dist > 1.52) continue;
-      const reach = 1.08 + Math.min(0.28, Math.hypot(p.vx, p.vz) * 0.006);
-      if (lateral > reach && dist > 0.9) continue;
+      const save = cpuTune(s, player).save;
+      if (dist > 1.52 * save) continue;
+      const reach = (1.08 + Math.min(0.28, Math.hypot(p.vx, p.vz) * 0.006)) * save;
+      if (lateral > reach && dist > 0.9 * save) continue;
       goalieSave(s, player);
       return;
     }
@@ -1555,7 +1562,19 @@ export function stepMatch(s: MatchState, input: InputFrame = EMPTY_INPUT, dt = R
       else if (input.pokeHeld) pokeCheck(s, p, true);
     } else {
       if (!ai) continue;
-      moveSkater(p, ai.move.x, ai.move.z, ai.hustle, ai.backskate, dt, carrying, grip);
+      const tune = cpuTune(s, p);
+      moveSkater(
+        p,
+        ai.move.x,
+        ai.move.z,
+        ai.hustle,
+        ai.backskate,
+        dt,
+        carrying,
+        grip,
+        tune.speed,
+        tune.speed,
+      );
       if (p.role === 'G')
         p.angle = attackDirection(p.team, s.period) > 0 ? Math.PI / 2 : -Math.PI / 2;
       else {

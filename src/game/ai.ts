@@ -1,4 +1,5 @@
 import { attackDirection, PHYSICS, RINK } from './config';
+import { cpuTune } from './difficulty';
 import { clamp, distance, normalized } from './math';
 import { isOnIce } from './modes';
 import type { MatchState, Skater, Vec2 } from './types';
@@ -106,11 +107,14 @@ function bestOutlet(s: MatchState, p: Skater) {
 function goalieTarget(s: MatchState, p: Skater): Vec2 {
   const dir = attackDirection(p.team, s.period),
     puck = s.puck,
-    netX = defendNet(p.team, s.period);
-  const depth = clamp(0.5 + (16 - Math.abs(puck.x - netX)) * 0.07, 0.42, 1.85);
+    netX = defendNet(p.team, s.period),
+    tune = cpuTune(s, p);
+  const base = clamp(0.5 + (16 - Math.abs(puck.x - netX)) * 0.07, 0.42, 1.85);
+  const depth = base * tune.depth;
+  const track = clamp(0.26 + base * 0.09, 0.24, 0.48) * tune.track;
   return {
     x: netX + dir * depth,
-    z: clamp(puck.z * clamp(0.26 + depth * 0.09, 0.24, 0.48), -1.32, 1.32),
+    z: clamp(puck.z * track, -1.32 * Math.max(1, tune.track), 1.32 * Math.max(1, tune.track)),
   };
 }
 function carrierTarget(s: MatchState, p: Skater): Vec2 {
@@ -154,25 +158,26 @@ function chaseTarget(s: MatchState, p: Skater, owner: Skater | null): Vec2 {
     goalSide = (owner.x - p.x) * dir,
     ownerSpeed = Math.hypot(owner.vx, owner.vz),
     side = wrapSide(p, owner),
-    inside = insideOf(owner, side);
+    inside = insideOf(owner, side),
+    tune = cpuTune(s, p);
   if (goalSide < 1.5) {
     // Beaten: angle to the puck. Matching their z is how a magnet follows every cut;
     // skating onto their spine is how a CPU freezes when the carrier stops.
     if (gap < 3.0) {
-      const lead = ownerSpeed > 3 ? clamp(gap / PHYSICS.maxSpeed, 0.05, 0.2) : 0;
+      const lead = ownerSpeed > 3 ? clamp(gap / PHYSICS.maxSpeed, 0.05, 0.2) * tune.lead : 0;
       return {
         x: owner.x + owner.vx * lead - dir * 0.75,
         z: clamp(owner.z + side * 1.05 + owner.vz * lead * 0.2, -11, 11),
       };
     }
-    const lead = clamp(gap / PHYSICS.maxSpeed, 0.08, 0.36);
+    const lead = clamp(gap / PHYSICS.maxSpeed, 0.08, 0.36) * tune.lead;
     return {
       x: owner.x + owner.vx * lead * 0.7 - dir * Math.min(0.35, gap * 0.04),
       z: clamp(owner.z * 0.82 + owner.vz * 0.05 + inside * 0.7, -11, 11),
     };
   }
   // Still between them and the net: hold a gap and shade the slot, don't glue to their hip.
-  const cushion = clamp(1.7 + Math.min(gap, 6) * 0.18, 1.7, 3.8);
+  const cushion = clamp(1.7 + Math.min(gap, 6) * 0.18, 1.7, 3.8) * tune.gap;
   return {
     x: owner.x - dir * cushion,
     z: clamp(owner.z * 0.48 + owner.vz * 0.05, -8.2, 8.2),
@@ -181,7 +186,8 @@ function chaseTarget(s: MatchState, p: Skater, owner: Skater | null): Vec2 {
 
 function pressureCarrier(s: MatchState, p: Skater, owner: Skater, decision: AIDecision) {
   const puck = s.puck,
-    gap = distance(p, owner);
+    gap = distance(p, owner),
+    tune = cpuTune(s, p);
   if (p.cooldown > 0 || owner.role === 'G' || gap > 3.1) return;
   const dir = attackDirection(p.team, s.period),
     toward = normalized(owner.x - p.x, owner.z - p.z),
@@ -201,18 +207,18 @@ function pressureCarrier(s: MatchState, p: Skater, owner: Skater, decision: AIDe
   }
   decision.poke =
     !pokeShielded(p, owner, puck) &&
-    distance(p, puck) < 1.7 &&
+    distance(p, puck) < 1.7 * (0.72 + 0.28 * tune.bite) &&
     facePuck > 0.18 &&
     (beside || !behind);
   decision.pokeSweep = decision.poke && beside && ownerSpeed < 3.5;
-  const mood = Math.sin(s.tick * 0.011 + p.id * 2.3) > 0.2;
+  const mood = Math.sin(s.tick * 0.011 + p.id * 2.3) > 0.2 / tune.bite;
   const bumpSlow = ownerSpeed < 2.6 && beside && gap < 1.9 && closing > 0.4;
   decision.check =
     !decision.poke &&
     mood &&
-    gap < 2.15 &&
+    gap < 2.15 * (0.78 + 0.22 * tune.bite) &&
     p.stamina > 0.12 &&
-    ((closing > (isDefense(p) ? 3.2 : 4.5) && faceBody > 0.55) || bumpSlow);
+    ((closing > (isDefense(p) ? 3.2 : 4.5) / tune.bite && faceBody > 0.55) || bumpSlow);
   decision.checkAim = toward;
   decision.checkPower = isDefense(p) && closing > 6 ? 0.5 : 0;
 }
@@ -388,6 +394,12 @@ function shootoutBreakaway(s: MatchState, p: Skater, decision: AIDecision): Vec2
   const netDist = Math.hypot(dir * RINK.goalX - p.x, p.z);
   const onDoorstep = !!goalie && distance(p, goalie) < 3.5 && zone > 18.5;
   const tight = zone > 21.4 || netDist < 4.1 || onDoorstep;
+  const tune = cpuTune(s, p);
+  decision.shotAim = clamp(
+    decision.shotAim + Math.sin(s.tick * 0.03 + p.id) * (tune.wobble - 0.32),
+    -1,
+    1,
+  );
   decision.shoot = p.cooldown <= 0 && facingNet && tight && zone > 19.2;
   return target;
 }
@@ -395,6 +407,8 @@ function shootoutBreakaway(s: MatchState, p: Skater, decision: AIDecision): Vec2
 function sidestep(s: MatchState, p: Skater, target: Vec2, decision: AIDecision) {
   const speed = Math.hypot(p.vx, p.vz);
   if (speed < 2) return;
+  const tune = cpuTune(s, p);
+  if (tune.handle < 1 && Math.sin(s.tick * 0.019 + p.id) > tune.handle * 2 - 1) return;
   const hx = p.vx / speed,
     hz = p.vz / speed;
   for (const foe of foes(s, p)) {
@@ -402,7 +416,7 @@ function sidestep(s: MatchState, p: Skater, target: Vec2, decision: AIDecision) 
       dz = foe.z - p.z,
       ahead = dx * hx + dz * hz,
       across = dx * hz - dz * hx;
-    if (ahead < 0.6 || ahead > 4.5 || Math.abs(across) > 2) continue;
+    if (ahead < 0.6 || ahead > 4.5 * tune.handle || Math.abs(across) > 2) continue;
     const side = across >= 0 ? 1 : -1;
     // Player-space right is −across; the skill stick's +X is the player's right.
     decision.stickX = side * 0.85;
@@ -418,7 +432,8 @@ export function decideAI(s: MatchState, p: Skater): AIDecision {
     puck = s.puck,
     owner = puck.owner === null ? null : s.skaters[puck.owner],
     ours = owner?.team === p.team,
-    decision = idle();
+    decision = idle(),
+    tune = cpuTune(s, p);
   decision.passDir = { x: dir, z: 0 };
   let target: Vec2;
   if (p.role === 'G') target = goalieTarget(s, p);
@@ -437,19 +452,19 @@ export function decideAI(s: MatchState, p: Skater): AIDecision {
         p.cooldown <= 0 &&
         facingNet &&
         zone > 13 &&
-        (look >= 0.42 || (look >= 0.2 && press < 2.4 && zone > 16.5));
+        (look >= tune.shootLook || (look >= tune.shootPress && press < 2.4 && zone > 16.5));
       const outletAhead = !!outlet && (outlet.x - p.x) * dir > 2.4;
       decision.pass =
         !decision.shoot &&
         p.cooldown <= 0 &&
         !!outlet &&
-        (outletLook > look + 0.15 ||
+        (outletLook > look + 0.15 / tune.pass ||
           (press < 2.2 && outletAhead) ||
           (zone < 10 && outletAhead && press < 2.8));
       if (outlet) decision.passDir = { x: outlet.x - p.x, z: outlet.z - p.z };
       const goalie = goalieOf(s, p.team === 0 ? 1 : 0);
       const far = goalie ? (goalie.z >= 0 ? -0.58 : 0.58) : 0;
-      decision.shotAim = clamp(far + Math.sin(s.tick * 0.03 + p.id) * 0.32, -1, 1);
+      decision.shotAim = clamp(far + Math.sin(s.tick * 0.03 + p.id) * tune.wobble, -1, 1);
       decision.shotHeight = Math.sin(s.tick * 0.05 + p.id) > 0.35 ? 0.78 : 0.18;
       decision.shotPower = look > 0.7 ? 0.38 : 0.62;
       const route = normalized(target.x - p.x, target.z - p.z);
@@ -458,7 +473,8 @@ export function decideAI(s: MatchState, p: Skater): AIDecision {
         const across = (o.x - p.x) * route.z - (o.z - p.z) * route.x;
         return ahead > 0 && ahead < 8 && Math.abs(across) < 2.8;
       });
-      decision.hustle = p.stamina > 0.2 && press > 4 && openLane && Math.abs(decision.stickX) < 0.5;
+      decision.hustle =
+        p.stamina > 0.2 / tune.hustle && press > 4 && openLane && Math.abs(decision.stickX) < 0.5;
     }
   } else {
     const mates = skaters(s, p);
@@ -479,8 +495,8 @@ export function decideAI(s: MatchState, p: Skater): AIDecision {
         markSpeed = Math.hypot(mark.vx, mark.vz);
       // Catch a rush, but don't sprint into the back of a stopped carrier.
       decision.hustle =
-        p.stamina > 0.18 &&
-        (gap > 3.4 || markSpeed > 5.5) &&
+        p.stamina > 0.18 / tune.hustle &&
+        (gap > 3.4 / tune.hustle || markSpeed > 5.5 / tune.hustle) &&
         !(owner && markSpeed < 2.8 && gap < 2.6);
     } else target = supportTarget(s, p, ours, hunters);
     if (!ours && owner && (isDefense(p) || chaser?.id === p.id)) {
@@ -495,14 +511,15 @@ export function decideAI(s: MatchState, p: Skater): AIDecision {
         (target.x - p.x) * dir < 0;
       if (!decision.backskate && (goalSide < 3 || rushSpeed > 7)) {
         const gap = distance(p, owner);
-        decision.hustle = p.stamina > 0.18 && (goalSide > 0 || rushSpeed > 4 || gap > 2.8);
+        decision.hustle =
+          p.stamina > 0.18 / tune.hustle && (goalSide > 0 || rushSpeed > 4 || gap > 2.8);
       }
     }
   }
   const d = distance(p, target),
     move = normalized(target.x - p.x, target.z - p.z);
   const chasing = !ours && puck.owner !== p.id && p.role !== 'G';
-  const ease = p.role === 'G' ? 2.4 : puck.owner === p.id ? 1.7 : chasing ? 1.05 : 2.1;
+  const ease = p.role === 'G' ? 2.4 : puck.owner === p.id ? 1.7 : chasing ? tune.chaseEase : 2.1;
   const scale = clamp(d / ease, 0, p.role === 'G' ? 0.68 : 1);
   decision.move = { x: move.x * scale, z: move.z * scale };
   if (p.role !== 'G' && !ours && puck.owner !== p.id && distance(p, puck) > 7 && p.stamina > 0.35)

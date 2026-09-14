@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 import { attackDirection } from '../game/config';
+import { difficultyInfo } from '../game/difficulty';
 import { modeInfo } from '../game/modes';
 import {
   beginGame,
@@ -115,6 +116,7 @@ export function Hud() {
       <div className="match-info">
         <span>NORTHSTAR ARENA</span>
         <span>{info.live}</span>
+        <span>{difficultyInfo(s.difficulty).label.toUpperCase()}</span>
       </div>
       {s.phase === 'playing' && (
         <>
@@ -254,7 +256,9 @@ export function Hud() {
       {s.phase === 'paused' && !controls && !showSettings && !feel && (
         <div className="modal-scrim">
           <section className="pause-modal" role="dialog" aria-modal="true" aria-label="Game paused">
-            <div className="eyebrow">{info.eyebrow}</div>
+            <div className="eyebrow">
+              {info.eyebrow} / {difficultyInfo(s.difficulty).label.toUpperCase()}
+            </div>
             <h2>Paused</h2>
             <p>
               {controller.status.connected

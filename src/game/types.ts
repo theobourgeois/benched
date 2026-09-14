@@ -139,6 +139,8 @@ export interface MatchState {
   homeTeam: Team;
   /** Club on each side; side 0 wears home colors, side 1 away. */
   teams: [Club, Club];
+  /** How hard opposing CPUs play. The player's teammates stay All-Star. */
+  difficulty: Difficulty;
   scoringTeam: Team | null;
   shotCharge: number;
   /** Left-stick shot aim across the net, −1 (right post from behind) to 1. */
@@ -169,6 +171,7 @@ export interface MatchState {
   /** Shootout attempts taken by each team. */
   shootoutTaken: [number, number];
 }
+export type Difficulty = 'rookie' | 'pro' | 'allStar' | 'legend';
 export type CameraMode = 'broadcast' | 'tight' | 'high' | 'wide';
 export function cameraUsesAttackUp(camera: CameraMode) {
   switch (camera) {
@@ -190,4 +193,5 @@ export interface Settings {
   quality: 'high' | 'low';
   /** Shot target in the net and pass-lane arrow. */
   beginner: boolean;
+  difficulty: Difficulty;
 }

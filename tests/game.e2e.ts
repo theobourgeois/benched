@@ -23,7 +23,14 @@ test('menu renders, selects teams, opens accessible controls and settings', asyn
   await expect(page.getByText('W A S D', { exact: true })).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);
+  const difficulty = page.getByRole('group', { name: 'CPU difficulty' });
+  await expect(difficulty.getByRole('button', { name: 'All-Star' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await difficulty.getByRole('button', { name: 'Rookie' }).click();
   await page.getByRole('button', { name: 'Open settings' }).click();
+  await expect(page.getByRole('dialog').getByLabel('CPU difficulty')).toHaveValue('rookie');
   await page.getByRole('button', { name: 'Toggle beginner mode' }).click();
   await expect(page.getByRole('button', { name: 'Toggle beginner mode' })).toHaveAttribute(
     'aria-pressed',
@@ -36,6 +43,7 @@ test('menu renders, selects teams, opens accessible controls and settings', asyn
   await page.getByRole('button', { name: 'Montréal Canadiens' }).click();
   await page.getByRole('button', { name: 'PLAY GAME' }).click();
   expect((await state(page)).homeTeam).toBe(1);
+  expect((await state(page)).difficulty).toBe('rookie');
   await expect(page.locator('canvas')).toHaveCount(1);
   expect(errors).toEqual([]);
 });

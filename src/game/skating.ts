@@ -18,6 +18,7 @@ export function skateVelocity(
   carrying = false,
   grip = PHYSICS.edgeGrip,
   pushScale = 1,
+  speedScale = 1,
 ) {
   const mag = Math.min(1, Math.hypot(x, z));
   const speed = Math.hypot(p.vx, p.vz);
@@ -46,7 +47,7 @@ export function skateVelocity(
     // A committed shoulder follows its launch momentum. Left-stick input cannot cancel it or
     // steer it onto a dodging target. Stumbles likewise cannot be accelerated out of.
   } else if (goalie) {
-    const max = PHYSICS.maxSpeed * 0.64;
+    const max = PHYSICS.maxSpeed * 0.64 * speedScale;
     const scale = Math.max(1, Math.hypot(x, z));
     const blend = 1 - Math.exp(-2.6 * dt);
     p.vx += ((x / scale) * max - p.vx) * blend;
@@ -74,6 +75,7 @@ export function skateVelocity(
       heading = travel + turn;
       const top =
         (PHYSICS.maxSpeed + (PHYSICS.hustleSpeed - PHYSICS.maxSpeed) * effort) *
+        speedScale *
         (backskate ? PHYSICS.backskateSpeed : 1) *
         (carrying ? (effort > 0 ? PHYSICS.carryHustle : PHYSICS.carrySpeed) : 1);
       const target = top * mag;
@@ -117,6 +119,7 @@ export function skateVelocity(
     const heading = current > 0.1 ? Math.atan2(p.vx, p.vz) : p.angle;
     const top =
       (PHYSICS.maxSpeed + (PHYSICS.hustleSpeed - PHYSICS.maxSpeed) * effort) *
+      speedScale *
       (carrying ? PHYSICS.carrySpeed : 1);
     const budget = Math.max(0, PHYSICS.skateAcceleration * dt - Math.max(0, current - speed));
     const surge =

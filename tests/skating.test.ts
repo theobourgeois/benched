@@ -4,7 +4,7 @@ import { skateVelocity } from '../src/game/skating';
 import { decideAI } from '../src/game/ai';
 import { startDeke, stepDeke } from '../src/game/dekes';
 import { EMPTY_INPUT, PHYSICS, RULES } from '../src/game/config';
-import type { Skater } from '../src/game/types';
+import type { Difficulty, Skater } from '../src/game/types';
 
 const dt = RULES.fixedStep;
 const speed = (p: Skater) => Math.hypot(p.vx, p.vz);
@@ -300,5 +300,76 @@ describe('CPU chase feel', () => {
     expect(ai.poke).toBe(true);
     expect(ai.pokeSweep).toBe(true);
     expect(ai.check).toBe(false);
+  });
+});
+
+describe('CPU difficulty', () => {
+  function rush(difficulty: Difficulty = 'allStar') {
+    const s = createMatch(0, 'oneOnOne');
+    s.phase = 'playing';
+    s.difficulty = difficulty;
+    const you = s.skaters[0],
+      cpu = s.skaters[6];
+    return { s, you, cpu };
+  }
+
+  it('starts matches on All-Star', () => {
+    expect(createMatch().difficulty).toBe('allStar');
+  });
+
+  it('lets a Rookie chaser sit off a gap All-Star would hustle to close', () => {
+    const chase = (difficulty: Difficulty) => {
+      const { s, you, cpu } = rush(difficulty);
+      Object.assign(you, { x: -8, z: 8, vx: 0, vz: 0 });
+      Object.assign(cpu, { x: 0, z: 0, vx: 0, vz: 0, stamina: 1 });
+      Object.assign(s.puck, { owner: null, x: 5, z: 0, vx: 0, vz: 0 });
+      return decideAI(s, cpu);
+    };
+    expect(chase('allStar').hustle).toBe(true);
+    expect(chase('rookie').hustle).toBe(false);
+    expect(chase('legend').hustle).toBe(true);
+  });
+
+  it('holds a bigger gap on Rookie than Legend when still in front of the carrier', () => {
+    const step = (difficulty: Difficulty) => {
+      const { s, you, cpu } = rush(difficulty);
+      Object.assign(you, { x: 0, z: 0, vx: 5, vz: 0, angle: Math.PI / 2 });
+      Object.assign(cpu, { x: 2.8, z: 0, vx: 0, vz: 0, angle: -Math.PI / 2 });
+      Object.assign(s.puck, { owner: you.id, x: you.x, z: you.z, vx: you.vx });
+      return decideAI(s, cpu).move.x;
+    };
+    expect(step('legend')).toBeLessThan(0);
+    expect(step('rookie')).toBeGreaterThan(0);
+  });
+
+  it('makes a Legend CPU shoot a look a Rookie would hold', () => {
+    const look = (difficulty: Difficulty, team: 0 | 1) => {
+      const s = createMatch();
+      s.difficulty = difficulty;
+      const p = s.skaters[team * 6];
+      const dir = team === 0 ? 1 : -1;
+      Object.assign(p, {
+        x: dir * 20,
+        z: 5.4,
+        cooldown: 0,
+        angle: dir > 0 ? Math.PI / 2 : -Math.PI / 2,
+      });
+      s.puck.owner = p.id;
+      s.skaters
+        .filter((q) => q.team !== team && q.role !== 'G')
+        .forEach((q) => {
+          q.x = -dir * 12;
+          q.z = 10;
+        });
+      Object.assign(
+        s.skaters.find((q) => q.team !== team && q.role === 'G')!,
+        { x: dir * 25.2, z: 5.4 },
+      );
+      return decideAI(s, p).shoot;
+    };
+    expect(look('allStar', 1)).toBe(true);
+    expect(look('legend', 1)).toBe(true);
+    expect(look('rookie', 1)).toBe(false);
+    expect(look('rookie', 0)).toBe(true);
   });
 });

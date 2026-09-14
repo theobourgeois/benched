@@ -12,10 +12,11 @@ import {
 } from 'lucide-react';
 import { useState, type CSSProperties } from 'react';
 import { cycleClub, LEAGUES, leagueOf, openingMatchup, uniformFor, type Club } from '../game/clubs';
+import { DIFFICULTIES, difficultyInfo } from '../game/difficulty';
 import { CAMERA_OPTIONS } from '../scene/camera';
 import { beginGame, updateSettings, useGame } from '../game/store';
 import { MODES, modeInfo } from '../game/modes';
-import type { CameraMode, GameMode, Team } from '../game/types';
+import type { CameraMode, Difficulty, GameMode, Team } from '../game/types';
 import { Controls } from './Controls';
 import { ControllerSetup } from './ControllerSetup';
 import { useDialog } from './useDialog';
@@ -58,6 +59,21 @@ export function SettingsPanel({ close }: { close: () => void }) {
         </button>
         <div className="eyebrow">OPTIONS</div>
         <h2>Game settings</h2>
+        <label htmlFor="difficulty-setting">
+          CPU difficulty{' '}
+          <select
+            id="difficulty-setting"
+            value={settings.difficulty}
+            onChange={(e) => updateSettings({ difficulty: e.target.value as Difficulty })}
+          >
+            {DIFFICULTIES.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p className="setting-hint">{difficultyInfo(settings.difficulty).hint}</p>
         <label>
           Sound{' '}
           <button
@@ -245,6 +261,21 @@ export function Menu() {
             })}
             <div className="versus" aria-hidden="true">
               VS
+            </div>
+          </div>
+          <div className="difficulty-row">
+            <span>CPU</span>
+            <div className="difficulty-picker" role="group" aria-label="CPU difficulty">
+              {DIFFICULTIES.map((option) => (
+                <button
+                  key={option.id}
+                  className="difficulty-option"
+                  aria-pressed={settings.difficulty === option.id}
+                  onClick={() => updateSettings({ difficulty: option.id })}
+                >
+                  {option.label}
+                </button>
+              ))}
             </div>
           </div>
           <div className="matchup-bottomline">
