@@ -49,6 +49,11 @@ export interface Skater extends Vec2 {
   stickSideVel: number;
   stickReachVel: number;
   shotTimer: number;
+  /** Recorded with the simulation so action clips are stable during replay and seeking. */
+  shotStyle?: 'wrist' | 'slap' | 'backhand' | 'pass';
+  shotDuration?: number;
+  shotSide?: number;
+  shotReach?: number;
   /** Window after a tape-to-tape catch where a one-timer is live. */
   passTimer: number;
   /** Belly-flop block; player is sliding, not ragdolled. */

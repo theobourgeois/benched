@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { clone as cloneRig } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import type { Uniform } from '../game/clubs';
 import { makeNumberTexture } from './textures';
+import { limitWrist, solveTwoBone } from './animationMath';
+import { fitHockeyEquipment, SKATE_LIFT } from './hockeyEquipment';
 
 /** Mixamo-rigged character (see public/models/CREDITS.txt). mixamorig / mixamorig12 both work. */
 export const SKATER_URL = `${import.meta.env.BASE_URL}models/skater.fbx`;
@@ -100,6 +102,8 @@ export interface SkaterRig {
   /** Segment lengths in world units. */
   limbs: { upperArm: number; forearm: number; thigh: number; shin: number };
   armReach: number;
+  /** Solver frame to the actual bone rest axes, calibrated once per imported rig. */
+  limbFrame: Partial<Record<BoneName, THREE.Quaternion>>;
   dispose(): void;
 }
 
@@ -302,7 +306,9 @@ export function createSkaterRig(
   const rootQ = root.getWorldQuaternion(new THREE.Quaternion()).invert();
   const bindWorld = {} as Record<BoneName, THREE.Quaternion>;
   for (const name of NAMES)
-    bindWorld[name] = rootQ.clone().multiply(bones[name].getWorldQuaternion(new THREE.Quaternion()));
+    bindWorld[name] = rootQ
+      .clone()
+      .multiply(bones[name].getWorldQuaternion(new THREE.Quaternion()));
   const footFlat = {
     L: rootQ.clone().multiply(bones.footL.getWorldQuaternion(new THREE.Quaternion())),
     R: rootQ.clone().multiply(bones.footR.getWorldQuaternion(new THREE.Quaternion())),
@@ -313,6 +319,25 @@ export function createSkaterRig(
     thigh: bones.shinL.position.length() * scale,
     shin: bones.footL.position.length() * scale,
   };
+  const disposeEquipment = fitHockeyEquipment(bones, bindWorld, scale, ankle.y, goalie);
+  const limbFrame: Partial<Record<BoneName, THREE.Quaternion>> = {};
+  for (const side of SIDES) {
+    for (const [name, child, arm] of [
+      [`upperArm${side}`, `forearm${side}`, true],
+      [`forearm${side}`, `hand${side}`, true],
+      [`thigh${side}`, `shin${side}`, false],
+      [`shin${side}`, `foot${side}`, false],
+    ] as [BoneName, BoneName, boolean][]) {
+      const y = bones[child].position.clone().normalize().applyQuaternion(bindWorld[name]);
+      const x = new THREE.Vector3(arm ? 0 : -1, arm ? -1 : 0, 0);
+      x.addScaledVector(y, -x.dot(y)).normalize();
+      const z = new THREE.Vector3().crossVectors(x, y).normalize();
+      const reference = new THREE.Quaternion().setFromRotationMatrix(
+        new THREE.Matrix4().makeBasis(x, y, z),
+      );
+      limbFrame[name] = reference.invert().multiply(bindWorld[name]);
+    }
+  }
   return {
     root,
     mesh: skinned,
@@ -322,19 +347,29 @@ export function createSkaterRig(
     fingers,
     ragdoll: { active: false, extra, spin },
     scale,
-    ankleHeight: ankle.y,
+    ankleHeight: ankle.y + SKATE_LIFT,
     pelvisBind: bones.pelvis.position.clone(),
     hipOffset: bones.thighL.position.clone().multiplyScalar(scale),
     footFlat,
     limbs,
     armReach: limbs.upperArm + limbs.forearm,
+    limbFrame,
     dispose() {
+      disposeEquipment();
+      const materials = new Set<THREE.Material>();
+      const skeletons = new Set<THREE.Skeleton>();
       root.traverse((object) => {
-        const mat = (object as THREE.Mesh).material;
-        if ((object as THREE.Mesh).isMesh && mat && 'dispose' in mat) mat.dispose();
+        const mesh = object as THREE.Mesh;
+        if (mesh.isMesh) {
+          for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material])
+            materials.add(material);
+        }
+        if ((object as THREE.SkinnedMesh).isSkinnedMesh)
+          skeletons.add((object as THREE.SkinnedMesh).skeleton);
       });
+      materials.forEach((material) => material.dispose());
+      skeletons.forEach((skeleton) => skeleton.dispose());
       numberTexture.dispose();
-      skinned.skeleton.dispose();
     },
   };
 }
@@ -347,24 +382,14 @@ export function setWorldQuaternion(bone: THREE.Bone, world: THREE.Quaternion) {
   bone.parent!.getWorldQuaternion(_parentQ);
   bone.quaternion.copy(_parentQ.invert()).multiply(world);
 }
-function setWorldBasis(bone: THREE.Bone, x: THREE.Vector3, y: THREE.Vector3, z: THREE.Vector3) {
-  setWorldQuaternion(bone, _worldQ.setFromRotationMatrix(_basis.makeBasis(x, y, z)));
-}
-
 const _rootPos = new THREE.Vector3(),
-  _toTarget = new THREE.Vector3(),
-  _bend = new THREE.Vector3(),
   _mid = new THREE.Vector3(),
+  _end = new THREE.Vector3(),
   _along = new THREE.Vector3(),
   _hinge = new THREE.Vector3(),
   _third = new THREE.Vector3();
 export type Limb = 'arm' | 'leg';
-/**
- * Two-bone IK. Places the wrist or ankle at `target` (world) with the elbow or knee pushed toward
- * `pole` (world point). Both segments get a full orientation from the bend plane, so the mesh
- * never twists about the limb: Mixamo arms hinge on local Z and legs on local X, with local Y
- * running down the bone toward the child.
- */
+/** Calibrated two-bone IK. Bend limits avoid locked elbows and hyperextended knees. */
 export function reachLimb(
   rig: SkaterRig,
   limb: Limb,
@@ -372,40 +397,38 @@ export function reachLimb(
   target: THREE.Vector3,
   pole: THREE.Vector3,
 ) {
-  const upper =
-      rig.bones[limb === 'arm' ? (`upperArm${side}` as const) : (`thigh${side}` as const)],
-    lower = rig.bones[limb === 'arm' ? (`forearm${side}` as const) : (`shin${side}` as const)];
-  const a = limb === 'arm' ? rig.limbs.upperArm : rig.limbs.thigh,
-    b = limb === 'arm' ? rig.limbs.forearm : rig.limbs.shin;
+  const upperName: BoneName = limb === 'arm' ? `upperArm${side}` : `thigh${side}`;
+  const lowerName: BoneName = limb === 'arm' ? `forearm${side}` : `shin${side}`;
+  const upper = rig.bones[upperName],
+    lower = rig.bones[lowerName];
+  // Measure each side: imported rigs need not have exactly symmetrical limbs.
+  const a = lower.position.length() * rig.scale;
+  const b =
+    rig.bones[(limb === 'arm' ? `hand${side}` : `foot${side}`) as BoneName].position.length() *
+    rig.scale;
   upper.getWorldPosition(_rootPos);
-  _toTarget.subVectors(target, _rootPos);
-  const distance = THREE.MathUtils.clamp(
-    _toTarget.length(),
-    Math.abs(a - b) + 1e-3,
-    (a + b) * 0.995,
+  solveTwoBone(
+    _rootPos,
+    target,
+    pole,
+    a,
+    b,
+    limb === 'arm' ? 0.18 : 0.08,
+    limb === 'arm' ? 2.55 : 2.65,
+    _mid,
+    _end,
+    _hinge,
   );
-  _toTarget.normalize();
-  const along = (a * a - b * b + distance * distance) / (2 * distance),
-    lift = Math.sqrt(Math.max(a * a - along * along, 0));
-  _bend.subVectors(pole, _rootPos);
-  _bend.addScaledVector(_toTarget, -_bend.dot(_toTarget));
-  if (_bend.lengthSq() < 1e-8) _bend.set(0, 0, 1).addScaledVector(_toTarget, -_toTarget.z);
-  _bend.normalize();
-  _mid.copy(_rootPos).addScaledVector(_toTarget, along).addScaledVector(_bend, lift);
-  _hinge.crossVectors(_toTarget, _bend).normalize();
   if (limb === 'arm') _hinge.multiplyScalar(sideSign(side));
-  const orient = (bone: THREE.Bone, from: THREE.Vector3, to: THREE.Vector3) => {
+  const orient = (name: BoneName, from: THREE.Vector3, to: THREE.Vector3) => {
     _along.subVectors(to, from).normalize();
-    if (limb === 'leg') {
-      _third.crossVectors(_hinge, _along);
-      setWorldBasis(bone, _hinge, _along, _third);
-    } else {
-      _third.crossVectors(_along, _hinge);
-      setWorldBasis(bone, _third, _along, _hinge);
-    }
+    _third.crossVectors(_hinge, _along).normalize();
+    _worldQ.setFromRotationMatrix(_basis.makeBasis(_hinge, _along, _third));
+    _worldQ.multiply(rig.limbFrame[name]!);
+    setWorldQuaternion(rig.bones[name], _worldQ);
   };
-  orient(upper, _rootPos, _mid);
-  orient(lower, _mid, target);
+  orient(upperName, _rootPos, _mid);
+  orient(lowerName, _mid, _end);
 }
 
 const _yawQ = new THREE.Quaternion(),
@@ -438,12 +461,13 @@ const _palm = new THREE.Vector3(),
   _forearmQ = new THREE.Quaternion(),
   _handQ = new THREE.Quaternion(),
   _rollQ = new THREE.Quaternion(),
+  _inverseHand = new THREE.Quaternion(),
   _yAxis = new THREE.Vector3(0, 1, 0);
 /**
  * Share of the wrist's twist the forearm takes as pronation. Mixamo rigs have no forearm twist
  * bones, so leaving it all at the wrist collapses the skin there like a candy wrapper.
  */
-const FOREARM_TWIST = 0.6;
+const FOREARM_TWIST = 0.7;
 /**
  * Wraps a hand around the stick. `point` is on the shaft axis and `along` runs up the shaft toward
  * the knob. The knuckle line lies along the shaft and the fingers carry on from the forearm, so the
@@ -478,7 +502,23 @@ export function holdStick(
   _rollQ.copy(_forearmQ).invert().multiply(_handQ);
   const twist = 2 * Math.atan2(_rollQ.y, _rollQ.w);
   const wrapped = Math.atan2(Math.sin(twist), Math.cos(twist));
-  forearm.quaternion.multiply(_rollQ.setFromAxisAngle(_yAxis, wrapped * FOREARM_TWIST));
+  forearm.quaternion.multiply(
+    _rollQ.setFromAxisAngle(_yAxis, THREE.MathUtils.clamp(wrapped * FOREARM_TWIST, -1.25, 1.25)),
+  );
+  // Limit the remaining wrist deviation relative to this character's rest hand.
+  forearm.getWorldQuaternion(_forearmQ);
+  _rollQ.copy(_forearmQ).multiply(rig.bind[`hand${side}`]);
+  _handQ.premultiply(_inverseHand.copy(_rollQ).invert());
+  limitWrist(_handQ);
+  _handQ.premultiply(_rollQ);
+  // Recompute the wrist from the constrained palm, so limiting rotation cannot open the grip.
+  _fingersDir.set(0, 1, 0).applyQuaternion(_handQ);
+  _palm.set(0, 0, 1).applyQuaternion(_handQ);
+  _wrist.copy(point).addScaledVector(_fingersDir, -PALM_ALONG).addScaledVector(_palm, -PALM_THICK);
+  reachLimb(rig, 'arm', side, _wrist, _elbowPole);
+  forearm.quaternion.multiply(
+    _rollQ.setFromAxisAngle(_yAxis, THREE.MathUtils.clamp(wrapped * FOREARM_TWIST, -1.25, 1.25)),
+  );
   setWorldQuaternion(hand, _handQ);
   curlFingers(rig, side, curl);
 }

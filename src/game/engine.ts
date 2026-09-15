@@ -107,6 +107,10 @@ export function createMatch(
         stickSideVel: 0,
         stickReachVel: 0,
         shotTimer: 0,
+        shotStyle: 'wrist',
+        shotDuration: 0.34,
+        shotSide: STICK.restSide,
+        shotReach: STICK.restReach,
         passTimer: 0,
         diveTimer: 0,
         blockTimer: 0,
@@ -548,6 +552,10 @@ export function shootPuck(s: MatchState, p: Skater, power: number, aim = 0, heig
   const loft = Math.min(12, (target.y - origin.y + 4.9 * travel * travel) / travel);
   releasePuck(s, p, dx, dz, speed, loft, true, origin);
   p.shotTimer = oneTimer ? 0.22 : 0.34;
+  p.shotDuration = p.shotTimer;
+  p.shotStyle = backhand ? 'backhand' : power > 0.55 ? 'slap' : 'wrist';
+  p.shotSide = p.stickSide;
+  p.shotReach = p.stickReach;
   p.passTimer = 0;
   s.shots[p.team]++;
   s.shotCharge = 0;
@@ -620,6 +628,10 @@ function applyPassAim(s: MatchState, p: Skater, input: InputFrame) {
 export function passPuck(s: MatchState, p: Skater, mx: number, mz: number, loft = 0) {
   if (s.puck.owner !== p.id || p.downTimer > 0 || p.stumbleTimer > 0) return;
   const lane = passLane(s, p, mx, mz);
+  p.shotTimer = p.shotDuration = 0.28;
+  p.shotStyle = 'pass';
+  p.shotSide = p.stickSide;
+  p.shotReach = p.stickReach;
   releasePuck(s, p, lane.dx, lane.dz, PHYSICS.passSpeed * (loft > 0 ? 0.92 : 1), loft, false);
   if (lane.target && p.team === s.homeTeam) s.controlled = lane.target.id;
   s.passHeld = false;
@@ -660,7 +672,10 @@ export function chipPuck(s: MatchState, p: Skater, input: InputFrame) {
     onNet,
     { x: tip.x + aim.x * 0.28, z: tip.z + aim.z * 0.28, y: 0.22 },
   );
-  p.shotTimer = 0.22;
+  p.shotTimer = p.shotDuration = 0.22;
+  p.shotStyle = 'wrist';
+  p.shotSide = p.stickSide;
+  p.shotReach = p.stickReach;
   if (onNet) s.shots[p.team]++;
   emit(s, onNet ? 'shot' : 'pass', onNet ? 0.4 : 0.28);
   notice(s, onNet ? 'CHIP IN' : 'CHIP');

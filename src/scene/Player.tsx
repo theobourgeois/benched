@@ -16,8 +16,10 @@ import {
   curlFingers,
   holdStick,
   reachLimb,
+  poseBone,
 } from './skaterModel';
 import { GET_UP, fallenAmount, poseSkater } from './skaterPose';
+import { reviewSkaters } from './animationReview';
 import {
   POSE_SIZE,
   SkaterPhysics,
@@ -52,17 +54,16 @@ useLoader.preload(GLTFLoader, HELMET_GOALIE_URL);
 /** Player root sits at y=0.03; ice surface is ~0.012. Sink the rocker a hair so it reads as planted. */
 const BLADE_ICE_Y = -0.028;
 /** How far down the shaft from the top hand the bottom hand likes to sit, in world units. */
-const BOTTOM_HAND = 0.4;
 /** The bottom hand slides up the shaft rather than leave it when the arm cannot reach that far. */
 const BOTTOM_HAND_MIN = 0.14;
 /** Forward speed along facing before the bottom hand comes off for a pumping stride. */
-const ONE_HAND_FORWARD = 5.2;
+const ONE_HAND_FORWARD = 4.5;
 /** Rearward speed along facing that counts as backskating. */
-const ONE_HAND_BACK = -1.5;
+const ONE_HAND_BACK = -2;
 /** Residual whole-body roll on a deke; most of the lean comes from the hips and torso. */
 const DEKE_ROLL = 0.25;
 /** Only the jump deke leaves the ice; other dekes hop the puck while the skater just unweights. */
-const DEKE_HOP = 0.35;
+const DEKE_HOP = 0;
 
 const topShoulder = new THREE.Vector3(),
   lowShoulder = new THREE.Vector3(),
@@ -124,6 +125,7 @@ export const Player = memo(function Player({ id }: { id: number }) {
   useEffect(
     () => () => {
       physics.dispose();
+      reviewSkaters.delete(id);
       showPose(id, null);
     },
     [physics, id],
@@ -139,6 +141,10 @@ export const Player = memo(function Player({ id }: { id: number }) {
   const blade = goalie ? GOALIE_BLADE : SKATER_BLADE,
     bladeParts = bladeGeometries(blade);
   const heading = useMemo(() => new THREE.Vector3(0, 0, 1), []);
+  const gripPose = useMemo(
+    () => [new THREE.Quaternion(), new THREE.Quaternion(), new THREE.Quaternion()],
+    [],
+  );
 
   /** The procedural skater: skating pose, stick and hands. */
   function drawSkater(
@@ -148,17 +154,24 @@ export const Player = memo(function Player({ id }: { id: number }) {
     root: THREE.Group,
     tilt: THREE.Group,
     parts: StickParts,
+    recoveryProgress = 1,
   ) {
     const along_ = skater.vx * Math.sin(skater.angle) + skater.vz * Math.cos(skater.angle);
     const dekeMove = activeDeke(skater);
-    const oneHand =
+    const canRelease =
       !goalie &&
       s.puck.owner !== id &&
       skater.liftTimer <= 0 &&
       skater.blockTimer <= 0 &&
       !dekeMove &&
-      (along_ > ONE_HAND_FORWARD || along_ < ONE_HAND_BACK);
-    const twoHand = !oneHand;
+      skater.shotTimer <= 0;
+    let freeHand = canRelease
+      ? Math.max(
+          THREE.MathUtils.smoothstep(along_, ONE_HAND_FORWARD, ONE_HAND_FORWARD + 2.5),
+          THREE.MathUtils.smoothstep(-along_, -ONE_HAND_BACK, -ONE_HAND_BACK + 2),
+        )
+      : 0;
+    const twoHand = 1 - freeHand;
     // The body frame must be current before the pose plants skates and hands in world space.
     const fallen = fallenAmount(skater);
     const ease = 1 - Math.exp(-dt * 14);
@@ -176,33 +189,56 @@ export const Player = memo(function Player({ id }: { id: number }) {
     tilt.position.y = THREE.MathUtils.lerp(tilt.position.y, fallen * (diving ? 0.1 : 0.22), ease);
     root.updateMatrixWorld(true);
     const { bones } = rig;
-    const shooting = skater.shotTimer / 0.34;
     const charge = s.controlled === id ? s.shotCharge : 0;
-    const lift = s.controlled === id ? s.shotLift : 0;
     // The ragdoll runs on replay time, so a knockdown tumbles slowly in slow motion.
-    const posture = poseSkater(rig, skater, dt * viewTimeScale(), goalie, twoHand, charge, tilt);
-    const { stickBlend, pelvis, swing } = posture;
-
-    // Left-stick net aim keeps shotLift around 0.5 at rest; only raise the blade on a real windup.
-    const windup = Math.max(charge, shooting);
-    const raise = windup > 0.04 ? windup * (0.55 + lift * 0.7) : 0;
+    const posture = poseSkater(
+      rig,
+      skater,
+      dt * viewTimeScale(),
+      goalie,
+      twoHand,
+      charge,
+      tilt,
+      recoveryProgress,
+    );
+    const { stickBlend, pelvis, swing, action } = posture;
+    const support = 1 - THREE.MathUtils.smoothstep(recoveryProgress, 0.25, 0.7);
+    freeHand = Math.max(freeHand, action.releaseHand, support);
+    // Release clips start at the recorded puck contact and return to the current carrying pose.
+    const release =
+      skater.shotTimer > 0
+        ? THREE.MathUtils.smoothstep(skater.shotTimer / (skater.shotDuration ?? 0.34), 0, 0.55)
+        : 0;
+    const side = THREE.MathUtils.lerp(
+      skater.stickSide,
+      skater.shotSide ?? skater.stickSide,
+      release,
+    );
+    const reach_ = THREE.MathUtils.lerp(
+      skater.stickReach,
+      skater.shotReach ?? skater.stickReach,
+      release,
+    );
     tip.set(
-      THREE.MathUtils.lerp(0.52, skater.stickSide, stickBlend),
-      THREE.MathUtils.lerp(BLADE_ICE_Y, BLADE_ICE_Y + raise, stickBlend) + (dekeMove?.lift ?? 0),
-      THREE.MathUtils.lerp(0.2, skater.stickReach - charge * 1.15 + shooting * 0.4, stickBlend),
+      THREE.MathUtils.lerp(0.52, side + action.bladeSide, stickBlend),
+      BLADE_ICE_Y + action.bladeLift * stickBlend + (dekeMove?.lift ?? 0),
+      THREE.MathUtils.lerp(0.2, reach_ + action.bladeReach, stickBlend),
     );
     tilt.worldToLocal(bones.upperArmR.getWorldPosition(topShoulder));
     tilt.worldToLocal(bones.upperArmL.getWorldPosition(lowShoulder));
-    // Top hand rides in front of the right hip; it follows the blade a little and lifts on a windup.
-    if (twoHand) {
-      grip
-        .copy(pelvis)
-        .add(offset.set(-0.2 + skater.stickSide * 0.06, -0.02 + raise * 0.25, 0.34 + swing * 0.03));
-    } else {
-      grip.copy(pelvis).add(offset.set(-0.26, -0.02 + swing * 0.03, 0.26));
-    }
+    // The knob is carried ahead of the belt, with an elbow hanging below the shoulder.
+    // Fixed stick length then resolves the final socket before either arm is solved.
+    grip
+      .copy(pelvis)
+      .add(
+        offset.set(
+          -0.21 + side * 0.13,
+          0.14 + action.handLift + freeHand * swing * 0.025,
+          0.39 + action.check * 0.08,
+        ),
+      );
     grip.lerp(offset.set(-0.12, 0.08, -0.45), 1 - stickBlend);
-    placeStick(parts, blade, grip, tip, heading, hosel);
+    placeStick(parts, blade, grip, tip, heading, hosel, topShoulder, rig.armReach - 0.065);
     if (stickBlend > 0.4) {
       tilt.getWorldQuaternion(frameQ);
       along.subVectors(grip, hosel).normalize();
@@ -212,16 +248,16 @@ export const Player = memo(function Player({ id }: { id: number }) {
         'R',
         tilt.localToWorld(point.copy(grip)),
         alongWorld,
-        tilt.localToWorld(pole.copy(topShoulder).add(offset.set(-0.55, -0.25, -0.4))),
+        tilt.localToWorld(pole.copy(topShoulder).add(offset.set(-0.22, -0.48, -0.1))),
         1,
       );
-      if (twoHand) {
+      {
         const down = reachableDown(
           lowShoulder,
           grip,
           along,
-          rig.armReach * 0.98 + 0.05,
-          BOTTOM_HAND,
+          rig.armReach * 0.94,
+          action.handSpread,
         );
         lowHand.copy(grip).addScaledVector(along, -down);
         holdStick(
@@ -229,11 +265,15 @@ export const Player = memo(function Player({ id }: { id: number }) {
           'L',
           tilt.localToWorld(point.copy(lowHand)),
           alongWorld,
-          tilt.localToWorld(pole.copy(lowShoulder).add(offset.set(0.55, -0.05, -0.3))),
+          tilt.localToWorld(pole.copy(lowShoulder).add(offset.set(0.26, -0.4, 0.02))),
           1,
         );
-      } else {
-        // Free arm pumps across the body with the stride.
+      }
+      if (freeHand > 0) {
+        const armNames = ['upperArmL', 'forearmL', 'handL'] as const;
+        armNames.forEach((name, i) => gripPose[i].copy(bones[name].quaternion));
+        // Blend the whole arm, including the wrist, through the release and re-grip.
+
         reachLimb(
           rig,
           'arm',
@@ -243,15 +283,26 @@ export const Player = memo(function Player({ id }: { id: number }) {
               .copy(lowShoulder)
               .add(
                 offset.set(
-                  0.05 - 0.16 * Math.max(0, swing),
-                  -0.27 + 0.1 * swing,
-                  0.04 + 0.32 * swing,
+                  0.06 - 0.1 * Math.max(0, swing),
+                  -0.43 + 0.08 * swing,
+                  0.09 + 0.22 * swing,
                 ),
               ),
           ),
-          tilt.localToWorld(pole.copy(lowShoulder).add(offset.set(0.5, -0.15, -0.45))),
+          tilt.localToWorld(pole.copy(lowShoulder).add(offset.set(0.22, -0.35, -0.18))),
         );
-        curlFingers(rig, 'L', 0.55);
+        if (support > 0) {
+          reachLimb(
+            rig,
+            'arm',
+            'L',
+            tilt.localToWorld(point.set(0.32, 0.065, 0.3)),
+            tilt.localToWorld(pole.set(0.5, 0.4, 0.05)),
+          );
+        }
+        poseBone(rig, 'handL', 0.06 + support * 0.65, 0, 0);
+        armNames.forEach((name, i) => bones[name].quaternion.slerp(gripPose[i], 1 - freeHand));
+        curlFingers(rig, 'L', 1 - freeHand * 0.55);
       }
     } else {
       curlFingers(rig, 'L', 0.3);
@@ -286,6 +337,8 @@ export const Player = memo(function Player({ id }: { id: number }) {
     root.visible = true;
     if (!replay) physics.follow(skater.x, skater.z, goalie, skater.downTimer <= 0);
 
+    if (import.meta.env.DEV) reviewSkaters.set(id, { rig, stick: parts });
+
     // A full knockdown is a physics ragdoll; replays show the recorded fall.
     let ragdoll = false;
     if (replay) ragdoll = replayPose(replay.frames, replay.time, id, poses.drawn);
@@ -309,11 +362,12 @@ export const Player = memo(function Player({ id }: { id: number }) {
       if (!replay) {
         driveRagdoll(physics.doll!, rig, parts, blade);
         if (skater.downTimer < GET_UP) {
-          // Getting up: blend from where the body lies into the stance they skate off in.
+          // Gather into a supported half-kneel, then push off the planted front skate.
           capturePose(rig, parts, poses.doll);
-          drawSkater(s, { ...skater, downTimer: 0 }, dt, root, tilt, parts);
+          const progress = 1 - skater.downTimer / GET_UP;
+          drawSkater(s, { ...skater, downTimer: 0 }, dt, root, tilt, parts, progress);
           capturePose(rig, parts, poses.stand);
-          const t = THREE.MathUtils.smoothstep(1 - skater.downTimer / GET_UP, 0, 1);
+          const t = THREE.MathUtils.smoothstep(progress, 0, 0.42);
           mixPose(poses.doll, poses.stand, t, poses.drawn);
         } else capturePose(rig, parts, poses.drawn);
         showPose(id, poses.drawn);

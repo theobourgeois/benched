@@ -116,6 +116,30 @@ describe('replay sampling', () => {
     expect(view.puck.owner).toBe(3);
   });
 
+  it('does not start a shot or check before its recorded contact when seeking', () => {
+    const { s, frames } = film(3, (s, i) => {
+      Object.assign(s.skaters[0], {
+        shotTimer: i === 0 ? 0 : 0.34 - (i - 1) / REPLAY_HZ,
+        checkTimer: i === 0 ? 0 : 0.46 - (i - 1) / REPLAY_HZ,
+        shotStyle: i === 0 ? 'wrist' : 'slap',
+        shotDuration: 0.34,
+        shotSide: i === 0 ? 0.58 : 0.8,
+      });
+    });
+    const view = createView(s);
+    sampleReplay(view, frames, 0.75 / REPLAY_HZ);
+    expect(view.skaters[0].shotTimer).toBe(0);
+    expect(view.skaters[0].checkTimer).toBe(0);
+    expect(view.skaters[0].shotStyle).toBe('wrist');
+    sampleReplay(view, frames, 1 / REPLAY_HZ);
+    expect(view.skaters[0].shotTimer).toBeCloseTo(0.34);
+    expect(view.skaters[0].shotStyle).toBe('slap');
+    sampleReplay(view, frames, 1.5 / REPLAY_HZ);
+    expect(view.skaters[0].shotTimer).toBeCloseTo(0.34 - 0.5 / REPLAY_HZ);
+    sampleReplay(view, frames, 0);
+    expect(view.skaters[0].shotSide).toBe(0.58);
+  });
+
   it('cuts across a reset instead of sliding skaters over the ice', () => {
     const { s, frames } = film(2, (s, i) => (s.skaters[0].x = i * 20));
     const view = createView(s);

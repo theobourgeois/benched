@@ -174,7 +174,20 @@ export function sampleReplay(view: MatchState, frames: ReplayFrame[], time: numb
   view.shootoutShooter = near.shootoutShooter;
   view.shotCharge = a.shotCharge + (b.shotCharge - a.shotCharge) * t;
   view.shotLift = a.shotLift + (b.shotLift - a.shotLift) * t;
-  view.skaters.forEach((p, k) => blend(p, a.skaters[k], b.skaters[k], t));
+  view.skaters.forEach((p, k) => {
+    const from = a.skaters[k],
+      to = b.skaters[k];
+    blend(p, from, to, t);
+    // A newly triggered action starts at its recorded contact, never halfway through a clip
+    // in the frame before release. Its sockets and duration are discrete event metadata.
+    const action = to.shotTimer > from.shotTimer && t < 1 ? from : near.skaters[k];
+    p.shotStyle = action.shotStyle;
+    p.shotDuration = action.shotDuration;
+    p.shotSide = action.shotSide;
+    p.shotReach = action.shotReach;
+    if (to.shotTimer > from.shotTimer && t < 1) p.shotTimer = from.shotTimer;
+    if (to.checkTimer > from.checkTimer && t < 1) p.checkTimer = from.checkTimer;
+  });
   blend(view.puck, a.puck, b.puck, t);
 }
 

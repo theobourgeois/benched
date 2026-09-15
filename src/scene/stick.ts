@@ -4,10 +4,12 @@ import * as THREE from 'three';
 export interface BladeSpec {
   length: number;
   height: number;
+  /** Fixed hosel-to-knob length. */
+  shaft: number;
 }
 // Slightly oversized against a real 30 cm blade so it still reads from the broadcast camera.
-export const SKATER_BLADE: BladeSpec = { length: 0.34, height: 0.08 };
-export const GOALIE_BLADE: BladeSpec = { length: 0.4, height: 0.095 };
+export const SKATER_BLADE: BladeSpec = { length: 0.34, height: 0.08, shaft: 1.42 };
+export const GOALIE_BLADE: BladeSpec = { length: 0.4, height: 0.095, shaft: 1.48 };
 const THICKNESS = 0.014,
   CURVE = 0.035,
   KNOB_PAST_HAND = 0.1;
@@ -93,7 +95,8 @@ const _flat = new THREE.Vector3(),
  * Poses a stick so the blade sits at `tip` on the ice and the shaft runs up through `grip`.
  * Like a real stick, the blade continues the shaft's line along the ice. `heading` keeps the last
  * blade direction for when the hands are directly above the tip. Writes the hosel (where the
- * shaft meets the blade) into `hosel`; all points share the stick parent's space.
+ * shaft meets the blade) into `hosel`. Updates `grip` to the fixed-length shaft's top-hand socket;
+ * all points share the stick parent's space.
  */
 export function placeStick(
   parts: StickParts,
@@ -102,6 +105,8 @@ export function placeStick(
   tip: THREE.Vector3,
   heading: THREE.Vector3,
   hosel: THREE.Vector3,
+  shoulder?: THREE.Vector3,
+  armReach = 0.5,
 ) {
   _flat.set(tip.x - grip.x, 0, tip.z - grip.z);
   if (_flat.lengthSq() > 1e-4) heading.copy(_flat.normalize());
@@ -115,11 +120,51 @@ export function placeStick(
   const hx = HOSEL_X,
     hy = spec.height * 0.6;
   _flat.subVectors(grip, _heel);
-  const gx = _flat.dot(heading) - hx,
+  let gx = _flat.dot(heading) - hx,
     gy = _flat.y - hy;
-  const reach = Math.hypot(gx, gy) || 1;
-  layoutShaft(parts, spec, Math.atan2(-gx / reach, gy / reach), reach + KNOB_PAST_HAND);
-  return hosel.copy(_heel).addScaledVector(heading, hx).addScaledVector(UP, hy);
+  let angle = Math.atan2(gx, gy);
+  const reach = spec.shaft - KNOB_PAST_HAND;
+  hosel.copy(_heel).addScaledVector(heading, hx).addScaledVector(UP, hy);
+  if (shoulder) {
+    // Intersect the fixed socket circle in the blade plane with the shoulder's reach sphere.
+    // Constrain shaft tilt before posing the arm, instead of stretching either the arm or stick.
+    _flat.subVectors(shoulder, hosel);
+    const sx = _flat.dot(heading),
+      sy = _flat.y,
+      depth = _flat.dot(_side);
+    const distance = Math.hypot(sx, sy);
+    const radius2 = Math.max(0, armReach * armReach - depth * depth);
+    if (distance > 1e-5) {
+      const center = Math.atan2(sx, sy);
+      const halfAngle = Math.acos(
+        THREE.MathUtils.clamp(
+          (reach * reach + distance * distance - radius2) / (2 * reach * distance),
+          -1,
+          1,
+        ),
+      );
+      let delta = Math.atan2(Math.sin(angle - center), Math.cos(angle - center));
+      // Keep enough room to bend the elbow: a socket against the shoulder is unreachable too.
+      const innerRadius2 = Math.max(0, 0.25 * 0.25 - depth * depth);
+      const innerAngle = Math.acos(
+        THREE.MathUtils.clamp(
+          (reach * reach + distance * distance - innerRadius2) / (2 * reach * distance),
+          -1,
+          1,
+        ),
+      );
+      if (Math.abs(delta) < innerAngle) delta = (Math.sign(delta) || -1) * innerAngle;
+      angle = center + THREE.MathUtils.clamp(delta, -halfAngle, halfAngle);
+    }
+  }
+  gx = Math.sin(angle);
+  gy = Math.cos(angle);
+  layoutShaft(parts, spec, -angle, spec.shaft);
+  grip
+    .copy(hosel)
+    .addScaledVector(heading, gx * reach)
+    .addScaledVector(UP, gy * reach);
+  return hosel;
 }
 
 const HOSEL_X = 0.015;

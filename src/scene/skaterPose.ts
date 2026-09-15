@@ -2,6 +2,12 @@ import * as THREE from 'three';
 import type { Skater } from '../game/types';
 import { activeDeke } from '../game/dekes';
 import {
+  createHockeyAction,
+  sampleHockeyAction,
+  sampleForwardStride,
+  type HockeyAction,
+} from './hockeyMotion';
+import {
   NAMES,
   SIDES,
   plantFoot,
@@ -22,11 +28,6 @@ const _slerp = new THREE.Quaternion();
 const _spinQ = new THREE.Quaternion();
 const _e = new THREE.Euler();
 const { clamp, lerp } = THREE.MathUtils;
-const ease = (t: number) => {
-  const x = clamp(t, 0, 1);
-  return x * x * (3 - 2 * x);
-};
-
 type Knockdown = 'up' | 'limp' | 'getup';
 function knockdown(downTimer: number): Knockdown {
   if (downTimer <= 0) return 'up';
@@ -109,41 +110,6 @@ const steps: Record<Side, Step> = {
  * back (0.4–0.7), leaves the ice on the toe and swings back under the hips. The other skate runs
  * half a cycle behind, so the push always happens with the other skate already planted.
  */
-function strideStep(out: number, t: number, drive: number, stance: number, o: Step) {
-  const ahead = 0.1 + 0.16 * drive;
-  const wide = stance + 0.5 * drive;
-  if (t < 0.4) {
-    const p = t / 0.4;
-    o.x = out * stance;
-    o.z = lerp(ahead, 0.02, p);
-    o.y = 0;
-    o.yaw = out * 0.06;
-    o.pitch = 0;
-    o.weight = 1;
-    o.push = 0;
-  } else if (t < 0.7) {
-    const p = ease((t - 0.4) / 0.3);
-    o.x = out * lerp(stance, wide, p);
-    o.z = 0.02 - 0.52 * drive * p;
-    o.y = 0.08 * drive * p * p;
-    o.yaw = out * (0.06 + 0.55 * drive * p);
-    o.pitch = 0.5 * drive * p * p;
-    o.weight = 1 - p;
-    o.push = Math.sin(Math.PI * p);
-  } else {
-    const p = (t - 0.7) / 0.3,
-      e = ease(p),
-      arc = Math.sin(Math.PI * p);
-    o.x = out * lerp(wide, stance, e) - out * 0.07 * drive * arc;
-    o.z = lerp(0.02 - 0.52 * drive, ahead, e);
-    o.y = 0.08 * drive * (1 - e) + 0.1 * drive * arc;
-    o.yaw = out * lerp(0.06 + 0.55 * drive, 0.06, e);
-    o.pitch = 0.5 * drive * (1 - e) + 0.15 * drive * arc;
-    o.weight = ease((p - 0.75) / 0.25);
-    o.push = 0;
-  }
-}
-
 /** How far a skater is from upright, 0 to 1, from the knockdown and dive timers alone. */
 export function fallenAmount(skater: Skater) {
   const phase = knockdown(skater.downTimer);
@@ -189,6 +155,7 @@ export interface Posture {
   /** Free-arm swing, −1 back to 1 forward. */
   swing: number;
   crouch: number;
+  action: HockeyAction;
 }
 const posture: Posture = {
   stickBlend: 1,
@@ -196,6 +163,7 @@ const posture: Posture = {
   pelvis: new THREE.Vector3(),
   swing: 0,
   crouch: 0.5,
+  action: createHockeyAction(),
 };
 
 const legBones: BoneName[] = ['thighL', 'shinL', 'footL', 'thighR', 'shinR', 'footR'];
@@ -213,11 +181,13 @@ export function poseSkater(
   skater: Skater,
   dt: number,
   goalie: boolean,
-  twoHand: boolean,
+  twoHand: number,
   /** Shot charge, 0 to 1: the stick is drawn back and the body loads onto the back skate. */
   windup: number,
   frame: THREE.Object3D,
+  recoveryProgress = 1,
 ): Posture {
+  const recovering = 1 - THREE.MathUtils.smoothstep(recoveryProgress, 0.32, 1);
   const phase = knockdown(skater.downTimer);
   switch (phase) {
     case 'up':
@@ -259,7 +229,8 @@ export function poseSkater(
   const cut = move && skater.dekeKind !== 'spin' ? clamp(move.cut / 12, 0, 1) * skater.dekeDir : 0;
   const stumble = Math.min(1, skater.stumbleTimer / 0.25),
     lurch = stumble * Math.sin(skater.stumbleTimer * 22);
-  const checking = Math.min(1, skater.checkTimer / 0.18);
+  const action = sampleHockeyAction(skater, windup, posture.action);
+  const checking = action.check;
   const lifting = Math.min(1, skater.liftTimer / 0.18);
   const blocking = Math.min(1, skater.blockTimer / 0.12);
   const crouch =
@@ -268,9 +239,9 @@ export function poseSkater(
       : goalie
         ? 0.85
         : clamp(
-            0.42 +
-              skate * 0.3 +
-              Math.abs(deke) * 0.12 +
+            0.32 +
+              skate * 0.27 +
+              Math.abs(deke) * 0.06 +
               checking * 0.2 +
               tuck * 0.3 +
               backward * 0.12 +
@@ -287,10 +258,10 @@ export function poseSkater(
   );
 
   // Stride cycle. The left skate leads; the right runs half a cycle behind.
-  const stance = goalie ? 0.24 : 0.15;
+  const stance = goalie ? 0.29 : 0.19;
   const cycle = (skater.stride / TAU) % 1;
-  strideStep(1, (cycle + 1) % 1, drive, stance, strideSteps.L);
-  strideStep(-1, (cycle + 0.5) % 1, drive, stance, strideSteps.R);
+  sampleForwardStride(1, (cycle + 1) % 1, drive, stance, strideSteps.L);
+  sampleForwardStride(-1, (cycle + 0.5) % 1, drive, stance, strideSteps.R);
   ccutStep(1, (cycle + 1) % 1, drive, stance, ccutSteps.L);
   ccutStep(-1, (cycle + 0.5) % 1, drive, stance, ccutSteps.R);
   mixStep(strideSteps.L, ccutSteps.L, backward, steps.L);
@@ -300,14 +271,18 @@ export function poseSkater(
   const pushing = L.push + R.push;
 
   // Pelvis: sits over the gliding skate, dips into each push and shifts inside a turn.
-  const hipAbove = 0.88 - 0.36 * crouch - 0.05 * drive * pushing - 0.1 * tuck;
+  const hipAbove = lerp(
+    0.78 - 0.29 * crouch - 0.025 * pushing - 0.1 * tuck - action.hipDrop,
+    0.39,
+    recovering,
+  );
   // Loading a shot sits the weight on the back (right) skate; the release drives it onto the left.
   const pelvis = posture.pelvis.set(
-    sway * 0.08 * (0.4 + 0.6 * drive) - leanRight * 0.35 - windup * 0.08 + shooting * 0.08,
+    sway * 0.15 - leanRight * 0.24 + action.hipX,
     ICE_Y + rig.ankleHeight + hipAbove - rig.hipOffset.y,
-    -0.05 * crouch - backward * 0.06,
+    -0.065 * crouch - backward * 0.06 + action.hipZ,
   );
-  const pelvisPitch = 0.1 + 0.16 * crouch + dive * 0.5 - stumble * 0.1;
+  const pelvisPitch = 0.15 + 0.18 * crouch + dive * 0.5 - stumble * 0.1;
   const pelvisYaw = 0.13 * drive * (L.push - R.push) + deke * 0.06;
   const pelvisRoll = leanRight * 0.22 - 0.04 * drive * (R.weight - L.weight) + lurch * 0.1;
   rig.bones.pelvis.position
@@ -319,9 +294,10 @@ export function poseSkater(
   // Torso: forward lean spread down the spine, shoulders countering the hips and turning toward
   // the puck, head kept level and looking up ice.
   const bend =
-    0.5 +
-    0.62 * crouch +
-    checking * 0.3 -
+    0.45 +
+    0.6 * crouch +
+    action.bend +
+    recovering * 0.2 -
     dive * 0.35 +
     lifting * 0.15 +
     blocking * 0.2 -
@@ -329,10 +305,10 @@ export function poseSkater(
     shooting * 0.15;
   // Shoulders sit slightly open toward the top hand, as a left-shot skater carries the stick.
   // A windup coils them toward the blade side; the release unwinds through the shot.
-  const twist =
-    -0.12 + deke * 0.32 + checking * 0.6 - pelvisYaw * 1.4 + windup * 0.45 - shooting * 0.4;
+  const twist = -0.08 + deke * 0.2 - pelvisYaw * 0.8 + action.twist;
   // With both hands on the stick the bottom-hand shoulder dips toward the shaft.
-  const dip = twoHand && !goalie ? 0.26 : 0;
+  const handSupport = twoHand * (1 - action.releaseHand);
+  const dip = goalie ? 0 : 0.09 * handSupport;
   applyMix(
     rig,
     'spine',
@@ -379,24 +355,58 @@ export function poseSkater(
     for (const side of SIDES) {
       const out = sideSign(side),
         step = steps[side];
-      const splay = out * 0.3 * Math.max(0, out * leanRight);
+      const lateral = skater.vx * Math.cos(skater.angle) - skater.vz * Math.sin(skater.angle);
+      const slip = Math.atan2(lateral, Math.max(0.8, Math.abs(along)));
+      const stopping = Math.abs(slip) * (1 - drive) * Math.min(1, speed / 3);
+      const crossover = Math.max(0, Math.abs(skater.edgeLean) - 0.35) * drive * (1 - backward);
+      const swingArc = Math.sin(
+        Math.PI * clamp((((cycle + (side === 'R' ? 0.5 : 0)) % 1) - 0.65) / 0.35, 0, 1),
+      );
+      const crossing = crossover * swingArc * Math.max(0, -out * Math.sign(skater.edgeLean));
+      const splay = out * 0.15 * Math.max(0, out * leanRight);
       // Outside skate of a cut: the one opposite the cut direction.
       const outside = Math.max(0, -out * cut),
         inside = Math.max(0, out * cut);
       _foot.set(
-        lerp(step.x + splay, out * 0.6, outside) + lerp(0, -out * 0.05, inside),
-        ICE_Y + rig.ankleHeight + lerp(step.y, 0.02, outside + inside) + 0.2 * tuck,
+        lerp(step.x + splay - out * crossing * 0.55, out * 0.49, outside) +
+          lerp(0, -out * 0.05, inside),
+        ICE_Y +
+          rig.ankleHeight +
+          lerp(step.y, 0.02, outside + inside) +
+          0.2 * tuck +
+          crossing * 0.14,
         lerp(step.z, -0.15, outside) + lerp(0, 0.1, inside) - 0.1 * tuck,
       );
-      const yaw = step.yaw + out * 0.15 * Math.abs(leanRight) + out * 0.5 * outside;
+      if (recovering > 0) {
+        _foot.x = lerp(_foot.x, out * 0.19, recovering);
+        _foot.z = lerp(_foot.z, side === 'L' ? 0.36 : -0.4, recovering);
+        _foot.y = lerp(_foot.y, ICE_Y + rig.ankleHeight, recovering);
+      }
+      const yaw =
+        step.yaw +
+        out * 0.15 * Math.abs(leanRight) +
+        out * 0.5 * outside +
+        slip * (goalie ? 0.1 : 0.6) +
+        Math.sign(slip) * stopping * 0.2;
       _knee
         .copy(_foot)
         .add(_hip.set(Math.sin(yaw) * 0.7, 0.55, Math.cos(yaw) * 0.7))
         .setX(_knee.x + out * 0.05 - leanRight * 0.15);
+      if (side === 'R' && recovering > 0) {
+        _knee.y = lerp(_knee.y, ICE_Y + 0.08, recovering);
+        _knee.z = lerp(_knee.z, 0.2, recovering);
+      }
       frame.localToWorld(_foot);
       frame.localToWorld(_knee);
       reachLimb(rig, 'leg', side, _foot, _knee);
-      plantFoot(rig, side, frame, yaw, -(step.pitch + 0.45 * tuck), leanRight * 0.35);
+      plantFoot(
+        rig,
+        side,
+        frame,
+        yaw,
+        -(step.pitch + 0.45 * tuck) - (side === 'R' ? recovering * 1.1 : 0),
+        leanRight * 0.35,
+      );
     }
     if (blendFk > 0)
       legBones.forEach((name, i) => rig.bones[name].quaternion.slerp(fk[i], blendFk));
@@ -409,8 +419,8 @@ export function poseSkater(
   for (const side of SIDES) {
     const s = sideSign(side);
     // The bottom-hand clavicle drops and rolls forward to bring that shoulder to the shaft.
-    const low = side === 'L' && twoHand && !goalie ? 1 : 0;
-    poseBone(rig, `shoulder${side}`, low * 0.35, 0, s * (0.08 + low * 0.4 + checking * 0.1));
+    const low = side === 'L' && !goalie ? handSupport : 0;
+    poseBone(rig, `shoulder${side}`, low * 0.08, 0, s * (0.035 + low * 0.08 + checking * 0.05));
     applyMix(rig, `upperArm${side}`, 0.55 + armDive, 0, s * (0.15 + pump * 0.4), limp);
     applyMix(rig, `forearm${side}`, 0.5 + dive * 0.4, 0, 0, limp);
     applyMix(rig, `hand${side}`, 0.1, 0, 0, limp);
