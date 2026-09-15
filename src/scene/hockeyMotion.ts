@@ -1,9 +1,57 @@
 import { MathUtils } from 'three';
 import { PHYSICS } from '../game/config';
 import { activeDeke, dekeDuration } from '../game/dekes';
-import type { Skater } from '../game/types';
+import type { Puck, Skater } from '../game/types';
+import { SHOT_DOWNSWING, GOALIE_SAVE_TIME } from '../game/actionTiming';
 
 const { clamp, lerp, smoothstep } = MathUtils;
+
+/** The loaded pose unwinds to exact contact before the simulation releases a charged shot. */
+export function shotWindup(p: Skater, charge: number) {
+  if (!p.pendingShot) return charge;
+  const progress = 1 - p.pendingShot.timer / SHOT_DOWNSWING;
+  return p.pendingShot.load * (1 - smoothstep(progress, 0, 1));
+}
+
+export interface GoalieAction {
+  drop: number;
+  side: number;
+  reach: number;
+  high: number;
+}
+export function createGoalieAction(): GoalieAction {
+  return { drop: 0, side: 0, reach: 0, high: 0 };
+}
+
+/** Read an approaching shot; recorded contact then drives the hold and return to the ready stance. */
+export function sampleGoalieAction(p: Skater, puck: Puck, out: GoalieAction) {
+  let weight = 0,
+    side = 0,
+    height = 0;
+  if ((p.saveTimer ?? 0) > 0) {
+    const u = clamp(1 - p.saveTimer! / GOALIE_SAVE_TIME, 0, 1);
+    weight = (0.6 + 0.4 * smoothstep(u, 0, 0.15)) * (1 - smoothstep(u, 0.48, 1));
+    side = p.saveSide ?? 0;
+    height = p.saveHeight ?? 0;
+  } else if (puck.shot && puck.owner === null) {
+    const dx = puck.x - p.x,
+      dz = puck.z - p.z;
+    const speed2 = puck.vx * puck.vx + puck.vz * puck.vz;
+    const time = speed2 > 1 ? -(dx * puck.vx + dz * puck.vz) / speed2 : -1;
+    const nearX = dx + puck.vx * time,
+      nearZ = dz + puck.vz * time;
+    if (time >= 0 && time < 0.24 && Math.hypot(nearX, nearZ) < 1.35) {
+      weight = 0.6 * (1 - smoothstep(time, 0, 0.24));
+      side = clamp((nearX * Math.cos(p.angle) - nearZ * Math.sin(p.angle)) / 0.8, -1, 1);
+      height = Math.max(0, puck.y + puck.vy * time - 4.9 * time * time);
+    }
+  }
+  out.high = smoothstep(height, 0.5, 1.2);
+  out.drop = weight * (1 - out.high * 0.8);
+  out.side = side * weight;
+  out.reach = weight;
+  return out;
+}
 type Key = readonly [time: number, value: number];
 type Track = readonly Key[];
 
@@ -135,7 +183,7 @@ const RELEASE = {
     [1, 0],
   ],
   transfer: [
-    [0, -0.3],
+    [0, 0],
     [0.2, 1],
     [0.5, 0.75],
     [1, 0],

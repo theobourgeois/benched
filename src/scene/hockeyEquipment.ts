@@ -22,6 +22,7 @@ export function fitHockeyEquipment(
     roughness: 0.24,
   });
   const geometries: THREE.BufferGeometry[] = [];
+  const pads: Partial<Record<Side, THREE.Group>> = {};
   function pad(
     parent: THREE.Object3D,
     size: number[],
@@ -61,6 +62,42 @@ export function fitHockeyEquipment(
       const length = next ? next.position.length() * scale : 0.022;
       pad(child, [0.028, Math.max(0.02, length), 0.029], [0, length * 0.4, -0.003], shell, 0.009);
     });
+    if (goalie) {
+      if (side === 'R') pad(hand, [0.17, 0.23, 0.045], [0, 0.055, -0.06], holder, 0.024);
+      else {
+        // A catcher's mitt has a thumb lobe and an open pocket, rather than a blocker silhouette.
+        const outline = new THREE.Shape();
+        outline.moveTo(-0.05, -0.035);
+        outline.lineTo(0.05, -0.035);
+        outline.quadraticCurveTo(0.13, 0, 0.115, 0.11);
+        outline.quadraticCurveTo(0.105, 0.22, 0.02, 0.2);
+        outline.quadraticCurveTo(-0.025, 0.19, -0.05, 0.145);
+        outline.quadraticCurveTo(-0.14, 0.13, -0.13, 0.06);
+        outline.quadraticCurveTo(-0.13, 0, -0.05, -0.035);
+        const geometry = new THREE.ExtrudeGeometry(outline, {
+          depth: 0.04,
+          bevelEnabled: true,
+          bevelSize: 0.012,
+          bevelThickness: 0.012,
+          bevelSegments: 3,
+          curveSegments: 12,
+        });
+        geometry.translate(0, 0, -0.02);
+        geometry.scale(1 / scale, 1 / scale, 1 / scale);
+        geometries.push(geometry);
+        const mitt = new THREE.Mesh(geometry, shell);
+        mitt.castShadow = true;
+        hand.add(mitt);
+        const pocketGeometry = new THREE.SphereGeometry(1, 20, 12);
+        geometries.push(pocketGeometry);
+        const pocket = new THREE.Mesh(pocketGeometry, padding);
+        pocket.scale.set(0.075 / scale, 0.078 / scale, 0.012 / scale);
+        pocket.position.set(0, 0.09 / scale, 0.032 / scale);
+        hand.add(pocket);
+        for (let i = 0; i < 4; i++)
+          pad(hand, [0.056, 0.004, 0.008], [-0.063, 0.065 + i * 0.019, 0.04], holder, 0.001);
+      }
+    }
     const foot = bones[`foot${side}`];
     const skate = new THREE.Group();
     // Equipment is modelled in the character's forward/up frame, independent of FBX bone roll.
@@ -73,6 +110,7 @@ export function fitHockeyEquipment(
     pad(skate, [0.009, 0.023, 0.285], [0, sole - SKATE_LIFT + 0.0115, 0.04], steel, 0.004);
     if (goalie) {
       const shin = new THREE.Group();
+      pads[side] = shin;
       shin.quaternion.copy(bindWorld[`shin${side}`]).invert();
       bones[`shin${side}`].add(shin);
       pad(shin, [0.23, 0.48, 0.13], [0, -0.16, 0.09], holder, 0.025);
@@ -80,7 +118,10 @@ export function fitHockeyEquipment(
         pad(shin, [0.2, 0.014, 0.015], [0, 0.015 - i * 0.105, 0.16], padding, 0.005);
     }
   }
-  return () => {
-    for (const geometry of geometries) geometry.dispose();
+  return {
+    pads,
+    dispose() {
+      for (const geometry of geometries) geometry.dispose();
+    },
   };
 }

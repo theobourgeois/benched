@@ -49,6 +49,18 @@ export interface Skater extends Vec2 {
   stickSideVel: number;
   stickReachVel: number;
   shotTimer: number;
+  /** Charged-shot animation commits briefly before releasing the puck at blade contact. */
+  pendingShot?: {
+    timer: number;
+    load: number;
+    power: number;
+    aim: number;
+    height: number;
+    tick: number;
+  } | null;
+  saveTimer?: number;
+  saveSide?: number;
+  saveHeight?: number;
   /** Recorded with the simulation so action clips are stable during replay and seeking. */
   shotStyle?: 'wrist' | 'slap' | 'backhand' | 'pass';
   shotDuration?: number;

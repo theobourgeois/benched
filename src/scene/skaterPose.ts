@@ -6,9 +6,11 @@ import {
   sampleHockeyAction,
   sampleForwardStride,
   type HockeyAction,
+  type GoalieAction,
 } from './hockeyMotion';
 import {
   NAMES,
+  faceGoaliePads,
   SIDES,
   plantFoot,
   poseBone,
@@ -186,8 +188,10 @@ export function poseSkater(
   windup: number,
   frame: THREE.Object3D,
   recoveryProgress = 1,
+  save?: GoalieAction,
 ): Posture {
   const recovering = 1 - THREE.MathUtils.smoothstep(recoveryProgress, 0.32, 1);
+  const butterfly = goalie && skater.downTimer <= 0 ? (save?.drop ?? 0) : 0;
   const phase = knockdown(skater.downTimer);
   switch (phase) {
     case 'up':
@@ -272,13 +276,13 @@ export function poseSkater(
 
   // Pelvis: sits over the gliding skate, dips into each push and shifts inside a turn.
   const hipAbove = lerp(
-    0.78 - 0.29 * crouch - 0.025 * pushing - 0.1 * tuck - action.hipDrop,
+    lerp(0.78 - 0.29 * crouch - 0.025 * pushing - 0.1 * tuck - action.hipDrop, 0.31, butterfly),
     0.39,
     recovering,
   );
   // Loading a shot sits the weight on the back (right) skate; the release drives it onto the left.
   const pelvis = posture.pelvis.set(
-    sway * 0.15 - leanRight * 0.24 + action.hipX,
+    sway * 0.15 - leanRight * 0.24 + action.hipX + (save?.side ?? 0) * 0.09,
     ICE_Y + rig.ankleHeight + hipAbove - rig.hipOffset.y,
     -0.065 * crouch - backward * 0.06 + action.hipZ,
   );
@@ -377,6 +381,12 @@ export function poseSkater(
           crossing * 0.14,
         lerp(step.z, -0.15, outside) + lerp(0, 0.1, inside) - 0.1 * tuck,
       );
+      if (goalie) {
+        // Lateral shuffle blades stay on the ice; save pads fan outward from the knees.
+        _foot.y = ICE_Y + rig.ankleHeight;
+        _foot.x = lerp(_foot.x, out * 0.54, butterfly);
+        _foot.z = lerp(_foot.z, -0.14, butterfly);
+      }
       if (recovering > 0) {
         _foot.x = lerp(_foot.x, out * 0.19, recovering);
         _foot.z = lerp(_foot.z, side === 'L' ? 0.36 : -0.4, recovering);
@@ -387,7 +397,8 @@ export function poseSkater(
         out * 0.15 * Math.abs(leanRight) +
         out * 0.5 * outside +
         slip * (goalie ? 0.1 : 0.6) +
-        Math.sign(slip) * stopping * 0.2;
+        Math.sign(slip) * stopping * 0.2 +
+        out * butterfly * 0.9;
       _knee
         .copy(_foot)
         .add(_hip.set(Math.sin(yaw) * 0.7, 0.55, Math.cos(yaw) * 0.7))
@@ -395,6 +406,11 @@ export function poseSkater(
       if (side === 'R' && recovering > 0) {
         _knee.y = lerp(_knee.y, ICE_Y + 0.08, recovering);
         _knee.z = lerp(_knee.z, 0.2, recovering);
+      }
+      if (butterfly > 0) {
+        _knee.x = lerp(_knee.x, out * 0.16, butterfly);
+        _knee.y = lerp(_knee.y, ICE_Y + 0.08, butterfly);
+        _knee.z = lerp(_knee.z, 0.18, butterfly);
       }
       frame.localToWorld(_foot);
       frame.localToWorld(_knee);
@@ -405,13 +421,14 @@ export function poseSkater(
         frame,
         yaw,
         -(step.pitch + 0.45 * tuck) - (side === 'R' ? recovering * 1.1 : 0),
-        leanRight * 0.35,
+        leanRight * 0.35 + out * butterfly * 0.8,
       );
     }
     if (blendFk > 0)
       legBones.forEach((name, i) => rig.bones[name].quaternion.slerp(fk[i], blendFk));
   }
   for (const side of SIDES) poseBone(rig, `toe${side}`, 0, 0, 0);
+  if (goalie) faceGoaliePads(rig, frame);
 
   // Arms. Stick hands are placed by the caller; this is the rest pose and the free-arm swing.
   const armDive = dive * 0.8 + lifting * 0.35 + blocking * 0.25;

@@ -17,9 +17,11 @@ import {
   holdStick,
   reachLimb,
   poseBone,
+  setWorldQuaternion,
 } from './skaterModel';
 import { GET_UP, fallenAmount, poseSkater } from './skaterPose';
 import { reviewSkaters } from './animationReview';
+import { createGoalieAction, sampleGoalieAction, shotWindup } from './hockeyMotion';
 import {
   POSE_SIZE,
   SkaterPhysics,
@@ -141,6 +143,7 @@ export const Player = memo(function Player({ id }: { id: number }) {
   const blade = goalie ? GOALIE_BLADE : SKATER_BLADE,
     bladeParts = bladeGeometries(blade);
   const heading = useMemo(() => new THREE.Vector3(0, 0, 1), []);
+  const goalieAction = useMemo(createGoalieAction, []);
   const gripPose = useMemo(
     () => [new THREE.Quaternion(), new THREE.Quaternion(), new THREE.Quaternion()],
     [],
@@ -189,7 +192,8 @@ export const Player = memo(function Player({ id }: { id: number }) {
     tilt.position.y = THREE.MathUtils.lerp(tilt.position.y, fallen * (diving ? 0.1 : 0.22), ease);
     root.updateMatrixWorld(true);
     const { bones } = rig;
-    const charge = s.controlled === id ? s.shotCharge : 0;
+    const charge = shotWindup(skater, s.controlled === id ? s.shotCharge : 0);
+    if (goalie) sampleGoalieAction(skater, s.puck, goalieAction);
     // The ragdoll runs on replay time, so a knockdown tumbles slowly in slow motion.
     const posture = poseSkater(
       rig,
@@ -200,10 +204,11 @@ export const Player = memo(function Player({ id }: { id: number }) {
       charge,
       tilt,
       recoveryProgress,
+      goalie ? goalieAction : undefined,
     );
     const { stickBlend, pelvis, swing, action } = posture;
     const support = 1 - THREE.MathUtils.smoothstep(recoveryProgress, 0.25, 0.7);
-    freeHand = Math.max(freeHand, action.releaseHand, support);
+    freeHand = Math.max(freeHand, action.releaseHand, support, goalie ? 1 : 0);
     // Release clips start at the recorded puck contact and return to the current carrying pose.
     const release =
       skater.shotTimer > 0
@@ -224,6 +229,7 @@ export const Player = memo(function Player({ id }: { id: number }) {
       BLADE_ICE_Y + action.bladeLift * stickBlend + (dekeMove?.lift ?? 0),
       THREE.MathUtils.lerp(0.2, reach_ + action.bladeReach, stickBlend),
     );
+    if (goalie) tip.set(-0.08 + goalieAction.side * 0.12, BLADE_ICE_Y, 0.63);
     tilt.worldToLocal(bones.upperArmR.getWorldPosition(topShoulder));
     tilt.worldToLocal(bones.upperArmL.getWorldPosition(lowShoulder));
     // The knob is carried ahead of the belt, with an elbow hanging below the shoulder.
@@ -237,6 +243,7 @@ export const Player = memo(function Player({ id }: { id: number }) {
           0.39 + action.check * 0.08,
         ),
       );
+    if (goalie) grip.copy(pelvis).add(offset.set(-0.22, -0.02, 0.34));
     grip.lerp(offset.set(-0.12, 0.08, -0.45), 1 - stickBlend);
     placeStick(parts, blade, grip, tip, heading, hosel, topShoulder, rig.armReach - 0.065);
     if (stickBlend > 0.4) {
@@ -251,7 +258,7 @@ export const Player = memo(function Player({ id }: { id: number }) {
         tilt.localToWorld(pole.copy(topShoulder).add(offset.set(-0.22, -0.48, -0.1))),
         1,
       );
-      {
+      if (!goalie) {
         const down = reachableDown(
           lowShoulder,
           grip,
@@ -301,8 +308,28 @@ export const Player = memo(function Player({ id }: { id: number }) {
           );
         }
         poseBone(rig, 'handL', 0.06 + support * 0.65, 0, 0);
+        if (goalie && support === 0) {
+          reachLimb(
+            rig,
+            'arm',
+            'L',
+            tilt.localToWorld(
+              point
+                .copy(lowShoulder)
+                .add(
+                  offset.set(
+                    0.13 + Math.max(0, goalieAction.side) * 0.22,
+                    -0.16 + goalieAction.high * goalieAction.reach * 0.32,
+                    0.32 + goalieAction.reach * 0.06,
+                  ),
+                ),
+            ),
+            tilt.localToWorld(pole.copy(lowShoulder).add(offset.set(0.3, -0.28, 0.1))),
+          );
+          setWorldQuaternion(bones.handL, frameQ);
+        }
         armNames.forEach((name, i) => bones[name].quaternion.slerp(gripPose[i], 1 - freeHand));
-        curlFingers(rig, 'L', 1 - freeHand * 0.55);
+        curlFingers(rig, 'L', goalie ? 0.2 + goalieAction.reach * 0.3 : 1 - freeHand * 0.55);
       }
     } else {
       curlFingers(rig, 'L', 0.3);

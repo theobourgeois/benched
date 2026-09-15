@@ -228,6 +228,8 @@ describe('puck physics', () => {
     Object.assign(s.puck, { x: 24.1, z: 0.1, y: 0.4, vx: 30, shot: true });
     stepMatch(s);
     expect(s.events.some((e) => e.type === 'save')).toBe(true);
+    expect(s.skaters[11].saveTimer).toBeGreaterThan(0);
+    expect(s.skaters[11].saveHeight).toBeCloseTo(0.4, 1);
     expect(s.puck.vx).toBeLessThan(0);
     expect(s.score).toEqual([0, 0]);
   });

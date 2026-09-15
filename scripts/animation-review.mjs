@@ -28,6 +28,8 @@ const clips = [
   ['check', 1.4],
   ['through-legs', 1.4],
   ['goalie', 1.5],
+  ['goalie-low-save', 1.4],
+  ['goalie-glove-save', 1.4],
 ].filter(([name]) => process.argv.length <= 2 || process.argv.slice(2).includes(name));
 try {
   await page.goto('http://localhost:5173');
@@ -41,11 +43,13 @@ try {
     const result = await page.evaluate(
       async ({ name, duration }) => {
         const { reviewSkaters } = await import('/src/scene/animationReview.ts');
-        const { stickTip } = await import('/src/game/engine.ts');
+        const { stickTip, shootPuck, passPuck } = await import('/src/game/engine.ts');
+        const { PHYSICS, PUCK } = await import('/src/game/config.ts');
         const { sampleDeke } = await import('/src/game/dekes.ts');
+        const { SHOT_DOWNSWING, GOALIE_SAVE_TIME } = await import('/src/game/actionTiming.ts');
         const { runtime } = window.__BENCHED__;
         const s = runtime.match;
-        const id = name === 'goalie' ? s.skaters.findIndex((p) => p.role === 'G') : 0;
+        const id = name.startsWith('goalie') ? s.skaters.findIndex((p) => p.role === 'G') : 0;
         s.controlled = id;
         s.hitstop = 1e9;
         s.skaters.forEach((p, i) => {
@@ -72,6 +76,10 @@ try {
           blockTimer: 0,
           liftTimer: 0,
           shotTimer: 0,
+          pendingShot: null,
+          saveTimer: 0,
+          saveSide: 0,
+          saveHeight: 0,
           shotStyle: 'wrist',
           shotDuration: 0.34,
           shotSide: 0.58,
@@ -92,6 +100,7 @@ try {
         const samples = [];
         const start = performance.now();
         let previous = -1;
+        let released = null;
         while ((performance.now() - start) / 1000 < duration) {
           const t = (performance.now() - start) / 1000,
             u = Math.min(1, t / duration);
@@ -114,14 +123,27 @@ try {
             p.stickReach = 1.05 - 0.9 * Math.sin(Math.PI * u);
           }
           if (name.includes('shot') || name === 'pass') {
+            p.angle = Math.PI / 2;
             const slap = name === 'slap-shot',
               pass = name === 'pass';
-            const releaseAt = 0.55;
-            s.shotCharge = slap && t < releaseAt ? Math.min(1, t / 0.4) : 0;
+            const releaseAt = 0.55 + (slap ? SHOT_DOWNSWING : 0);
+            s.shotCharge = slap && t < 0.55 ? Math.min(1, t / 0.4) : 0;
+            p.pendingShot =
+              slap && t >= 0.55 && t < releaseAt
+                ? { timer: releaseAt - t, load: 1, power: 1, aim: 0, height: 0.5, tick: s.tick }
+                : null;
             p.shotStyle = slap ? 'slap' : pass ? 'pass' : 'wrist';
             p.shotDuration = pass ? 0.28 : 0.34;
             p.shotTimer = t >= releaseAt ? Math.max(0, p.shotDuration - (t - releaseAt)) : 0;
             if (t >= releaseAt) s.puck.owner = null;
+          }
+          if (name.startsWith('goalie')) {
+            s.puck.owner = null;
+            if (name !== 'goalie') {
+              p.saveTimer = t >= 0.2 ? Math.max(0, GOALIE_SAVE_TIME - (t - 0.2)) : 0;
+              p.saveHeight = name === 'goalie-low-save' ? 0.1 : 1.25;
+              p.saveSide = 0.7;
+            }
           }
           if (name === 'check') {
             p.checkTimer = Math.max(0, 0.46 - Math.max(0, t - 0.2));
@@ -139,6 +161,29 @@ try {
           s.puck.x = tip.x;
           s.puck.z = tip.z;
           s.puck.y = 0.031;
+          if (name.includes('shot') || name === 'pass') {
+            const releaseAt = 0.55 + (name === 'slap-shot' ? SHOT_DOWNSWING : 0);
+            if (t >= releaseAt) {
+              if (!released) {
+                s.puck.owner = id;
+                if (name === 'pass') passPuck(s, p, 1, 0);
+                else shootPuck(s, p, name === 'slap-shot' ? 1 : 0.35, 0, 0.45);
+                released = { at: t, puck: { ...s.puck } };
+                s.controlled = id;
+              }
+              const elapsed = t - released.at;
+              const travel =
+                PHYSICS.puckDrag > 1e-6
+                  ? (1 - Math.exp(-PHYSICS.puckDrag * elapsed)) / PHYSICS.puckDrag
+                  : elapsed;
+              s.puck.x = released.puck.x + released.puck.vx * travel;
+              s.puck.z = released.puck.z + released.puck.vz * travel;
+              s.puck.y = Math.max(
+                PUCK.restY,
+                released.puck.y + released.puck.vy * elapsed - 4.9 * elapsed * elapsed,
+              );
+            }
+          }
           window.__CAMERA__ = { position: [3.1, 1.85, 3.8], target: [0, 0.95, 0.2], fov: 35 };
           // Wait until the renderer has consumed this sample.
           await new Promise(requestAnimationFrame);
@@ -192,7 +237,7 @@ try {
     );
     if (!result.samples.length) throw new Error(`No rendered samples for ${name}`);
     for (const sample of result.samples) {
-      const expected = name === 'goalie' ? 1.48 : 1.42;
+      const expected = name.startsWith('goalie') ? 1.48 : 1.42;
       if (!Number.isFinite(sample.shaftLength) || Math.abs(sample.shaftLength - expected) > 1e-5)
         throw new Error(`Shaft length changed in ${name}`);
       for (const bone of Object.values(sample.bones))
@@ -220,7 +265,9 @@ try {
           samples: c.samples.length,
           maxPalmDistance: [0, 1].map((i) => Math.max(...c.samples.map((s) => s.hands[i]))),
           shaftError: Math.max(
-            ...c.samples.map((s) => Math.abs(s.shaftLength - (c.name === 'goalie' ? 1.48 : 1.42))),
+            ...c.samples.map((s) =>
+              Math.abs(s.shaftLength - (c.name.startsWith('goalie') ? 1.48 : 1.42)),
+            ),
           ),
         })),
       },

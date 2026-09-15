@@ -131,6 +131,8 @@ const POSES = {
     noPuck: true,
   },
   goalie: { goalie: true },
+  goalieLow: { goalie: true, saveTimer: 0.56, saveHeight: 0.1, saveSide: 0.7 },
+  goalieGlove: { goalie: true, saveTimer: 0.56, saveHeight: 1.3, saveSide: 0.7 },
   limp: { downTimer: 1.3, noPuck: true },
   getup: { downTimer: 0.45, noPuck: true },
   dive: { diveTimer: 0.4, vz: 4, noPuck: true },
@@ -181,6 +183,10 @@ for (const [pose, fields] of Object.entries(POSES)) {
     p.checkTimer = 0;
     p.diveTimer = 0;
     p.shotTimer = 0;
+    p.pendingShot = null;
+    p.saveTimer = 0;
+    p.saveSide = 0;
+    p.saveHeight = 0;
     p.fallAngle = 0.6;
     s.shotCharge = fields.charge ?? 0;
     s.puck.owner = fields.noPuck ? null : id;
@@ -195,7 +201,9 @@ for (const [pose, fields] of Object.entries(POSES)) {
     Object.assign(p, rest);
   }, fields);
   const camSet =
-    process.env.CAMS === 'all' ? Object.keys(CAMS) : (CAM_SETS[process.env.CAMS] ?? CAM_SETS.default);
+    process.env.CAMS === 'all'
+      ? Object.keys(CAMS)
+      : (CAM_SETS[process.env.CAMS] ?? CAM_SETS.default);
   for (const cam of camSet) {
     const framing = CAMS[cam];
     await page.evaluate((f) => {

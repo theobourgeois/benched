@@ -102,6 +102,7 @@ export interface SkaterRig {
   /** Segment lengths in world units. */
   limbs: { upperArm: number; forearm: number; thigh: number; shin: number };
   armReach: number;
+  goaliePads: Partial<Record<Side, THREE.Group>>;
   /** Solver frame to the actual bone rest axes, calibrated once per imported rig. */
   limbFrame: Partial<Record<BoneName, THREE.Quaternion>>;
   dispose(): void;
@@ -319,7 +320,13 @@ export function createSkaterRig(
     thigh: bones.shinL.position.length() * scale,
     shin: bones.footL.position.length() * scale,
   };
-  const disposeEquipment = fitHockeyEquipment(bones, bindWorld, scale, ankle.y, goalie);
+  const { dispose: disposeEquipment, pads: goaliePads } = fitHockeyEquipment(
+    bones,
+    bindWorld,
+    scale,
+    ankle.y,
+    goalie,
+  );
   const limbFrame: Partial<Record<BoneName, THREE.Quaternion>> = {};
   for (const side of SIDES) {
     for (const [name, child, arm] of [
@@ -354,6 +361,7 @@ export function createSkaterRig(
     limbs,
     armReach: limbs.upperArm + limbs.forearm,
     limbFrame,
+    goaliePads,
     dispose() {
       disposeEquipment();
       const materials = new Set<THREE.Material>();
@@ -378,7 +386,7 @@ const _basis = new THREE.Matrix4(),
   _worldQ = new THREE.Quaternion(),
   _parentQ = new THREE.Quaternion();
 /** Sets a bone's world orientation. The parent's world matrix is refreshed first. */
-export function setWorldQuaternion(bone: THREE.Bone, world: THREE.Quaternion) {
+export function setWorldQuaternion(bone: THREE.Object3D, world: THREE.Quaternion) {
   bone.parent!.getWorldQuaternion(_parentQ);
   bone.quaternion.copy(_parentQ.invert()).multiply(world);
 }
@@ -450,6 +458,34 @@ export function plantFoot(
   _yawQ.setFromEuler(_e2.set(pitch, yaw, roll, 'YXZ'));
   _worldQ.copy(_frameQ).multiply(_yawQ).multiply(rig.footFlat[side]);
   setWorldQuaternion(rig.bones[`foot${side}`], _worldQ);
+}
+
+const _padY = new THREE.Vector3(),
+  _padZ = new THREE.Vector3(),
+  _padX = new THREE.Vector3(),
+  _kneePos = new THREE.Vector3(),
+  _anklePos = new THREE.Vector3(),
+  _padFrame = new THREE.Quaternion();
+/** Goal pads rotate around the shin to keep their broad face toward the puck in a butterfly. */
+export function faceGoaliePads(rig: SkaterRig, frame: THREE.Object3D) {
+  frame.getWorldQuaternion(_padFrame);
+  for (const side of SIDES) {
+    const pad = rig.goaliePads[side];
+    if (!pad) continue;
+    rig.bones[`shin${side}`].getWorldPosition(_kneePos);
+    rig.bones[`foot${side}`].getWorldPosition(_anklePos);
+    _padY.subVectors(_kneePos, _anklePos).normalize();
+    _padZ.set(0, 0, 1).applyQuaternion(_padFrame);
+    _padZ.addScaledVector(_padY, -_padZ.dot(_padY));
+    if (_padZ.lengthSq() < 1e-8) {
+      _padZ.set(0, 1, 0).applyQuaternion(_padFrame);
+      _padZ.addScaledVector(_padY, -_padZ.dot(_padY));
+    }
+    _padZ.normalize();
+    _padX.crossVectors(_padY, _padZ).normalize();
+    _worldQ.setFromRotationMatrix(_basis.makeBasis(_padX, _padY, _padZ));
+    setWorldQuaternion(pad, _worldQ);
+  }
 }
 
 const _palm = new THREE.Vector3(),

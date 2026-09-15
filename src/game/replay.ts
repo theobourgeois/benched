@@ -67,6 +67,7 @@ export class ReplayBuffer {
       skaters: s.skaters.map((p) => ({
         ...p,
         queuedCheck: p.queuedCheck && { ...p.queuedCheck },
+        pendingShot: p.pendingShot ? { ...p.pendingShot } : null,
       })),
       puck: { ...s.puck },
       events,
@@ -187,6 +188,23 @@ export function sampleReplay(view: MatchState, frames: ReplayFrame[], time: numb
     p.shotReach = action.shotReach;
     if (to.shotTimer > from.shotTimer && t < 1) p.shotTimer = from.shotTimer;
     if (to.checkTimer > from.checkTimer && t < 1) p.checkTimer = from.checkTimer;
+    if ((to.saveTimer ?? 0) > (from.saveTimer ?? 0) && t < 1) {
+      p.saveTimer = from.saveTimer;
+      p.saveSide = from.saveSide;
+      p.saveHeight = from.saveHeight;
+    }
+    if (k === view.controlled && !from.pendingShot && to.pendingShot && t < 1)
+      view.shotCharge = a.shotCharge;
+    if (from.pendingShot && to.pendingShot && from.pendingShot.tick === to.pendingShot.tick) {
+      p.pendingShot = {
+        ...from.pendingShot,
+        timer: from.pendingShot.timer + (to.pendingShot.timer - from.pendingShot.timer) * t,
+      };
+    } else if (t < 1) {
+      p.pendingShot = from.pendingShot
+        ? { ...from.pendingShot, timer: Math.max(0, from.pendingShot.timer - t / REPLAY_HZ) }
+        : null;
+    }
   });
   blend(view.puck, a.puck, b.puck, t);
 }

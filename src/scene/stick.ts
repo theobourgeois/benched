@@ -6,10 +6,12 @@ export interface BladeSpec {
   height: number;
   /** Fixed hosel-to-knob length. */
   shaft: number;
+  /** Goalies hold near the paddle, below the knob. */
+  grip?: number;
 }
 // Slightly oversized against a real 30 cm blade so it still reads from the broadcast camera.
 export const SKATER_BLADE: BladeSpec = { length: 0.34, height: 0.08, shaft: 1.42 };
-export const GOALIE_BLADE: BladeSpec = { length: 0.4, height: 0.095, shaft: 1.48 };
+export const GOALIE_BLADE: BladeSpec = { length: 0.4, height: 0.095, shaft: 1.48, grip: 0.82 };
 const THICKNESS = 0.014,
   CURVE = 0.035,
   KNOB_PAST_HAND = 0.1;
@@ -123,7 +125,7 @@ export function placeStick(
   let gx = _flat.dot(heading) - hx,
     gy = _flat.y - hy;
   let angle = Math.atan2(gx, gy);
-  const reach = spec.shaft - KNOB_PAST_HAND;
+  const reach = spec.grip ?? spec.shaft - KNOB_PAST_HAND;
   hosel.copy(_heel).addScaledVector(heading, hx).addScaledVector(UP, hy);
   if (shoulder) {
     // Intersect the fixed socket circle in the blade plane with the shoulder's reach sphere.

@@ -14,6 +14,7 @@ import { decideAI } from './ai';
 import { DEFAULT_MATCHUP, type Club } from './clubs';
 import { cpuTune, DEFAULT_DIFFICULTY } from './difficulty';
 import { skateVelocity } from './skating';
+import { SHOT_DOWNSWING, GOALIE_SAVE_TIME } from './actionTiming';
 import { clamp, constrainToRink, distance, hash01, normalized } from './math';
 import { isOnIce, modeInfo, SHOOTOUT_ROUNDS } from './modes';
 import type {
@@ -119,6 +120,10 @@ export function createMatch(
         stickSideVel: 0,
         stickReachVel: 0,
         shotTimer: 0,
+        pendingShot: null,
+        saveTimer: 0,
+        saveSide: 0,
+        saveHeight: 0,
         shotStyle: 'wrist',
         shotDuration: 0.34,
         shotSide: STICK.restSide,
@@ -168,6 +173,8 @@ export function resetFormation(s: MatchState) {
     p.stickSideVel = 0;
     p.stickReachVel = 0;
     p.shotTimer = 0;
+    p.pendingShot = null;
+    p.saveTimer = 0;
     p.passTimer = 0;
     p.diveTimer = 0;
     p.blockTimer = 0;
@@ -576,8 +583,46 @@ function releasePuck(
   puck.shot = shot;
   p.cooldown = 0.55;
 }
+/** Queue only an already loaded slap shot; taps, backhands and one-timers release immediately. */
+export function requestShot(s: MatchState, p: Skater, power: number, aim = 0, height = 0.25) {
+  if (
+    s.puck.owner !== p.id ||
+    p.downTimer > 0 ||
+    p.stumbleTimer > 0 ||
+    p.diveTimer > 0 ||
+    p.pendingShot
+  )
+    return;
+  const load = p.id === s.controlled ? s.shotCharge : 0;
+  if (load > 0.2 && power > 0.55 && p.stickSide >= 0 && p.passTimer <= 0) {
+    p.pendingShot = { timer: SHOT_DOWNSWING, load, power, aim, height, tick: s.tick };
+    s.shotCharge = 0;
+  } else shootPuck(s, p, power, aim, height);
+}
+
+export function advancePendingShot(s: MatchState, p: Skater, dt: number) {
+  const shot = p.pendingShot;
+  if (!shot) return;
+  if (
+    s.puck.owner !== p.id ||
+    p.downTimer > 0 ||
+    p.stumbleTimer > 0 ||
+    p.diveTimer > 0 ||
+    p.dekeKind
+  ) {
+    p.pendingShot = null;
+    return;
+  }
+  if (shot.tick === s.tick) return;
+  if (shot.timer <= dt + 1e-8) {
+    p.pendingShot = null;
+    shootPuck(s, p, shot.power, shot.aim, shot.height);
+  } else p.pendingShot = { ...shot, timer: shot.timer - dt };
+}
+
 export function shootPuck(s: MatchState, p: Skater, power: number, aim = 0, height = 0.25) {
   if (s.puck.owner !== p.id || p.downTimer > 0 || p.stumbleTimer > 0) return;
+  p.pendingShot = null;
   const oneTimer = p.passTimer > 0;
   power = clamp(power + (oneTimer ? 0.28 : 0), 0, 1);
   const tip = stickTip(p),
@@ -1406,6 +1451,13 @@ function containGoalPuck(s: MatchState) {
 function goalieSave(s: MatchState, player: Skater) {
   const p = s.puck,
     defending = attackDirection(player.team, s.period);
+  player.saveTimer = GOALIE_SAVE_TIME;
+  player.saveHeight = p.y;
+  player.saveSide = clamp(
+    ((p.x - player.x) * Math.cos(player.angle) - (p.z - player.z) * Math.sin(player.angle)) / 0.8,
+    -1,
+    1,
+  );
   const side = Math.sign(p.z - player.z || Math.sin(s.tick * 0.7));
   p.vx = defending * (6.2 + Math.abs(p.vx) * 0.22);
   p.vz = side * (3.6 + Math.abs(p.z - player.z) * 4.5) + (p.z - player.z) * 3;
@@ -1644,6 +1696,7 @@ export function stepMatch(s: MatchState, input: InputFrame = EMPTY_INPUT, dt = R
     switchSkater(s);
   const youCarry = s.puck.owner === s.controlled;
   s.shotCharge =
+    !s.skaters[s.controlled].pendingShot &&
     !input.toeDrag &&
     !input.deke &&
     !input.dekeSpecial &&
@@ -1677,6 +1730,7 @@ export function stepMatch(s: MatchState, input: InputFrame = EMPTY_INPUT, dt = R
     p.stumbleTimer = Math.max(0, p.stumbleTimer - dt);
     p.hitImmunity = Math.max(0, p.hitImmunity - dt);
     p.shotTimer = Math.max(0, p.shotTimer - dt);
+    p.saveTimer = Math.max(0, (p.saveTimer ?? 0) - dt);
     p.passTimer = Math.max(0, p.passTimer - dt);
     p.diveTimer = Math.max(0, p.diveTimer - dt);
     p.blockTimer = Math.max(0, p.blockTimer - dt);
@@ -1690,7 +1744,7 @@ export function stepMatch(s: MatchState, input: InputFrame = EMPTY_INPUT, dt = R
     const side = controlled ? input.stickX : ai?.stickX || Math.sin(s.tick * 0.025 + p.id) * 0.35;
     const pull = drag ? clamp(input.stickY, 0, 1) : ai?.toeDrag ? 0.82 : 0;
     const carrying = s.puck.owner === p.id;
-    advanceStick(p, side, pull, dt, carrying);
+    if (!p.pendingShot) advanceStick(p, side, pull, dt, carrying);
     const grip = activeDeke(p)
       ? PHYSICS.dekeGrip
       : carrying
@@ -1745,7 +1799,7 @@ export function stepMatch(s: MatchState, input: InputFrame = EMPTY_INPUT, dt = R
       if (input.saucer && s.puck.owner === p.id)
         passPuck(s, p, input.moveX, input.moveZ, PHYSICS.saucerLift);
       if (input.shoot && s.puck.owner === p.id)
-        shootPuck(s, p, input.shotPower, input.aimZ ?? 0, input.shotHeight ?? s.shotLift);
+        requestShot(s, p, input.shotPower, input.aimZ ?? 0, input.shotHeight ?? s.shotLift);
       if (input.passRelease && s.puck.owner === p.id) passPuck(s, p, input.moveX, input.moveZ);
       if (input.poke) pokeCheck(s, p);
       else if (input.pokeHeld) pokeCheck(s, p, true);
@@ -1769,13 +1823,14 @@ export function stepMatch(s: MatchState, input: InputFrame = EMPTY_INPUT, dt = R
       else {
         if (ai.check) launchCheck(s, p, ai.checkAim.x, ai.checkAim.z, ai.checkPower);
       }
-      if (ai.shoot) shootPuck(s, p, ai.shotPower, ai.shotAim, ai.shotHeight);
-      else if (ai.pass) passPuck(s, p, ai.passDir.x, ai.passDir.z);
+      if (ai.shoot && !p.pendingShot) shootPuck(s, p, ai.shotPower, ai.shotAim, ai.shotHeight);
+      else if (ai.pass && !p.pendingShot) passPuck(s, p, ai.passDir.x, ai.passDir.z);
       if (ai.poke) pokeCheck(s, p, ai.pokeSweep);
     }
     updateRush(p, dt);
   }
   separatePlayers(s, previous);
+  for (const p of s.skaters) if (p.pendingShot) advancePendingShot(s, p, dt);
   advancePuck(s, dt);
 }
 export const isLivePhase = (phase: Phase) =>
