@@ -13,7 +13,7 @@ export function canvasTexture(
   texture.anisotropy = 8;
   return texture;
 }
-export function makeIceTexture() {
+export function makeIceTexture(logo?: CanvasImageSource) {
   return canvasTexture(2048, 1024, (ctx) => {
     ctx.fillStyle = '#e3edf3';
     ctx.fillRect(0, 0, 2048, 1024);
@@ -100,16 +100,17 @@ export function makeIceTexture() {
       ctx.fill();
       ctx.stroke();
     }
-    ctx.save();
-    ctx.fillStyle = '#74959c';
-    ctx.globalAlpha = 0.64;
-    ctx.rotate(Math.PI / 2);
-    ctx.font = 'italic 900 2.0px Arial';
-    ctx.textAlign = 'center';
-    ctx.fillText('BENCHED', 0, 0.7);
-    ctx.font = '700 0.46px Arial';
-    ctx.fillText('NORTHSTAR ARENA', 0, 1.6);
-    ctx.restore();
+    if (logo) {
+      const iw = Number((logo as { width?: number }).width) || 960;
+      const ih = Number((logo as { height?: number }).height) || 640;
+      ctx.save();
+      ctx.globalAlpha = 0.58;
+      ctx.rotate(Math.PI / 2);
+      const width = 10;
+      const height = width * (ih / iw);
+      ctx.drawImage(logo, -width / 2, -height / 2, width, height);
+      ctx.restore();
+    }
     ctx.fillStyle = '#87a5ad';
     ctx.textAlign = 'center';
     ctx.font = '700 0.62px Arial';

@@ -1,21 +1,6 @@
-import {
-  ArrowRight,
-  ArrowUp,
-  ArrowUpRight,
-  Gamepad2,
-  HelpCircle,
-  History,
-  Pause,
-  Play,
-  RotateCcw,
-  Settings2,
-  SlidersHorizontal,
-  Volume2,
-  VolumeX,
-} from 'lucide-react';
-import { useState } from 'react';
+import { ArrowRight } from 'lucide-react';
+import { useState, type CSSProperties } from 'react';
 import { attackDirection } from '../game/config';
-import { difficultyInfo } from '../game/difficulty';
 import { modeInfo } from '../game/modes';
 import {
   beginGame,
@@ -24,349 +9,307 @@ import {
   openInstantReplay,
   pauseGame,
   returnToMenu,
-  updateSettings,
   useGame,
 } from '../game/store';
-import { cameraUsesAttackUp } from '../game/types';
-import { Brand, SettingsPanel, TeamLogo } from './Menu';
-import { Controls } from './Controls';
+import { cameraUsesAttackUp, type MatchState } from '../game/types';
+import { step, useNav } from '../input/menuNavigation';
+import { ControlsScreen } from './Controls';
 import { FeelHud } from './FeelHud';
 import { FpsCounter } from './FpsCounter';
+import { MenuItem, Prompts, TeamLogo } from './kit';
+import { SettingsScreen } from './Settings';
+
 export function formatClock(seconds: number) {
   const s = Math.ceil(seconds);
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 function periodMark(period: number) {
-  if (period === 1) return '1ST';
-  if (period === 2) return '2ND';
-  if (period === 3) return '3RD';
-  return `${period}TH`;
+  if (period === 1) return '1st';
+  if (period === 2) return '2nd';
+  if (period === 3) return '3rd';
+  return `${period}th`;
 }
-function shootoutMark(round: number) {
-  return round > 3 ? 'SD' : `RND ${round}`;
-}
+const shootoutMark = (round: number) => (round > 3 ? 'SD' : `Rnd ${round}`);
+/** Away on the left, home on the right, the same way round as the matchup screen. */
+const BROADCAST_ORDER = [1, 0] as const;
+const club = (c: string) => ({ '--club': c }) as CSSProperties;
+
+type Panel = 'settings' | 'controls' | null;
+
+/** On the ice: the score, your skater, and the calls. Nothing else. */
 export function Hud() {
-  const { match: s, settings, controller } = useGame();
-  const [controls, setControls] = useState(false),
-    [showSettings, setShowSettings] = useState(false),
-    [feel, setFeel] = useState(false);
-  const player = s.skaters[s.controlled],
-    team = s.teams[s.homeTeam],
-    dir = attackDirection(s.homeTeam, s.period);
-  const info = modeInfo(s.mode);
-  const practice = info.practice;
-  const openControls = () => {
-    if (s.phase !== 'paused') pauseGame();
-    setControls(true);
-  };
+  const { match: s, settings } = useGame();
+  const [panel, setPanel] = useState<Panel>(null);
+  const [feel, setFeel] = useState(false);
+  const [pauseIndex, setPauseIndex] = useState(0);
+  const paused = s.phase === 'paused';
   return (
-    <div className="hud">
-      <FpsCounter />
-      <header className="game-header">
-        <Brand small />
-        <div className="scoreboard">
-          {practice ? (
-            <div className="score-clock practice">
-              <strong>SKATE</strong>
-              <small>{s.phase === 'playing' ? '● LIVE' : s.phase.toUpperCase()}</small>
-            </div>
-          ) : (
-            <>
-              {s.teams.map((t, i) => (
-                <div key={i} className={`score-team score-team-${i}`}>
-                  <TeamLogo club={t} small />
-                  <span>{t.abbr}</span>
-                  <strong>{s.score[i]}</strong>
-                  <i style={{ background: t.accent }} />
-                </div>
-              ))}
-              <div className="score-clock">
-                <span>
-                  {s.mode === 'shootout' ? shootoutMark(s.shootoutRound) : periodMark(s.period)}
-                </span>
-                <strong>{formatClock(s.clock)}</strong>
-                <small>{s.phase === 'playing' ? '● LIVE' : s.phase.toUpperCase()}</small>
-              </div>
-            </>
-          )}
+    <div className="hud" data-phase={s.phase}>
+      {settings.showFps && <FpsCounter />}
+      <ScoreBug s={s} />
+      {s.phase === 'playing' && s.noticeTimer > 0 && (
+        <div className="notice" key={s.notice}>
+          {s.notice}
         </div>
-        <div className="game-actions">
-          <button className="icon-button" onClick={openControls} aria-label="Show controls">
-            <HelpCircle size={19} />
-          </button>
-          <button
-            className="icon-button"
-            onClick={() => updateSettings({ sound: !settings.sound })}
-            aria-label={settings.sound ? 'Mute sound' : 'Enable sound'}
-          >
-            {settings.sound ? <Volume2 size={19} /> : <VolumeX size={19} />}
-          </button>
-          <button
-            className="icon-button"
-            onClick={pauseGame}
-            aria-label={s.phase === 'paused' ? 'Resume game' : 'Pause game'}
-          >
-            {s.phase === 'paused' ? <Play size={19} /> : <Pause size={19} />}
-          </button>
-          <button
-            className={`icon-button ${feel ? 'active' : ''}`}
-            onClick={() => setFeel((open) => !open)}
-            aria-label={feel ? 'Hide feel tuner' : 'Show feel tuner'}
-            title="Feel tuner (`)"
-          >
-            <SlidersHorizontal size={19} />
-          </button>
-        </div>
-      </header>
-      <div className="match-info">
-        <span>NORTHSTAR ARENA</span>
-        <span>{info.live}</span>
-        <span>{difficultyInfo(s.difficulty).label.toUpperCase()}</span>
-      </div>
-      {s.phase === 'playing' && (
-        <>
-          <div className="attack-label">
-            {s.mode === 'shootout' && player.role === 'G' ? (
-              <>
-                <ArrowUp size={15} /> THEIR SHOT
-              </>
-            ) : cameraUsesAttackUp(settings.camera) ? (
-              <>
-                <ArrowUp size={15} /> ATTACK
-              </>
-            ) : (
-              <>
-                {dir < 0 && <ArrowRight className="reverse" size={15} />} ATTACK{' '}
-                {dir > 0 && <ArrowRight size={15} />}
-              </>
-            )}
-          </div>
-          {s.noticeTimer > 0 && (
-            <div className="play-notice" key={s.notice}>
-              {s.notice}
-            </div>
-          )}
-        </>
       )}
-      <footer className="game-footer">
-        <div className="player-card">
-          <span className="player-number" style={{ color: team.accent }}>
-            {player.number}
-          </span>
-          <div>
-            <small>
-              {team.abbr} / {player.role} <span>YOU</span>
-            </small>
-            <strong>{player.name.toUpperCase()}</strong>
-            <div className="stamina-track">
-              <i
-                style={{
-                  width: `${player.stamina * 100}%`,
-                  background: player.stamina < 0.25 ? '#fa644f' : team.accent,
-                }}
-              />
-            </div>
-          </div>
-          <span className="possession-tag">
-            {player.downTimer > 0
-              ? 'RECOVERING'
-              : player.diveTimer > 0
-                ? 'DIVE'
-                : player.stumbleTimer > 0
-                  ? 'OFF BALANCE'
-                  : s.puck.owner === s.controlled
-                    ? 'PUCK'
-                    : player.blockTimer > 0
-                      ? 'BLOCK'
-                      : player.role}
-          </span>
+      {s.phase === 'playing' && !cameraUsesAttackUp(settings.camera) && <AttackArrow s={s} />}
+      {s.phase !== 'intermission' && s.phase !== 'final' && <PlayerCard s={s} />}
+      {s.phase === 'faceoff' && <Faceoff s={s} />}
+      {s.phase === 'goal' && <GoalCall s={s} />}
+      {paused && !panel && !feel && (
+        <PauseMenu
+          index={pauseIndex}
+          setIndex={setPauseIndex}
+          onPanel={setPanel}
+          onFeel={() => setFeel(true)}
+        />
+      )}
+      {paused && panel === 'settings' && (
+        <SettingsScreen crumb="Paused" onClose={() => setPanel(null)} />
+      )}
+      {paused && panel === 'controls' && (
+        <ControlsScreen crumb="Paused" onClose={() => setPanel(null)} />
+      )}
+      {(s.phase === 'intermission' || s.phase === 'final') && <Results s={s} />}
+      <FeelHud open={feel} onOpenChange={setFeel} />
+    </div>
+  );
+}
+
+function ScoreBug({ s }: { s: MatchState }) {
+  if (modeInfo(s.mode).practice)
+    return (
+      <div className="bug">
+        <div className="bug-clock">
+          <strong>Free Skate</strong>
         </div>
+      </div>
+    );
+  return (
+    <div className="bug" aria-label="Scoreboard">
+      {BROADCAST_ORDER.map((t) => (
+        <div key={t} className="bug-team" style={club(s.teams[t].accent)}>
+          <TeamLogo club={s.teams[t]} />
+          <span>{s.teams[t].abbr}</span>
+          <strong>{s.score[t]}</strong>
+        </div>
+      ))}
+      <div className="bug-clock">
+        <span>{s.mode === 'shootout' ? shootoutMark(s.shootoutRound) : periodMark(s.period)}</span>
+        <strong>{formatClock(s.clock)}</strong>
+      </div>
+    </div>
+  );
+}
+
+/** The wide camera runs sideways, so it needs to say which way you are going. */
+function AttackArrow({ s }: { s: MatchState }) {
+  const dir = attackDirection(s.homeTeam, s.period);
+  return (
+    <div className="attack" aria-label="Attacking direction">
+      {dir < 0 && <ArrowRight className="flip" size={16} />}
+      Attack
+      {dir > 0 && <ArrowRight size={16} />}
+    </div>
+  );
+}
+
+function PlayerCard({ s }: { s: MatchState }) {
+  const p = s.skaters[s.controlled];
+  const status = p.downTimer > 0 ? 'Down' : p.stumbleTimer > 0 ? 'Off balance' : null;
+  return (
+    <div className="player-card" style={club(s.teams[s.homeTeam].accent)}>
+      <span className="pc-number">{p.number}</span>
+      <div className="pc-body">
         {s.shotCharge > 0.05 && (
-          <div className="shot-meter">
-            <span>SHOT POWER</span>
-            <div>
-              <i style={{ width: `${s.shotCharge * 100}%` }} />
-            </div>
+          <div className="meter power" aria-label="Shot power">
+            <i style={{ width: `${s.shotCharge * 100}%` }} />
           </div>
         )}
-        <div className="ingame-controls">
-          {s.puck.owner === s.controlled ? (
-            <>
-              <span>
-                <kbd>{controller.status.connected ? 'LS AIM + RS ↑' : 'WASD + ↑'}</kbd> SHOOT
-              </span>
-              <span>
-                <kbd>{controller.status.connected ? 'RB + RS' : 'E + ↑'}</kbd> CHIP / DUMP
-              </span>
-              <span>
-                <kbd>{controller.status.connected ? 'TAP RB' : 'TAP E'}</kbd> SAUCER
-              </span>
-              <span>
-                <kbd>{controller.status.connected ? 'HOLD RT' : 'HOLD SPACE'}</kbd> PASS
-              </span>
-              <span>
-                <kbd>{controller.status.connected ? 'RS CLICK + ↓' : 'C + ↓'}</kbd> TOE DRAG
-              </span>
-            </>
-          ) : (
-            <>
-              <span>
-                <kbd>{controller.status.connected ? 'RB' : 'E'}</kbd> POKE
-              </span>
-              <span>
-                <kbd>{controller.status.connected ? 'LB + RB' : 'R + E / F'}</kbd> DIVE
-              </span>
-              <span>
-                <kbd>{controller.status.connected ? 'RS FLICK' : 'ARROWS'}</kbd> HIT
-              </span>
-              <span>
-                <kbd>{controller.status.connected ? 'A' : 'Q'}</kbd> STICK LIFT / SWITCH
-              </span>
-              <span>
-                <kbd>{controller.status.connected ? 'HOLD RT' : 'HOLD SPACE'}</kbd> SWITCH
-              </span>
-            </>
-          )}
+        <strong>{p.name}</strong>
+        <div className="meter stamina" data-low={p.stamina < 0.25 || undefined}>
+          <i style={{ width: `${p.stamina * 100}%` }} />
         </div>
-      </footer>
-      {s.phase === 'faceoff' && (
-        <div className="faceoff-overlay">
-          <span className="eyebrow">PERIOD {s.period} / GET READY</span>
-          <strong key={Math.ceil(s.countdown)}>{Math.ceil(s.countdown) || 1}</strong>
-          <span>{s.countdown < 0.5 ? 'DRAW NOW' : 'FACEOFF'}</span>
-          <small>
-            {controller.status.connected ? 'RT or RB' : 'Space or E'} as the puck drops to win the
-            draw
-          </small>
+      </div>
+      {status && <span className="pc-status">{status}</span>}
+    </div>
+  );
+}
+
+function Faceoff({ s }: { s: MatchState }) {
+  const count = Math.ceil(s.countdown) || 1;
+  return (
+    <div className="faceoff">
+      <span>{periodMark(s.period)} period</span>
+      <strong key={count}>{count}</strong>
+    </div>
+  );
+}
+
+function GoalCall({ s }: { s: MatchState }) {
+  const practice = modeInfo(s.mode).practice;
+  const scorer = s.scoringTeam === null ? null : s.teams[s.scoringTeam];
+  return (
+    <div className="goal-call" style={club(scorer?.accent ?? '#5d7894')}>
+      <div className="goal-band" />
+      {scorer && !practice && (
+        <span className="goal-team">
+          {scorer.city} {scorer.name}
+        </span>
+      )}
+      <strong className="goal-word">
+        {scorer ? 'GOAL' : (s.notice || 'NO GOAL').toUpperCase()}
+      </strong>
+      {scorer && !practice && (
+        <div className="goal-score">
+          <TeamLogo club={s.teams[1]} />
+          <b>{s.score[1]}</b>
+          <i>–</i>
+          <b>{s.score[0]}</b>
+          <TeamLogo club={s.teams[0]} />
         </div>
       )}
-      {s.phase === 'goal' && (
-        <div className={`goal-overlay goal-team-${s.scoringTeam}`}>
-          <span className="eyebrow">
-            {practice
-              ? info.eyebrow
-              : s.scoringTeam === null
-                ? info.eyebrow
-                : `${s.teams[s.scoringTeam].city} ${s.teams[s.scoringTeam].name}`}
-          </span>
-          <strong>{s.scoringTeam === null ? s.notice || 'NO GOAL' : 'GOAL'}</strong>
-          {!practice && (
-            <div>
-              {s.score[0]} <span>—</span> {s.score[1]}
-            </div>
-          )}
-          <span>{s.mode === 'shootout' ? 'NEXT SHOOTER' : 'BACK TO CENTER ICE'}</span>
-        </div>
-      )}
-      {s.phase === 'paused' && !controls && !showSettings && !feel && (
-        <div className="modal-scrim">
-          <section className="pause-modal" role="dialog" aria-modal="true" aria-label="Game paused">
-            <div className="eyebrow">
-              {info.eyebrow} / {difficultyInfo(s.difficulty).label.toUpperCase()}
-            </div>
-            <h2>Paused</h2>
-            <p>
-              {controller.status.connected
-                ? 'Controller connected.'
-                : 'Playing on keyboard. Connect a controller and press any button to use it.'}
-            </p>
-            <button className="primary-button" onClick={pauseGame}>
-              {info.resume} <Play size={18} fill="currentColor" />
-            </button>
-            <button
-              className="secondary-button"
-              onClick={openInstantReplay}
-              disabled={!canInstantReplay()}
+    </div>
+  );
+}
+
+function PauseMenu({
+  index,
+  setIndex,
+  onPanel,
+  onFeel,
+}: {
+  index: number;
+  setIndex: (i: number) => void;
+  onPanel: (panel: Panel) => void;
+  onFeel: () => void;
+}) {
+  const items = [
+    { label: 'Resume', run: pauseGame },
+    { label: 'Instant Replay', run: openInstantReplay, disabled: !canInstantReplay() },
+    { label: 'Settings', run: () => onPanel('settings') },
+    { label: 'Controls', run: () => onPanel('controls') },
+    ...(import.meta.env.DEV ? [{ label: 'Feel Tuner', run: onFeel }] : []),
+    { label: 'Quit to Menu', run: returnToMenu },
+  ];
+  const at = Math.min(index, items.length - 1);
+  const skip = (i: number) => !!items[i].disabled;
+  const run = (i: number) => !items[i].disabled && items[i].run();
+  useNav((a) => {
+    if (a === 'up' || a === 'down') setIndex(step(at, a === 'up' ? -1 : 1, items.length, skip));
+    else if (a === 'confirm') run(at);
+    else if (a === 'back' || a === 'start') pauseGame();
+  });
+  return (
+    <div className="pause-layer">
+      <section className="pause" role="dialog" aria-modal="true" aria-label="Game paused">
+        <h2 className="title-bar pause-title">Paused</h2>
+        <nav className="plate menu-list">
+          {items.map((item, i) => (
+            <MenuItem
+              key={item.label}
+              focused={i === at}
+              disabled={item.disabled}
+              onFocus={() => setIndex(i)}
+              onSelect={() => run(i)}
+              className={item.label === 'Quit to Menu' ? 'gap' : ''}
             >
-              <History size={18} /> Instant replay <ArrowUpRight size={16} />
-            </button>
-            <button className="secondary-button" onClick={() => setControls(true)}>
-              <Gamepad2 size={18} /> Skill-stick controls <ArrowUpRight size={16} />
-            </button>
-            <button className="secondary-button" onClick={() => setShowSettings(true)}>
-              <Settings2 size={18} /> Game settings <ArrowUpRight size={16} />
-            </button>
-            <button className="secondary-button" onClick={() => setFeel(true)}>
-              <SlidersHorizontal size={18} /> Feel tuner <ArrowUpRight size={16} />
-            </button>
-            <button className="text-button" onClick={returnToMenu}>
-              {info.endMatch}
-            </button>
-          </section>
-        </div>
-      )}
-      {(s.phase === 'intermission' || s.phase === 'final') && (
-        <div className="modal-scrim">
-          <section
-            className="results-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-label={s.phase === 'final' ? 'Final results' : 'Intermission'}
-          >
-            <div className="eyebrow">
-              {s.phase === 'final' ? 'FINAL' : `END OF THE ${s.period === 1 ? 'FIRST' : 'SECOND'}`}
-            </div>
-            <h2>
-              {s.phase === 'final'
-                ? s.score[0] === s.score[1]
-                  ? 'Draw'
-                  : s.score[s.homeTeam] > s.score[1 - s.homeTeam]
-                    ? 'You win'
-                    : 'You lose'
-                : 'Intermission'}
-            </h2>
-            <div className="results-score">
-              <TeamLogo club={s.teams[0]} />
-              <strong>
-                {s.score[0]} <span>:</span> {s.score[1]}
-              </strong>
+              {item.label}
+            </MenuItem>
+          ))}
+        </nav>
+      </section>
+      <Prompts
+        items={[
+          { k: 'confirm', label: 'Select', onClick: () => run(at) },
+          { k: 'back', label: 'Resume', onClick: pauseGame },
+        ]}
+      />
+    </div>
+  );
+}
+
+function Results({ s }: { s: MatchState }) {
+  const [index, setIndex] = useState(0);
+  const final = s.phase === 'final';
+  const you = s.homeTeam;
+  const headline = !final
+    ? 'Intermission'
+    : s.score[0] === s.score[1]
+      ? 'Draw'
+      : s.score[you] > s.score[1 - you]
+        ? 'You win'
+        : 'You lose';
+  const items = [
+    final
+      ? { label: 'Rematch', run: () => beginGame(s.homeTeam, s.mode) }
+      : { label: `Start period ${s.period + 1}`, run: continueGame },
+    { label: 'Quit to Menu', run: returnToMenu },
+  ];
+  useNav((a) => {
+    if (a === 'up' || a === 'down') setIndex(step(index, a === 'up' ? -1 : 1, items.length));
+    else if (a === 'confirm') items[index].run();
+    else if (a === 'start') items[0].run();
+  });
+  const stats: [string, (t: 0 | 1) => string][] = [
+    ['Shots', (t) => String(s.shots[t])],
+    ['Hits', (t) => String(s.hits[t])],
+    ['Possession', (t) => formatClock(s.possession[t])],
+  ];
+  return (
+    <div className="results-layer">
+      <section
+        className="results"
+        role="dialog"
+        aria-modal="true"
+        aria-label={final ? 'Final results' : 'Intermission'}
+      >
+        <header className="title-bar">
+          <div className="crumb">
+            <span>{final ? 'Final' : `End of ${periodMark(s.period)}`} /</span>
+            <h2>{headline}</h2>
+          </div>
+        </header>
+        <div className="plate results-body">
+          <div className="results-score">
+            <div className="results-team">
               <TeamLogo club={s.teams[1]} />
+              <span>{s.teams[1].abbr}</span>
             </div>
-            <div className="stats-table">
-              <div>
-                <b>{s.teams[0].abbr}</b>
-                <span>TEAM STATS</span>
-                <b>{s.teams[1].abbr}</b>
-              </div>
-              <div>
-                <strong>{s.shots[0]}</strong>
-                <span>SHOTS</span>
-                <strong>{s.shots[1]}</strong>
-              </div>
-              <div>
-                <strong>{s.hits[0]}</strong>
-                <span>HITS</span>
-                <strong>{s.hits[1]}</strong>
-              </div>
-              <div>
-                <strong>{Math.round(s.possession[0])}s</strong>
-                <span>POSSESSION</span>
-                <strong>{Math.round(s.possession[1])}s</strong>
-              </div>
+            <strong>
+              {s.score[1]}
+              <i>–</i>
+              {s.score[0]}
+            </strong>
+            <div className="results-team">
+              <TeamLogo club={s.teams[0]} />
+              <span>{s.teams[0].abbr}</span>
             </div>
-            <p>
-              {s.phase === 'intermission'
-                ? `Switching ends. A fresh ${Math.round(info.periodSeconds / 60)} minutes on the clock.`
-                : s.mode === 'shootout'
-                  ? 'Best of three, then sudden death.'
-                  : ''}
-            </p>
-            <button
-              className="primary-button"
-              onClick={() => (s.phase === 'final' ? beginGame(s.homeTeam, s.mode) : continueGame())}
-            >
-              {s.phase === 'final' ? 'REMATCH' : `START PERIOD ${s.period + 1}`}
-              {s.phase === 'final' ? <RotateCcw size={18} /> : <ArrowRight size={18} />}
-            </button>
-            <button className="text-button" onClick={returnToMenu}>
-              Return to menu
-            </button>
-          </section>
+          </div>
+          <dl className="stats">
+            {stats.map(([label, value]) => (
+              <div key={label}>
+                <dt>{label}</dt>
+                <dd>{value(1)}</dd>
+                <dd>{value(0)}</dd>
+              </div>
+            ))}
+          </dl>
+          <nav className="menu-list">
+            {items.map((item, i) => (
+              <MenuItem
+                key={item.label}
+                focused={i === index}
+                onFocus={() => setIndex(i)}
+                onSelect={item.run}
+              >
+                {item.label}
+              </MenuItem>
+            ))}
+          </nav>
         </div>
-      )}
-      {controls && <Controls close={() => setControls(false)} />}
-      {showSettings && <SettingsPanel close={() => setShowSettings(false)} />}
-      <FeelHud open={feel} onOpenChange={setFeel} />
+      </section>
+      <Prompts items={[{ k: 'confirm', label: 'Select', onClick: () => items[index].run() }]} />
     </div>
   );
 }

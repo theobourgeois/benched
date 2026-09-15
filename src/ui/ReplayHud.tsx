@@ -1,14 +1,5 @@
-import {
-  ChevronLeft,
-  ChevronRight,
-  History,
-  Pause,
-  Play,
-  RotateCcw,
-  SkipForward,
-  X,
-} from 'lucide-react';
-import { useRef, type MouseEvent } from 'react';
+import { ChevronLeft, ChevronRight, Pause, Play, RotateCcw, X } from 'lucide-react';
+import { useRef, type CSSProperties, type MouseEvent } from 'react';
 import {
   REPLAY_CAMERAS,
   REPLAY_SPEEDS,
@@ -20,19 +11,30 @@ import {
 } from '../game/replay';
 import { closeReplay, publish, useGame } from '../game/store';
 import type { MatchState } from '../game/types';
+import { useDevice } from '../input/menuNavigation';
+import { Glyph, KeyChip } from './kit';
 
 /** Transport buttons never take focus, so Space stays play/pause instead of re-clicking them. */
 const keepFocus = (e: MouseEvent) => e.preventDefault();
 const speedLabel = (speed: number) => (speed === 0.25 ? '¼×' : speed === 0.5 ? '½×' : `${speed}×`);
+/** Controller buttons, keyboard keys, what they do. */
+const HINTS: [pad: string, keys: string, label: string][] = [
+  ['A', 'Space', 'Play'],
+  ['LT RT', 'Q E', 'Scrub'],
+  ['RS', '← →', 'Orbit'],
+  ['LS', 'W A S D', 'Move'],
+  ['LB RB', 'R F', 'Zoom'],
+  ['Y', 'C', 'Camera'],
+  ['B', 'Esc', 'Exit'],
+];
 
 export function ReplayHud() {
-  const { replay, match, controller } = useGame();
+  const { replay, match } = useGame();
   if (!replay) return null;
-  const pad = controller.status.connected;
   return replay.kind === 'goal' ? (
-    <GoalReplay r={replay} match={match} pad={pad} />
+    <GoalReplay r={replay} match={match} />
   ) : (
-    <InstantReplay r={replay} pad={pad} />
+    <InstantReplay r={replay} />
   );
 }
 
@@ -40,39 +42,41 @@ function ReplayBug({ r }: { r: ReplaySession }) {
   const slow = r.rate > 0 && r.rate < 0.9;
   return (
     <div className="replay-bug">
-      <History size={17} /> REPLAY
-      {slow && <small>SLOW MOTION</small>}
+      <i aria-hidden="true" />
+      REPLAY
+      {slow && <small>SLOW MO</small>}
     </div>
   );
 }
 
-function GoalReplay({ r, match, pad }: { r: ReplaySession; match: MatchState; pad: boolean }) {
+function GoalReplay({ r, match }: { r: ReplaySession; match: MatchState }) {
   const goal = r.goal!,
     club = match.teams[goal.team],
     scorer = goal.scorer === null ? null : match.skaters[goal.scorer];
   const progress = (r.time - r.start) / Math.max(0.01, r.end - r.start);
   return (
     <div
-      className={`replay-hud goal-replay goal-team-${goal.team}`}
+      className="replay-hud goal-replay"
       onClick={closeReplay}
       role="region"
       aria-label="Goal replay"
+      style={{ '--club': club.accent } as CSSProperties}
     >
       <div className="letterbox top" />
       <div className="letterbox bottom" />
       <ReplayBug r={r} />
       <div className="goal-replay-card">
-        <span className="eyebrow">
-          GOAL · {club.city} {club.name}
+        <span>
+          Goal · {club.city} {club.name}
         </span>
         {scorer && (
           <strong>
-            <i style={{ background: club.accent }} />#{scorer.number} {scorer.name.toUpperCase()}
+            #{scorer.number} {scorer.name}
           </strong>
         )}
       </div>
       <button className="replay-skip" onClick={closeReplay}>
-        <kbd>{pad ? 'A' : 'SPACE'}</kbd> Skip replay <SkipForward size={15} />
+        <Glyph k="confirm" /> Skip replay
       </button>
       <div className="replay-progress">
         <i style={{ width: `${progress * 100}%` }} />
@@ -81,7 +85,9 @@ function GoalReplay({ r, match, pad }: { r: ReplaySession; match: MatchState; pa
   );
 }
 
-function InstantReplay({ r, pad }: { r: ReplaySession; pad: boolean }) {
+function InstantReplay({ r }: { r: ReplaySession }) {
+  const { settings } = useGame();
+  const device = useDevice();
   const drag = useRef<{ id: number; pan: boolean } | null>(null);
   const cam = r.camera,
     behind = r.end - r.time;
@@ -89,27 +95,6 @@ function InstantReplay({ r, pad }: { r: ReplaySession; pad: boolean }) {
     fn();
     publish();
   };
-  const hints = pad
-    ? [
-        ['A', 'Play / pause'],
-        ['LT · RT', 'Rewind · fast-forward'],
-        ['RS', 'Orbit'],
-        ['LS', 'Move camera'],
-        ['LB · RB', 'Zoom'],
-        ['D-PAD', 'Frame · speed'],
-        ['Y', 'Camera'],
-        ['B', 'Exit'],
-      ]
-    : [
-        ['SPACE', 'Play / pause'],
-        ['Q · E', 'Rewind · fast-forward'],
-        ['DRAG · ARROWS', 'Orbit'],
-        ['WASD · RIGHT-DRAG', 'Move camera'],
-        ['WHEEL · R F', 'Zoom'],
-        [', .', 'Frame'],
-        ['C', 'Camera'],
-        ['ESC', 'Exit'],
-      ];
   return (
     <div className="replay-hud instant-replay">
       <div
@@ -138,7 +123,7 @@ function InstantReplay({ r, pad }: { r: ReplaySession; pad: boolean }) {
         onContextMenu={(e) => e.preventDefault()}
       />
       <ReplayBug r={r} />
-      <section className="replay-deck" aria-label="Replay controls">
+      <section className="plate replay-deck" aria-label="Replay controls">
         <div className="replay-timeline">
           <input
             type="range"
@@ -147,6 +132,11 @@ function InstantReplay({ r, pad }: { r: ReplaySession; pad: boolean }) {
             max={r.end}
             step={0.001}
             value={r.time}
+            style={
+              {
+                '--at': `${((r.time - r.start) / Math.max(0.01, r.end - r.start)) * 100}%`,
+              } as CSSProperties
+            }
             onChange={(e) => {
               r.playing = false;
               seekReplay(r, Number(e.target.value));
@@ -222,13 +212,18 @@ function InstantReplay({ r, pad }: { r: ReplaySession; pad: boolean }) {
             <X size={15} /> Exit replay
           </button>
         </div>
-        <div className="replay-hints">
-          {hints.map(([keys, label]) => (
-            <span key={label}>
-              <kbd>{keys}</kbd> {label}
-            </span>
-          ))}
-        </div>
+        {settings.hints && (
+          <div className="replay-hints" aria-hidden="true">
+            {HINTS.map(([pad, keys, label]) => (
+              <span key={label}>
+                {(device === 'pad' ? pad : keys).split(' ').map((token) => (
+                  <KeyChip key={token} label={token} device={device} />
+                ))}
+                {label}
+              </span>
+            ))}
+          </div>
+        )}
       </section>
     </div>
   );

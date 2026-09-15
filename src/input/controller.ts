@@ -14,6 +14,36 @@ export function deadzone(value: number) {
     : (Math.sign(value) * (Math.abs(value) - DEADZONE)) / (1 - DEADZONE);
 }
 export type ReplayInput = ReturnType<Controller['replayInput']>;
+export const MENU_BUTTONS = [
+  'confirm',
+  'back',
+  'x',
+  'y',
+  'left',
+  'right',
+  'up',
+  'down',
+  'start',
+  'lb',
+  'rb',
+  'lt',
+  'rt',
+] as const;
+export type MenuButton = (typeof MENU_BUTTONS)[number];
+const NO_MENU_BUTTONS = Object.fromEntries(MENU_BUTTONS.map((b) => [b, false])) as Record<
+  MenuButton,
+  boolean
+>;
+const NO_MENU_TIMES = Object.fromEntries(MENU_BUTTONS.map((b) => [b, 0])) as Record<
+  MenuButton,
+  number
+>;
+const REPEATS = new Set<MenuButton>(['left', 'right', 'up', 'down']);
+/** A held direction fires once, waits, then repeats at a steady clip. */
+const REPEAT_DELAY = 0.38,
+  REPEAT_EVERY = 0.09;
+const repeatStep = (held: number) =>
+  held < REPEAT_DELAY ? -1 : Math.floor((held - REPEAT_DELAY) / REPEAT_EVERY);
 /** One input vocabulary for Gamepad API and keyboard. Shot gestures are edge-triggered. */
 export class Controller {
   private keys = new Set<string>();
@@ -35,32 +65,14 @@ export class Controller {
   private bumperChipped = false;
   private moveMag = 0;
   private previousBackskate = false;
-  private previousUI = {
-    confirm: false,
-    back: false,
-    left: false,
-    right: false,
-    up: false,
-    down: false,
-    menu: false,
-    prevMode: false,
-    nextMode: false,
-    prevLeague: false,
-    nextLeague: false,
-  };
-  ui = {
-    confirm: false,
-    back: false,
-    left: false,
-    right: false,
-    up: false,
-    down: false,
-    menu: false,
-    prevMode: false,
-    nextMode: false,
-    prevLeague: false,
-    nextLeague: false,
-  };
+  private previousUI: Record<MenuButton, boolean> = { ...NO_MENU_BUTTONS };
+  /** Seconds each direction has been held, for menu auto-repeat. */
+  private heldFor: Record<MenuButton, number> = { ...NO_MENU_TIMES };
+  private menuClock = 0;
+  /** Menu presses this frame. Held directions repeat like a console menu. */
+  ui: Record<MenuButton, boolean> = { ...NO_MENU_BUTTONS };
+  /** A pad button or stick moved this frame. */
+  padActive = false;
   private lastPad: Gamepad | null = null;
   status: ControllerStatus = { ...WAITING_STATUS };
   layout: ControllerLayout = 'auto';
@@ -202,22 +214,38 @@ export class Controller {
       pause: button(9) || tapped('Escape'),
     };
     const shoot = held.up && !this.previous.up && !rb;
-    const uiHeld = {
+    const uiHeld: Record<MenuButton, boolean> = {
       confirm: button(0),
       back: button(1),
+      x: button(2),
+      y: button(3),
       left: button(14) || axis(0) < -0.6,
       right: button(15) || axis(0) > 0.6,
       up: button(12) || axis(1) < -0.6,
       down: button(13) || axis(1) > 0.6,
-      menu: button(9),
-      prevMode: button(4),
-      nextMode: button(5),
-      prevLeague: button(6),
-      nextLeague: button(7),
+      start: button(9),
+      lb: button(4),
+      rb: button(5),
+      lt: button(6),
+      rt: button(7),
     };
-    for (const name of Object.keys(uiHeld) as (keyof typeof uiHeld)[])
-      this.ui[name] = uiHeld[name] && !this.previousUI[name];
+    // Menus repeat on the wall clock, so a slow frame rate doesn't make them sluggish.
+    const now = performance.now() / 1000;
+    const menuDt = this.menuClock ? Math.min(now - this.menuClock, 0.25) : 0;
+    this.menuClock = now;
+    for (const name of MENU_BUTTONS) {
+      const before = this.heldFor[name];
+      const after = uiHeld[name] ? before + menuDt : 0;
+      this.heldFor[name] = after;
+      const edge = uiHeld[name] && !this.previousUI[name];
+      this.ui[name] =
+        edge || (REPEATS.has(name) && before > 0 && repeatStep(after) > repeatStep(before));
+    }
     this.previousUI = uiHeld;
+    this.padActive =
+      !!pad &&
+      (pad.buttons.some((b) => b.pressed || b.value > 0.5) ||
+        pad.axes.some((a) => Math.abs(a) > 0.5));
     const frame = {
       ...EMPTY_INPUT,
       moveX,

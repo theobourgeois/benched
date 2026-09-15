@@ -1,76 +1,113 @@
-import { pauseGame, runtime } from '../game/store';
-/** Standard controller navigation lets a full match run without mouse interaction. */
-export function navigateWithController() {
-  const { controller, match } = runtime,
-    ui = controller.ui;
-  const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
-  if (dialog?.hasAttribute('data-controller-test')) {
-    if (ui.back) dialog.querySelector<HTMLButtonElement>('.modal-close')?.click();
-    return true;
-  }
-  if (dialog) {
-    const items = Array.from(dialog.querySelectorAll<HTMLElement>('button, select'));
-    if (ui.back) {
-      const close = dialog.querySelector<HTMLButtonElement>('.modal-close');
-      if (close) close.click();
-      else if (match.phase === 'paused') pauseGame();
-    }
-    if (ui.up || ui.down || ui.left || ui.right) {
-      const current = items.indexOf(document.activeElement as HTMLElement),
-        direction = ui.up || ui.left ? -1 : 1;
-      const active = document.activeElement;
-      if (active instanceof HTMLSelectElement && (ui.left || ui.right)) {
-        active.selectedIndex =
-          (active.selectedIndex + direction + active.options.length) % active.options.length;
-        active.dispatchEvent(new Event('change', { bubbles: true }));
-      } else {
-        const index = current < 0 ? 0 : (current + direction + items.length) % items.length;
-        document.querySelector('.controller-focus')?.classList.remove('controller-focus');
-        items[index]?.focus();
-        items[index]?.classList.add('controller-focus');
-      }
-    }
-    if (ui.confirm || ui.menu) {
-      if (ui.menu && match.phase === 'paused' && !dialog.hasAttribute('data-block-game-input'))
-        pauseGame();
-      else {
-        const focused = document.activeElement;
-        const target =
-          focused instanceof HTMLButtonElement && dialog.contains(focused)
-            ? focused
-            : dialog.querySelector<HTMLButtonElement>('.primary-button');
-        target?.click();
-      }
-    }
-    return Object.values(ui).some(Boolean);
-  }
-  if (match.phase === 'menu') {
-    if (ui.prevMode || ui.nextMode) {
-      const tabs = Array.from(document.querySelectorAll<HTMLButtonElement>('.mode-tab'));
-      const selected = tabs.findIndex((t) => t.classList.contains('nav-active'));
-      tabs[(selected + (ui.prevMode ? -1 : 1) + tabs.length) % tabs.length]?.click();
-    }
-    if (ui.left || ui.right) {
-      const teams = Array.from(document.querySelectorAll<HTMLButtonElement>('.team-option'));
-      const selected = teams.findIndex((t) => t.getAttribute('aria-pressed') === 'true');
-      teams[(selected + 1) % teams.length]?.click();
-    }
-    if (ui.up || ui.down) {
-      const slot = document
-        .querySelector('.team-option[aria-pressed="true"]')
-        ?.closest('.matchup-slot');
-      slot
-        ?.querySelector<HTMLButtonElement>(ui.up ? '.club-cycle.prev' : '.club-cycle.next')
-        ?.click();
-    }
-    if (ui.prevLeague || ui.nextLeague) {
-      const leagues = Array.from(document.querySelectorAll<HTMLButtonElement>('.league-option'));
-      const selected = leagues.findIndex((l) => l.getAttribute('aria-pressed') === 'true');
-      const step = ui.prevLeague ? -1 : 1;
-      leagues[(selected + step + leagues.length) % leagues.length]?.click();
-    }
-    if (ui.confirm || ui.menu) document.querySelector<HTMLButtonElement>('.play-button')?.click();
-    return true;
-  }
-  return false;
+import { useEffect, useRef, useSyncExternalStore } from 'react';
+import { runtime } from '../game/store';
+import { MENU_BUTTONS, type MenuButton } from './controller';
+
+/**
+ * Menu input. Every screen that takes presses mounts a layer; the newest layer owns the pad and
+ * keyboard until it unmounts. Screens keep their own focus, so each can decide what a direction
+ * means (a list moves, a selector steps, the matchup switches sides).
+ */
+export type NavAction = MenuButton;
+export type NavHandler = (action: NavAction) => void;
+/** The input the player last touched, so prompts show the right buttons. */
+export type Device = 'pad' | 'keys';
+
+const layers: { current: NavHandler }[] = [];
+export const navActive = () => layers.length > 0;
+
+export function useNav(handler: NavHandler) {
+  const latest = useRef(handler);
+  latest.current = handler;
+  useEffect(() => {
+    const layer = { current: (action: NavAction) => latest.current(action) };
+    layers.push(layer);
+    return () => {
+      layers.splice(layers.indexOf(layer), 1);
+    };
+  }, []);
 }
+
+let device: Device = 'keys';
+const watchers = new Set<() => void>();
+function setDevice(next: Device) {
+  if (next === device) return;
+  device = next;
+  watchers.forEach((fn) => fn());
+}
+export function useDevice() {
+  return useSyncExternalStore(
+    (fn) => {
+      watchers.add(fn);
+      return () => watchers.delete(fn);
+    },
+    () => device,
+  );
+}
+
+const dispatch = (action: NavAction) => layers.at(-1)?.current(action);
+
+/** Wraps a list index; skips entries the caller marks unavailable. */
+export function step(index: number, dir: number, count: number, skip?: (i: number) => boolean) {
+  let next = index;
+  for (let tries = 0; tries < count; tries++) {
+    next = (next + dir + count) % count;
+    if (!skip?.(next)) return next;
+  }
+  return index;
+}
+
+/** Runs once per frame from the simulation loop. True while a menu owns the pad. */
+export function navigateWithController() {
+  const { controller } = runtime;
+  if (controller.padActive) setDevice('pad');
+  if (!navActive()) return false;
+  for (const button of MENU_BUTTONS) if (controller.ui[button]) dispatch(button);
+  return true;
+}
+
+const KEYS: Record<string, NavAction> = {
+  ArrowUp: 'up',
+  KeyW: 'up',
+  ArrowDown: 'down',
+  KeyS: 'down',
+  ArrowLeft: 'left',
+  KeyA: 'left',
+  ArrowRight: 'right',
+  KeyD: 'right',
+  Enter: 'confirm',
+  NumpadEnter: 'confirm',
+  Space: 'confirm',
+  Escape: 'back',
+  Backspace: 'back',
+  KeyX: 'x',
+  KeyR: 'y',
+  KeyQ: 'lb',
+  KeyE: 'rb',
+  KeyZ: 'lt',
+  KeyC: 'rt',
+};
+const REPEATING = new Set<NavAction>(['up', 'down', 'left', 'right']);
+
+// Capture phase, so a key a menu uses never also reaches gameplay (Escape would re-pause).
+function keyDown(e: KeyboardEvent) {
+  setDevice('keys');
+  if (!layers.length || e.metaKey || e.ctrlKey || e.altKey) return;
+  const target = e.target as Element | null;
+  if (target?.closest?.('input, textarea, select, [data-feel-hud]')) return;
+  const action = KEYS[e.code];
+  if (!action) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  if (e.repeat && !REPEATING.has(action)) return;
+  dispatch(action);
+}
+// A focused button would otherwise click itself on Space release.
+function keyUp(e: KeyboardEvent) {
+  if (layers.length && (e.code === 'Space' || e.code === 'Enter')) e.preventDefault();
+}
+window.addEventListener('keydown', keyDown, true);
+window.addEventListener('keyup', keyUp, true);
+import.meta.hot?.dispose(() => {
+  window.removeEventListener('keydown', keyDown, true);
+  window.removeEventListener('keyup', keyUp, true);
+});

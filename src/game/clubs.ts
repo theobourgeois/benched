@@ -1,6 +1,6 @@
 import nhlData from '../data/leagues/nhl.json';
 import type { League, LeaguePlayer, LeagueTeam } from '../data/leagues/types';
-import type { Team } from './types';
+import type { Jersey, Team } from './types';
 
 export interface Uniform {
   jersey: string;
@@ -25,6 +25,8 @@ export interface Club {
   away: Uniform;
   /** Logo image drawn for dark backgrounds. */
   logo: string;
+  /** Logo image drawn for ice and other light surfaces. */
+  logoLight: string;
   /** Starters in engine role order: C, LW, RW, LD, RD, G. */
   lineup: Starter[];
 }
@@ -110,6 +112,7 @@ function clubOf(league: League, team: LeagueTeam): Club {
     home: { jersey: primary, trim: secondary, crest: crestOf(primary, team) },
     away: { jersey: AWAY_WHITE, trim: primary, crest: crestOf(AWAY_WHITE, team) },
     logo: `${import.meta.env.BASE_URL}${team.logos.dark}`,
+    logoLight: `${import.meta.env.BASE_URL}${team.logos.light}`,
     lineup: startersOf(team.players),
   };
 }
@@ -127,8 +130,13 @@ function leagueOption(league: League, featured: [string, string]): LeagueOption 
 export const LEAGUES: LeagueOption[] = [leagueOption(nhlData as unknown as League, ['TOR', 'MTL'])];
 
 export const leagueOf = (club: Club) => LEAGUES.find((l) => l.id === club.league) ?? LEAGUES[0];
-/** Side 0 wears home colors, side 1 away. */
-export const uniformFor = (club: Club, side: Team) => (side === 0 ? club.home : club.away);
+export const uniformFor = (club: Club, jersey: Jersey) =>
+  jersey === 'home' ? club.home : club.away;
+export const otherJersey = (jersey: Jersey): Jersey => (jersey === 'home' ? 'away' : 'home');
+/** The picking side wears its choice and the opponent the other set, so the colors never clash. */
+export function jerseysFor(side: Team, choice: Jersey): [Jersey, Jersey] {
+  return side === 0 ? [choice, otherJersey(choice)] : [otherJersey(choice), choice];
+}
 
 export function openingMatchup(league: LeagueOption): [Club, Club] {
   const find = (key: string, fallback: number) =>

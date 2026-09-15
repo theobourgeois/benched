@@ -2,64 +2,90 @@ import { test, expect, type Page } from '@playwright/test';
 async function state(page: Page) {
   return page.evaluate('JSON.parse(JSON.stringify(window.__BENCHED__.runtime.match))');
 }
+async function settings(page: Page) {
+  return page.evaluate('JSON.parse(JSON.stringify(window.__BENCHED__.runtime.settings))');
+}
 async function changeState(page: Page, code: string) {
   return page.evaluate(
     `(() => { const {runtime,publish} = window.__BENCHED__; ${code}; publish(); })()`,
   );
 }
+const live = (page: Page) => page.locator('.hud[data-phase="playing"]');
+/** Main menu entry, then ready up and drop the puck. */
+async function play(page: Page, entry = 'Play Now') {
+  await page.getByRole('button', { name: entry, exact: true }).click();
+  await page.getByRole('button', { name: 'Ready', exact: true }).click();
+  await page.getByRole('button', { name: 'Play game', exact: true }).click();
+}
 async function start(page: Page) {
   await page.goto('/');
-  await page.getByRole('button', { name: 'PLAY GAME' }).click();
-  await expect(page.locator('.score-clock small')).toHaveText('● LIVE', { timeout: 30000 });
+  await play(page);
+  await expect(live(page)).toBeVisible({ timeout: 30000 });
 }
 test('menu renders, selects teams, opens accessible controls and settings', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'SELECT TEAMS' })).toBeVisible();
-  await page.getByRole('button', { name: 'HOW TO PLAY' }).click();
-  await expect(page.getByRole('dialog')).toBeVisible();
-  await page.getByRole('button', { name: 'Keyboard', exact: true }).click();
-  await expect(page.getByText('W A S D', { exact: true })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Main menu' })).toBeVisible();
+  await page.getByRole('button', { name: 'Controls', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Controls' })).toBeVisible();
+  await page.getByRole('tab', { name: 'Keyboard' }).click();
+  await expect(page.locator('.control-row').first()).toContainText('Skate');
   await page.keyboard.press('Escape');
-  await expect(page.getByRole('dialog')).toHaveCount(0);
-  const difficulty = page.getByRole('group', { name: 'CPU difficulty' });
-  await expect(difficulty.getByRole('button', { name: 'All-Star' })).toHaveAttribute(
-    'aria-pressed',
-    'true',
-  );
-  await difficulty.getByRole('button', { name: 'Rookie' }).click();
-  await page.getByRole('button', { name: 'Open settings' }).click();
-  await expect(page.getByRole('dialog').getByLabel('CPU difficulty')).toHaveValue('rookie');
-  await page.getByRole('button', { name: 'Toggle beginner mode' }).click();
-  await expect(page.getByRole('button', { name: 'Toggle beginner mode' })).toHaveAttribute(
-    'aria-pressed',
-    'false',
-  );
-  await page.getByLabel('Graphics').selectOption('low');
-  await page.getByLabel('Camera angle').selectOption('tight');
-  await page.getByLabel('Camera angle').selectOption('wide');
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
+  await page.getByRole('button', { name: 'Previous CPU difficulty' }).click();
+  await page.getByRole('button', { name: 'Previous CPU difficulty' }).click();
+  expect((await settings(page)).difficulty).toBe('rookie');
+  const beginner = page.getByRole('switch', { name: 'Beginner mode' });
+  await beginner.click();
+  await expect(beginner).toHaveAttribute('aria-checked', 'false');
+  await page.getByRole('button', { name: 'Next Graphics' }).click();
+  await page.getByRole('button', { name: 'Next Camera angle' }).click();
+  await page.getByRole('switch', { name: 'FPS counter' }).click();
+  expect(await settings(page)).toMatchObject({ quality: 'low', showFps: false, beginner: false });
+  expect((await settings(page)).camera).not.toBe('broadcast');
   await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Play Now', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Select Teams' })).toBeVisible();
   await page.getByRole('button', { name: 'Montréal Canadiens' }).click();
-  await page.getByRole('button', { name: 'PLAY GAME' }).click();
-  expect((await state(page)).homeTeam).toBe(1);
-  expect((await state(page)).difficulty).toBe('rookie');
+  await page.getByRole('button', { name: 'Ready', exact: true }).click();
+  await page.getByRole('button', { name: 'Play game', exact: true }).click();
+  const s = await state(page);
+  expect(s.homeTeam).toBe(1);
+  expect(s.difficulty).toBe('rookie');
+  expect(s.jerseys).toEqual(['home', 'away']);
   await expect(page.locator('canvas')).toHaveCount(1);
+  await expect(live(page)).toBeVisible({ timeout: 30000 });
+  await expect(page.locator('.fps-counter')).toHaveCount(0);
   expect(errors).toEqual([]);
+});
+test('settings survive a reload', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('switch', { name: 'Button prompts' }).click();
+  await expect(page.locator('.prompts')).toHaveCount(0);
+  await page.reload();
+  expect((await settings(page)).hints).toBe(false);
+  await expect(page.getByRole('navigation', { name: 'Main menu' })).toBeVisible();
+  await expect(page.locator('.prompts')).toHaveCount(0);
 });
 test('an NHL matchup puts real clubs, logos and starters on the ice', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto('/');
+  await page.getByRole('button', { name: 'Play Now', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Toronto Maple Leafs' })).toBeVisible();
+  await page.getByRole('button', { name: 'Montréal Canadiens' }).click();
   await page.getByRole('button', { name: 'Next away team' }).click();
   await expect(page.getByRole('button', { name: 'Nashville Predators' })).toBeVisible();
-  await page.getByRole('button', { name: 'PLAY GAME' }).click();
-  await expect(page.locator('.score-clock small')).toHaveText('● LIVE', { timeout: 30000 });
+  await page.getByRole('button', { name: 'Ready', exact: true }).click();
+  await page.getByRole('button', { name: 'Play game', exact: true }).click();
+  await expect(live(page)).toBeVisible({ timeout: 30000 });
   const s = await state(page);
   expect(s.teams.map((t: { key: string }) => t.key)).toEqual(['nhl:TOR', 'nhl:NSH']);
   expect(s.skaters[0].name).toBe(s.teams[0].lineup[0].name);
-  const logos = page.locator('.score-team img');
+  const logos = page.locator('.bug-team img');
   await expect(logos).toHaveCount(2);
   await expect
     .poll(() =>
@@ -67,7 +93,8 @@ test('an NHL matchup puts real clubs, logos and starters on the ice', async ({ p
     )
     .toBe(true);
   await page.keyboard.press('Escape');
-  await page.getByRole('button', { name: 'End match & return to menu' }).click();
+  await page.getByRole('button', { name: 'Quit to Menu' }).click();
+  await page.getByRole('button', { name: 'Play Now', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Nashville Predators' })).toBeVisible();
   expect(errors).toEqual([]);
 });
@@ -93,19 +120,22 @@ test('keyboard skates, skill stick shoots, pause freezes play and help stays pau
   await page.keyboard.press('Escape');
   await expect(page.getByRole('heading', { name: 'Paused' })).toBeVisible();
   await page.keyboard.press('Escape');
-  await expect(page.locator('.score-clock small')).toHaveText('● LIVE');
+  await expect(live(page)).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('heading', { name: 'Paused' })).toBeVisible();
   const clock = (await state(page)).clock;
   await page.waitForTimeout(300);
   expect((await state(page)).clock).toBe(clock);
-  await page.getByRole('button', { name: /Skill-stick controls/ }).click();
+  await page.getByRole('button', { name: 'Controls', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Controls' })).toBeVisible();
   await page.keyboard.press('Escape');
   expect((await state(page)).phase).toBe('paused');
-  await page.getByRole('button', { name: 'RESUME GAME', exact: true }).click();
-  await expect(page.locator('.score-clock small')).toHaveText('● LIVE');
+  await page.getByRole('button', { name: 'Resume', exact: true }).click();
+  await expect(live(page)).toBeVisible();
 });
-test('virtual Xbox connects, skates, shoots with RS, and safely disconnects', async ({ page }) => {
+test('virtual Xbox drives the menus, picks a jersey, skates, shoots, and safely disconnects', async ({
+  page,
+}) => {
   await page.addInitScript(() => {
     const w = window as unknown as {
       testPad: {
@@ -128,20 +158,26 @@ test('virtual Xbox connects, skates, shoots with RS, and safely disconnects', as
     });
   });
   await page.goto('/');
-  await expect(page.getByText('CONTROLLER CONNECTED')).toBeVisible();
+  await expect
+    .poll(() => page.evaluate('window.__BENCHED__.runtime.controller.status.connected'))
+    .toBe(true);
   const pressPad = async (button: number) => {
     await page.evaluate(`window.testPad.buttons[${button}].pressed=true`);
     await page.waitForTimeout(90);
     await page.evaluate(`window.testPad.buttons[${button}].pressed=false`);
     await page.waitForTimeout(90);
   };
-  await pressPad(15);
+  // A on Play Now opens the matchup; the prompts switch to controller glyphs.
+  await pressPad(0);
+  await expect(page.getByRole('heading', { name: 'Select Teams' })).toBeVisible();
+  await expect(page.locator('.prompts .glyph.pad').first()).toBeVisible();
+  // Left takes the away side, right comes back home; down changes your club.
+  await pressPad(14);
   await expect(page.getByRole('button', { name: 'Montréal Canadiens' })).toHaveAttribute(
     'aria-pressed',
     'true',
   );
-  await pressPad(14);
-  // D-pad or left stick changes the selected side's team; bumpers change mode.
+  await pressPad(15);
   await pressPad(13);
   await expect(page.getByRole('button', { name: 'Utah Mammoth' })).toHaveAttribute(
     'aria-pressed',
@@ -152,14 +188,19 @@ test('virtual Xbox connects, skates, shoots with RS, and safely disconnects', as
   await page.evaluate('window.testPad.axes[1]=0');
   await page.waitForTimeout(90);
   await expect(page.getByRole('button', { name: 'Toronto Maple Leafs' })).toBeVisible();
-  await pressPad(5);
-  await expect(page.getByRole('button', { name: '3 ON 3' })).toHaveAttribute(
-    'aria-current',
-    'page',
-  );
-  await pressPad(4);
+  // A readies up; down swaps to the away sweater; B backs out and A readies again.
   await pressPad(0);
-  await expect(page.locator('.score-clock small')).toHaveText('● LIVE');
+  await expect(page.locator('.team-select')).toHaveAttribute('data-stage', 'ready');
+  await pressPad(13);
+  await expect(page.locator('.side-home .panel-jersey')).toContainText('Away');
+  await pressPad(1);
+  await expect(page.locator('.team-select')).toHaveAttribute('data-stage', 'team');
+  await pressPad(0);
+  await pressPad(0);
+  await expect(live(page)).toBeVisible();
+  const started = await state(page);
+  expect(started.jerseys).toEqual(['away', 'home']);
+  expect(started.mode).toBe('exhibition');
   await changeState(
     page,
     'const s=runtime.match; s.controlled=0; s.puck.owner=0; s.skaters[0].x=0;s.skaters[0].z=-8;s.skaters[0].cooldown=0;Object.assign(s.skaters[0],{vx:0,vz:0,angle:Math.PI/2,downTimer:0,stumbleTimer:0,checkTimer:0});s.skaters.slice(6).forEach(p=>{p.x=20;p.z=10})',
@@ -177,7 +218,7 @@ test('virtual Xbox connects, skates, shoots with RS, and safely disconnects', as
   await pressPad(9);
   await expect(page.getByRole('heading', { name: 'Paused' })).toBeVisible();
   await pressPad(1);
-  await expect(page.locator('.score-clock small')).toHaveText('● LIVE');
+  await expect(live(page)).toBeVisible();
   await changeState(page, 'runtime.match.clock=0.01');
   await expect(page.getByRole('heading', { name: 'Intermission' })).toBeVisible();
   await pressPad(0);
@@ -185,13 +226,39 @@ test('virtual Xbox connects, skates, shoots with RS, and safely disconnects', as
   await page.evaluate('window.testPad.connected=false');
   await expect(page.getByRole('heading', { name: 'Paused' })).toBeVisible();
 });
+test('a held stick repeats through a menu', async ({ page }) => {
+  await page.addInitScript(() => {
+    const pad = {
+      connected: true,
+      id: 'Xbox Wireless Controller (test)',
+      mapping: 'standard',
+      axes: [0, 0, 0, 0],
+      buttons: Array.from({ length: 17 }, () => ({ pressed: false, value: 0 })),
+    };
+    Object.assign(window, { testPad: pad });
+    Object.defineProperty(navigator, 'getGamepads', { value: () => [pad] });
+  });
+  await page.goto('/');
+  await expect(page.getByRole('navigation', { name: 'Main menu' })).toBeVisible();
+  const focusIndex = () =>
+    page.evaluate(() =>
+      Array.from(document.querySelectorAll('.menu-item')).findIndex((e) =>
+        e.hasAttribute('data-focused'),
+      ),
+    );
+  await page.evaluate('window.testPad.axes[1]=1');
+  // One step on the press, then repeats after a short hold. Poll fast so it's seen before it wraps.
+  await expect.poll(focusIndex, { timeout: 2000 }).toBe(1);
+  await expect.poll(focusIndex, { intervals: [50], timeout: 4000 }).toBeGreaterThan(1);
+  await page.evaluate('window.testPad.axes[1]=0');
+});
 test('all periods, goal presentation, final result, and rematch work', async ({ page }) => {
   await start(page);
   await changeState(
     page,
     'runtime.match.skaters.forEach(p=>{p.z=10});Object.assign(runtime.match.puck,{owner:null,x:25.8,z:0.8,y:0.4,vx:44,vz:0,lockout:1})',
   );
-  await expect(page.locator('.goal-overlay > strong')).toBeVisible();
+  await expect(page.locator('.goal-call .goal-word')).toHaveText('GOAL');
   expect((await state(page)).score).toEqual([1, 0]);
   const celebrating = await state(page);
   expect(celebrating.phase).toBe('goal');
@@ -209,13 +276,13 @@ test('all periods, goal presentation, final result, and rematch work', async ({ 
     await changeState(page, "runtime.match.phase='playing';runtime.match.clock=0.01");
     if (period < 3) {
       await expect(page.getByRole('heading', { name: 'Intermission' })).toBeVisible();
-      await page.getByRole('button', { name: `START PERIOD ${period + 1}` }).click();
+      await page.getByRole('button', { name: `Start period ${period + 1}` }).click();
       expect((await state(page)).period).toBe(period + 1);
     } else {
       await expect(page.getByRole('heading', { name: 'You win' })).toBeVisible();
     }
   }
-  await page.getByRole('button', { name: 'REMATCH' }).click();
+  await page.getByRole('button', { name: 'Rematch' }).click();
   const s = await state(page);
   expect(s.score).toEqual([0, 0]);
   expect(s.period).toBe(1);
@@ -225,17 +292,24 @@ test('desktop and narrow layouts keep primary actions visible', async ({ page })
   await page.goto('/');
   await page.waitForTimeout(1200);
   await page.screenshot({ path: 'artifacts/menu.png' });
-  await page.getByRole('button', { name: 'PLAY GAME' }).click();
+  await page.getByRole('button', { name: 'Play Now', exact: true }).click();
+  await page.waitForTimeout(400);
+  await page.screenshot({ path: 'artifacts/teams.png' });
+  await page.getByRole('button', { name: 'Ready', exact: true }).click();
+  await page.getByRole('button', { name: 'Play game', exact: true }).click();
   await page.waitForTimeout(4200);
   await page.screenshot({ path: 'artifacts/game.png' });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.reload();
   await page.waitForTimeout(1500);
   expect(await page.evaluate('document.documentElement.scrollWidth<=window.innerWidth')).toBe(true);
-  await page.getByRole('button', { name: 'PLAY GAME' }).scrollIntoViewIfNeeded();
-  await expect(page.getByRole('button', { name: 'PLAY GAME' })).toBeVisible();
-  const footer = await page.locator('.footer-actions').boundingBox();
-  expect(footer!.y + footer!.height).toBeLessThanOrEqual(844);
+  await page.getByRole('button', { name: 'Play Now', exact: true }).click();
+  const ready = page.getByRole('button', { name: 'Ready', exact: true });
+  await ready.scrollIntoViewIfNeeded();
+  await expect(ready).toBeVisible();
+  expect(await page.evaluate('document.documentElement.scrollWidth<=window.innerWidth')).toBe(true);
+  const prompts = await page.locator('.prompts').boundingBox();
+  expect(prompts!.y + prompts!.height).toBeLessThanOrEqual(844);
   await page.screenshot({ path: 'artifacts/mobile.png', fullPage: true });
 });
 
@@ -266,7 +340,8 @@ test('controller test discovers a paired Xbox with no mapping label and does not
     });
   });
   await page.goto('/');
-  await page.getByRole('button', { name: 'Connect controller', exact: true }).click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'Test controller' }).click();
   await expect(page.getByText('No controller detected', { exact: true })).toBeVisible();
   await page.evaluate(
     'window.exposePad=true;window.rawPad.buttons[0].pressed=true;window.rawPad.axes[0]=0.8;window.rawPad.axes[3]=-0.6;window.rawPad.buttons[7].value=0.9',
@@ -279,25 +354,23 @@ test('controller test discovers a paired Xbox with no mapping label and does not
   await page.evaluate(
     'window.rawPad.buttons[0].pressed=false;window.rawPad.axes=[0,0,0,0];window.rawPad.buttons[7].value=0',
   );
-  await page.getByRole('button', { name: 'Close controller setup' }).click();
-  await expect(page.getByRole('button', { name: 'Test controller', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Close controller test' }).click();
+  await expect(page.getByRole('button', { name: 'Test controller' })).toHaveAccessibleDescription(
+    'Connected',
+  );
 });
 
 test('3-on-3 and shootout can be selected from the menu', async ({ page }) => {
   await page.goto('/');
-  await page.getByRole('button', { name: '3 ON 3' }).click();
-  await expect(page.getByText('3 PERIODS · 3 MINUTES')).toBeVisible();
-  await page.getByRole('button', { name: 'PLAY GAME' }).click();
-  await expect(page.locator('.score-clock small')).toHaveText('● LIVE', { timeout: 30000 });
+  await play(page, '3 on 3');
+  await expect(live(page)).toBeVisible({ timeout: 30000 });
   const three = await state(page);
   expect(three.mode).toBe('threeOnThree');
   expect(three.clock).toBeGreaterThan(170);
   await page.keyboard.press('Escape');
-  await page.getByRole('button', { name: 'End match & return to menu' }).click();
-  await page.getByRole('button', { name: 'SHOOTOUT' }).click();
-  await expect(page.getByText('BEST OF 3 · THEN SUDDEN DEATH')).toBeVisible();
-  await page.getByRole('button', { name: 'PLAY GAME' }).click();
-  await expect(page.locator('.score-clock small')).toHaveText('● LIVE', { timeout: 5000 });
+  await page.getByRole('button', { name: 'Quit to Menu' }).click();
+  await play(page, 'Shootout');
+  await expect(live(page)).toBeVisible({ timeout: 5000 });
   const shootout = await state(page);
   expect(shootout.mode).toBe('shootout');
   expect(shootout.phase).toBe('playing');
@@ -308,11 +381,12 @@ test('free skate starts on open ice, keeps saves live, and resets after a goal',
   page,
 }) => {
   await page.goto('/');
-  await page.getByRole('button', { name: 'FREE SKATE' }).click();
-  await expect(page.getByRole('heading', { name: 'FREE SKATE' })).toBeVisible();
-  await page.getByRole('button', { name: 'START SKATE' }).click();
-  await expect(page.locator('.score-clock small')).toHaveText('● LIVE', { timeout: 5000 });
-  await expect(page.getByText('SKATE', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Free Skate', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Select Team' })).toBeVisible();
+  await page.getByRole('button', { name: 'Ready', exact: true }).click();
+  await page.getByRole('button', { name: 'Play game', exact: true }).click();
+  await expect(live(page)).toBeVisible({ timeout: 5000 });
+  await expect(page.locator('.bug-clock')).toHaveText('Free Skate');
   const opened = await state(page);
   expect(opened.mode).toBe('freeSkate');
   expect(opened.phase).toBe('playing');
@@ -331,12 +405,12 @@ test('free skate starts on open ice, keeps saves live, and resets after a goal',
     page,
     'const s=runtime.match; s.skaters.forEach(p=>{if(p.role==="G")p.z=8}); Object.assign(s.puck,{owner:null,x:25.8,z:0.8,y:0.4,vx:44,vz:0,lockout:1})',
   );
-  await expect(page.locator('.goal-overlay > strong')).toHaveText('GOAL');
-  await expect(page.locator('.score-clock small')).toHaveText('● LIVE', { timeout: 5000 });
+  await expect(page.locator('.goal-call .goal-word')).toHaveText('GOAL');
+  await expect(live(page)).toBeVisible({ timeout: 5000 });
   expect((await state(page)).puck.owner).not.toBeNull();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('heading', { name: 'Paused' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'RESUME SKATE' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Resume', exact: true })).toBeVisible();
 });
 
 test('a blocked Gamepad API explains the problem and leaves keyboard gameplay usable', async ({
@@ -352,11 +426,13 @@ test('a blocked Gamepad API explains the problem and leaves keyboard gameplay us
     }),
   );
   await page.goto('/');
-  await page.getByRole('button', { name: 'Connect controller', exact: true }).click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'Test controller' }).click();
   await expect(page.getByText(/Controller access is blocked/)).toBeVisible();
-  await page.getByRole('button', { name: 'Close controller setup' }).click();
-  await page.getByRole('button', { name: 'PLAY GAME' }).click();
-  await expect(page.locator('.score-clock small')).toHaveText('● LIVE');
+  await page.getByRole('button', { name: 'Close controller test' }).click();
+  await page.keyboard.press('Escape');
+  await play(page);
+  await expect(live(page)).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('heading', { name: 'Paused' })).toBeVisible();
   expect(errors).toEqual([]);
@@ -389,7 +465,7 @@ test('a keyboard flick drives a backcheck toward your own end and dislodges the 
 
 test('feel tuner changes live physics, shows a readout, and resets', async ({ page }) => {
   await start(page);
-  await page.getByRole('button', { name: 'Show feel tuner' }).click();
+  await page.keyboard.press('Backquote');
   await expect(page.getByRole('heading', { name: 'How it feels' })).toBeVisible();
   await expect(page.getByText(/Build to top speed/)).toBeVisible();
   await expect(page.getByText('Speed', { exact: true })).toBeVisible();
@@ -428,19 +504,19 @@ test('a goal rolls a skippable replay, and pause opens a scrubbable instant repl
      for (const p of s.skaters) if (p.role === 'G') { p.x = 0; p.z = p.team ? -10 : 10; }
      Object.assign(s.puck, { owner: null, x: 25.8, z: 0.8, y: 0.4, vx: 44, vz: 0, vy: 0, lockout: 1 })`,
   );
-  await expect(page.locator('.goal-overlay')).toBeVisible();
+  await expect(page.locator('.goal-call')).toBeVisible();
   const goalReplay = page.getByRole('region', { name: 'Goal replay' });
   await expect(goalReplay).toBeVisible({ timeout: 5000 });
   await expect(page.locator('.replay-bug')).toContainText('REPLAY');
   await page.getByRole('button', { name: /Skip replay/ }).click();
   await expect(goalReplay).toHaveCount(0);
-  await expect(page.locator('.faceoff-overlay')).toBeVisible();
+  await expect(page.locator('.faceoff')).toBeVisible();
   const s = await state(page);
   expect(s.score[0] + s.score[1]).toBe(1);
 
   await expect(page.locator('.fps-counter')).toHaveText(/^\d+ FPS$/);
   await page.keyboard.press('Escape');
-  await page.getByRole('button', { name: 'Instant replay' }).click();
+  await page.getByRole('button', { name: 'Instant Replay' }).click();
   const deck = page.getByRole('region', { name: 'Replay controls' });
   await expect(deck).toBeVisible();
   const replay = (path: string) => page.evaluate(`window.__BENCHED__.runtime.replay.${path}`);

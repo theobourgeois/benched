@@ -4,13 +4,15 @@ import { GameScene } from './scene/GameScene';
 import { Menu } from './ui/Menu';
 import { Hud } from './ui/Hud';
 import { ReplayHud } from './ui/ReplayHud';
-import { useGame, runtime, publish } from './game/store';
+import { useGame, runtime, publish, beginGame } from './game/store';
 import { bootFeel, resetFeel } from './game/feel';
 import { PHYSICS, STICK } from './game/config';
 import './style.css';
 bootFeel();
 if (import.meta.env.DEV)
-  Object.assign(window, { __BENCHED__: { runtime, publish, PHYSICS, STICK, resetFeel } });
+  Object.assign(window, {
+    __BENCHED__: { runtime, publish, beginGame, PHYSICS, STICK, resetFeel },
+  });
 function App() {
   const { match, replay } = useGame();
   return (

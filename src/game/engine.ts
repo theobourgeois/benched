@@ -12,6 +12,7 @@ import type {
   GameMode,
   InputFrame,
   MatchState,
+  Jersey,
   Phase,
   Skater,
   Team,
@@ -23,6 +24,7 @@ export function createMatch(
   homeTeam: Team = 0,
   mode: GameMode = 'exhibition',
   teams: [Club, Club] = DEFAULT_MATCHUP,
+  jerseys: [Jersey, Jersey] = ['home', 'away'],
 ): MatchState {
   const s: MatchState = {
     mode,
@@ -51,6 +53,7 @@ export function createMatch(
     autoSkate: false,
     homeTeam,
     teams,
+    jerseys,
     difficulty: DEFAULT_DIFFICULTY,
     scoringTeam: null,
     shotCharge: 0,

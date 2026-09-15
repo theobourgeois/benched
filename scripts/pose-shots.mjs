@@ -14,8 +14,9 @@ const page = await browser.newPage({ viewport: { width: 900, height: 900 } });
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
 await page.goto('http://localhost:5173/');
-await page.getByRole('button', { name: 'PLAY GAME' }).click();
-await page.locator('.score-clock small').filter({ hasText: 'LIVE' }).waitFor({ timeout: 30000 });
+await page.waitForFunction(() => window.__BENCHED__);
+await page.evaluate(() => window.__BENCHED__.beginGame(0));
+await page.locator('.hud[data-phase="playing"]').waitFor({ timeout: 30000 });
 await page.evaluate(() => {
   const { runtime } = window.__BENCHED__;
   runtime.settings.beginner = false;

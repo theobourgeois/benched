@@ -1,5 +1,6 @@
 import type { Club } from './clubs';
 export type Team = 0 | 1;
+export type Jersey = 'home' | 'away';
 export type GameMode = 'exhibition' | 'threeOnThree' | 'oneOnOne' | 'shootout' | 'freeSkate';
 export type Phase = 'menu' | 'faceoff' | 'playing' | 'goal' | 'intermission' | 'paused' | 'final';
 export type DekeKind =
@@ -137,8 +138,10 @@ export interface MatchState {
   /** After a defensive switch, keep skating at the play while the left stick is quiet. */
   autoSkate: boolean;
   homeTeam: Team;
-  /** Club on each side; side 0 wears home colors, side 1 away. */
+  /** Club on each side. Side 0 has home ice. */
   teams: [Club, Club];
+  /** Which uniform each side wears. */
+  jerseys: [Jersey, Jersey];
   /** How hard opposing CPUs play. The player's teammates stay All-Star. */
   difficulty: Difficulty;
   scoringTeam: Team | null;
@@ -196,4 +199,8 @@ export interface Settings {
   difficulty: Difficulty;
   /** Replay the build-up after a goal; any button skips it. */
   goalReplays: boolean;
+  /** Frame counter in the corner of the ice. */
+  showFps: boolean;
+  /** Button prompts along the bottom of menus. */
+  hints: boolean;
 }

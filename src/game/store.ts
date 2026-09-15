@@ -17,7 +17,8 @@ import {
   toggleReplayPlayback,
   type ReplaySession,
 } from './replay';
-import type { GameMode, MatchState, Settings, Team } from './types';
+import type { GameMode, Jersey, MatchState, Settings, Team } from './types';
+const SETTINGS_KEY = 'benched.settings';
 export const runtime = {
   match: createMatch(),
   controller: new Controller(),
@@ -26,15 +27,26 @@ export const runtime = {
   recorder: new ReplayBuffer(),
   /** The replay on screen, if any. The live match holds still underneath it. */
   replay: null as ReplaySession | null,
-  settings: {
+  settings: loadSettings(),
+};
+function loadSettings(): Settings {
+  const defaults: Settings = {
     sound: true,
     camera: 'broadcast',
     quality: 'high',
     beginner: true,
     difficulty: DEFAULT_DIFFICULTY,
     goalReplays: true,
-  } as Settings,
-};
+    showFps: true,
+    hints: true,
+  };
+  try {
+    const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') as Partial<Settings>;
+    return { ...defaults, ...saved };
+  } catch {
+    return defaults;
+  }
+}
 let revision = 0;
 const listeners = new Set<() => void>();
 export const publish = () => {
@@ -59,10 +71,11 @@ export function beginGame(
   team: Team,
   mode: GameMode = 'exhibition',
   teams: [Club, Club] = runtime.match.teams,
+  jerseys: [Jersey, Jersey] = runtime.match.jerseys,
 ) {
   runtime.audio.unlock();
   runtime.replay = null;
-  runtime.match = createMatch(team, mode, teams);
+  runtime.match = createMatch(team, mode, teams, jerseys);
   runtime.match.difficulty = runtime.settings.difficulty;
   startMatch(runtime.match);
   publish();
@@ -77,13 +90,19 @@ export function continueGame() {
 }
 export function returnToMenu() {
   runtime.replay = null;
-  runtime.match = createMatch(runtime.match.homeTeam, 'exhibition', runtime.match.teams);
+  const { homeTeam, teams, jerseys } = runtime.match;
+  runtime.match = createMatch(homeTeam, 'exhibition', teams, jerseys);
   publish();
 }
 export function updateSettings(settings: Partial<Settings>) {
   Object.assign(runtime.settings, settings);
   runtime.audio.enabled = runtime.settings.sound;
   if (settings.difficulty) runtime.match.difficulty = settings.difficulty;
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(runtime.settings));
+  } catch {
+    // Private windows can refuse storage; the settings still hold for this session.
+  }
   publish();
 }
 export const canInstantReplay = () => runtime.recorder.length >= REPLAY_HZ;

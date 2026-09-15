@@ -14,8 +14,9 @@ const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
 page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
 await page.goto('http://localhost:5173/');
-await page.getByRole('button', { name: 'PLAY GAME' }).click();
-await page.locator('.score-clock small').filter({ hasText: 'LIVE' }).waitFor({ timeout: 30000 });
+await page.waitForFunction(() => window.__BENCHED__);
+await page.evaluate(() => window.__BENCHED__.beginGame(0));
+await page.locator('.hud[data-phase="playing"]').waitFor({ timeout: 30000 });
 await page.waitForTimeout(1500);
 
 // Victim starts at (x, z) skating at (vx, vz) and is pushed along `push` (radians, 0 = +z).

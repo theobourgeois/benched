@@ -109,7 +109,7 @@ export const Player = memo(function Player({ id }: { id: number }) {
     paddle = useRef<THREE.Mesh>(null);
   const p = runtime.match.skaters[id],
     goalie = p.role === 'G';
-  const uniform = uniformFor(runtime.match.teams[p.team], p.team);
+  const uniform = uniformFor(runtime.match.teams[p.team], runtime.match.jerseys[p.team]);
   const crest = useLoader(SvgTextureLoader, uniform.crest);
   const helmet = goalie ? goalieHelmet.scene : playerHelmet.scene;
   const rig = useMemo(() => {

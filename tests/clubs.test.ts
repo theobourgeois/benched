@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cycleClub, LEAGUES, openingMatchup, uniformFor } from '../src/game/clubs';
+import { cycleClub, jerseysFor, LEAGUES, openingMatchup, uniformFor } from '../src/game/clubs';
 import { createMatch } from '../src/game/engine';
 
 const nhl = LEAGUES.find((l) => l.id === 'nhl')!;
@@ -17,10 +17,13 @@ describe('leagues', () => {
   it('opens on a real matchup with the away side in white', () => {
     const [home, away] = openingMatchup(nhl);
     expect([home.key, away.key]).toEqual(['nhl:TOR', 'nhl:MTL']);
-    expect(uniformFor(home, 0).jersey).toBe(home.home.jersey);
-    expect(uniformFor(away, 1).jersey).not.toBe(uniformFor(home, 0).jersey);
-    expect(uniformFor(home, 0).crest).toMatch(/logos\/nhl\/TOR_dark\.svg$/);
-    expect(uniformFor(away, 1).crest).toMatch(/logos\/nhl\/MTL_light\.svg$/);
+    expect(uniformFor(home, 'home').jersey).toBe(home.home.jersey);
+    expect(uniformFor(away, 'away').jersey).not.toBe(uniformFor(home, 'home').jersey);
+    expect(home.logoLight).toMatch(/logos\/nhl\/TOR_light\.svg$/);
+    expect(uniformFor(home, 'home').crest).toMatch(/logos\/nhl\/TOR_dark\.svg$/);
+    expect(uniformFor(away, 'away').crest).toMatch(/logos\/nhl\/MTL_light\.svg$/);
+    expect(jerseysFor(0, 'away')).toEqual(['away', 'home']);
+    expect(jerseysFor(1, 'home')).toEqual(['away', 'home']);
   });
 
   it('never cycles a club into playing itself', () => {

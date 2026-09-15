@@ -428,16 +428,19 @@ export function GameScene() {
             />
             <directionalLight position={[-22, 16, -10]} intensity={1.1} color="#d6e6ff" />
             <Suspense fallback={null}>
-              <Arena />
+              <Arena iceLogo={match.teams[0].logoLight} />
               <Puck />
               <ShotAimHud marker={shotAim} />
               <PassAim />
               <IceSpray />
             </Suspense>
             <Suspense fallback={null}>
-              {/* Keyed by matchup so jerseys are rebuilt when the clubs change. */}
+              {/* Keyed by matchup so jerseys are rebuilt when the clubs or uniforms change. */}
               {Array.from({ length: 12 }, (_, i) => (
-                <Player key={`${match.teams[0].key}|${match.teams[1].key}|${i}`} id={i} />
+                <Player
+                  key={`${match.teams[0].key}|${match.teams[1].key}|${match.jerseys.join()}|${i}`}
+                  id={i}
+                />
               ))}
             </Suspense>
             <Simulation />
