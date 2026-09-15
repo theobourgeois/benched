@@ -194,4 +194,6 @@ export interface Settings {
   /** Shot target in the net and pass-lane arrow. */
   beginner: boolean;
   difficulty: Difficulty;
+  /** Replay the build-up after a goal; any button skips it. */
+  goalReplays: boolean;
 }

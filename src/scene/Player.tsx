@@ -3,7 +3,7 @@ import { useFrame, useLoader } from '@react-three/fiber';
 import * as THREE from 'three';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { runtime } from '../game/store';
+import { runtime, viewMatch, viewTimeScale } from '../game/store';
 import { uniformFor } from '../game/clubs';
 import { isOnIce } from '../game/engine';
 import { activeDeke } from '../game/dekes';
@@ -105,7 +105,7 @@ export const Player = memo(function Player({ id }: { id: number }) {
     bladeParts = bladeGeometries(blade);
   const heading = useMemo(() => new THREE.Vector3(0, 0, 1), []);
   useFrame((_, dt) => {
-    const s = runtime.match,
+    const s = viewMatch(),
       skater = s.skaters[id];
     const root = group.current,
       tilt = fall.current;
@@ -145,7 +145,8 @@ export const Player = memo(function Player({ id }: { id: number }) {
     const shooting = skater.shotTimer / 0.34;
     const charge = s.controlled === id ? s.shotCharge : 0;
     const lift = s.controlled === id ? s.shotLift : 0;
-    const posture = poseSkater(rig, skater, dt, goalie, twoHand, charge, tilt);
+    // The ragdoll runs on replay time, so a knockdown tumbles slowly in slow motion.
+    const posture = poseSkater(rig, skater, dt * viewTimeScale(), goalie, twoHand, charge, tilt);
     const { stickBlend, pelvis, swing } = posture;
 
     // Left-stick net aim keeps shotLift around 0.5 at rest; only raise the blade on a real windup.
@@ -231,7 +232,8 @@ export const Player = memo(function Player({ id }: { id: number }) {
       curlFingers(rig, 'L', 0.3);
       curlFingers(rig, 'R', 0.3);
     }
-    ring.current!.visible = s.controlled === id || (s.passHeld && s.passTarget === id);
+    ring.current!.visible =
+      !runtime.replay && (s.controlled === id || (s.passHeld && s.passTarget === id));
     const marker = ring.current!.material;
     if (marker instanceof THREE.MeshBasicMaterial)
       marker.color.set(s.controlled === id ? '#e84a4a' : '#d5fa64');

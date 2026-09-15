@@ -4,15 +4,30 @@ import * as THREE from 'three';
 import { Arena } from './Arena';
 import { Player } from './Player';
 import { IceSpray } from './Effects';
-import { runtime, publish, useGame } from '../game/store';
+import {
+  driveReplay,
+  goalReplayWanted,
+  publish,
+  runtime,
+  startGoalReplay,
+  useGame,
+  viewMatch,
+  viewTimeScale,
+} from '../game/store';
 import { stepMatch, togglePause, netShotTarget } from '../game/engine';
+import { GOAL_REPLAY, REPLAY_HZ } from '../game/replay';
+import { replayFraming } from './replayCamera';
 import { navigateWithController } from '../input/menuNavigation';
 import { screenInputToRink } from '../input/coordinates';
 import { cameraFraming } from './camera';
 import { playerLocator } from './locator';
 import { PUCK, RULES } from '../game/config';
-import type { InputFrame } from '../game/types';
+import type { InputFrame, Phase } from '../game/types';
 const _aimNdc = new THREE.Vector3();
+const _framing = new THREE.Vector3();
+/** Simulation steps per replay snapshot. */
+const RECORD_EVERY = Math.max(1, Math.round(1 / RULES.fixedStep / REPLAY_HZ));
+const RECORDED: Phase[] = ['faceoff', 'playing', 'goal'];
 /** Impact feedback shared between the simulation loop and the camera: a big hit shakes the frame. */
 const impact = { shake: 0 };
 const noEdges = (input: InputFrame) => ({
@@ -35,10 +50,16 @@ function Simulation() {
     lastEvent = useRef(-1),
     publishTime = useRef(0),
     lastMatch = useRef(runtime.match),
-    pending = useRef<InputFrame | null>(null);
+    pending = useRef<InputFrame | null>(null),
+    steps = useRef(0),
+    goalReplay = useRef(false);
   useEffect(() => {
     const detach = runtime.controller.attach();
     const pause = () => {
+      if (runtime.replay) {
+        if (runtime.replay.kind === 'instant') runtime.replay.playing = false;
+        return;
+      }
       if (['playing', 'faceoff', 'goal'].includes(runtime.match.phase)) {
         togglePause(runtime.match);
         runtime.audio.updateSkating(runtime.match);
@@ -63,6 +84,29 @@ function Simulation() {
       lastEvent.current = -1;
       accumulator.current = 0;
       pending.current = null;
+      goalReplay.current = false;
+    }
+    const tickPublish = () => {
+      publishTime.current += delta;
+      if (publishTime.current > 0.08) {
+        publish();
+        publishTime.current = 0;
+      }
+    };
+    // Replay controls read every frame, before read() clears this frame's key taps, so a button
+    // already held when a replay opens doesn't count as a press.
+    const replayInput = runtime.controller.replayInput();
+    const replay = runtime.replay;
+    if (replay) {
+      const dt = Math.min(delta, 0.05);
+      // Play input keeps reading too, so buttons held on the way out aren't fresh presses.
+      runtime.controller.read(dt, false);
+      pending.current = null;
+      accumulator.current = 0;
+      driveReplay(replay, replayInput, dt);
+      runtime.audio.updateSkating(viewMatch(), Math.min(1, viewTimeScale()));
+      tickPublish();
+      return;
     }
     const frame = screenInputToRink(
       runtime.controller.read(Math.min(delta, 0.05), s.puck.owner === s.controlled),
@@ -106,10 +150,13 @@ function Simulation() {
       stepMatch(s, pending.current, RULES.fixedStep);
       pending.current = noEdges(pending.current);
       accumulator.current -= RULES.fixedStep;
+      if (RECORDED.includes(s.phase) && ++steps.current % RECORD_EVERY === 0)
+        runtime.recorder.record(s);
     }
     for (const event of s.events)
       if (event.id > lastEvent.current) {
         runtime.audio.play(event);
+        if (event.type === 'goal') goalReplay.current = goalReplayWanted(s);
         if (['shot', 'hit', 'goal', 'post', 'save'].includes(event.type)) {
           const bigHit = event.type === 'hit' && event.power >= 0.5;
           if (bigHit) impact.shake = Math.max(impact.shake, event.power >= 0.75 ? 1 : 0.45);
@@ -120,27 +167,52 @@ function Simulation() {
         }
         lastEvent.current = event.id;
       }
-    runtime.audio.updateSkating(s);
-    publishTime.current += delta;
-    if (publishTime.current > 0.08) {
-      publish();
-      publishTime.current = 0;
+    // Let the goal land live for a moment, then roll the replay.
+    if (s.phase !== 'goal' && s.phase !== 'paused') goalReplay.current = false;
+    else if (
+      goalReplay.current &&
+      s.phase === 'goal' &&
+      s.countdown <= RULES.goalSeconds - GOAL_REPLAY.celebrate
+    ) {
+      goalReplay.current = false;
+      startGoalReplay();
     }
+    runtime.audio.updateSkating(s);
+    tickPublish();
   });
   return null;
 }
 function CameraRig() {
   const { camera, size } = useThree();
-  const look = useRef(new THREE.Vector3());
-  useFrame((_, dt) => {
-    const framing = cameraFraming(runtime.match, runtime.settings.camera, size.width / size.height);
-    const smoothing = 1 - Math.exp(-Math.min(dt, 0.1) * 5);
-    camera.position.lerp(new THREE.Vector3(...framing.position), smoothing);
-    look.current.lerp(new THREE.Vector3(...framing.target), smoothing);
+  const look = useRef(new THREE.Vector3()),
+    inReplay = useRef(false);
+  useFrame((_, delta) => {
+    const dt = Math.min(delta, 0.1),
+      aspect = size.width / size.height,
+      replay = runtime.replay;
+    const framing = replay
+      ? replayFraming(replay, dt, aspect, runtime.settings.camera, {
+          position: camera.position.toArray(),
+          target: look.current.toArray(),
+        })
+      : {
+          ...cameraFraming(runtime.match, runtime.settings.camera, aspect),
+          // Coming out of a replay cuts back to the game rather than flying across the rink.
+          cut: inReplay.current,
+          smoothing: 5,
+        };
+    inReplay.current = Boolean(replay);
+    const smoothing =
+      framing.cut || !Number.isFinite(framing.smoothing)
+        ? 1
+        : 1 - Math.exp(-dt * framing.smoothing);
+    camera.position.lerp(_framing.set(...framing.position), smoothing);
+    look.current.lerp(_framing.set(...framing.target), smoothing);
     const perspective = camera as THREE.PerspectiveCamera;
     perspective.fov = THREE.MathUtils.lerp(perspective.fov, framing.fov, smoothing);
     perspective.updateProjectionMatrix();
     camera.lookAt(look.current);
+    if (replay) impact.shake = 0;
     if (impact.shake > 0.01) {
       const amplitude = impact.shake * 0.28;
       camera.position.x += (Math.random() - 0.5) * amplitude;
@@ -158,7 +230,8 @@ function Puck() {
   const positions = useRef(Array.from({ length: 14 }, () => new THREE.Vector3())),
     dummy = useRef(new THREE.Object3D());
   useFrame(() => {
-    const p = runtime.match.puck;
+    const s = viewMatch(),
+      p = s.puck;
     mesh.current!.position.set(p.x, p.y, p.z);
     shadow.current!.position.set(p.x, 0.016, p.z);
     positions.current.unshift(new THREE.Vector3(p.x, p.y, p.z));
@@ -166,7 +239,7 @@ function Puck() {
     const fast =
       Math.hypot(p.vx, p.vz) > 12 &&
       p.owner === null &&
-      (runtime.match.phase === 'playing' || runtime.match.phase === 'goal');
+      (s.phase === 'playing' || s.phase === 'goal');
     const airborne = p.y > 0.35;
     positions.current.forEach((pos, i) => {
       dummy.current.position.copy(pos);
@@ -206,6 +279,7 @@ function PassAim() {
       root = group.current;
     if (!root) return;
     const live =
+      !runtime.replay &&
       runtime.settings.beginner &&
       s.passHeld &&
       s.phase === 'playing' &&
@@ -245,12 +319,9 @@ function PlayerLocatorHud({ marker }: { marker: RefObject<HTMLDivElement | null>
   useFrame(({ camera, size }) => {
     const el = marker.current;
     if (!el) return;
-    const loc = playerLocator(
-      runtime.match,
-      camera as THREE.PerspectiveCamera,
-      size.width,
-      shown.current,
-    );
+    const loc = runtime.replay
+      ? null
+      : playerLocator(runtime.match, camera as THREE.PerspectiveCamera, size.width, shown.current);
     shown.current = Boolean(loc);
     if (!loc) {
       el.hidden = true;
@@ -271,6 +342,7 @@ function ShotAimHud({ marker }: { marker: RefObject<HTMLDivElement | null> }) {
     const s = runtime.match,
       p = s.skaters[s.controlled];
     const live =
+      !runtime.replay &&
       runtime.settings.beginner &&
       s.phase === 'playing' &&
       s.puck.owner === s.controlled &&

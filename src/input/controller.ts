@@ -13,6 +13,7 @@ export function deadzone(value: number) {
     ? 0
     : (Math.sign(value) * (Math.abs(value) - DEADZONE)) / (1 - DEADZONE);
 }
+export type ReplayInput = ReturnType<Controller['replayInput']>;
 /** One input vocabulary for Gamepad API and keyboard. Shot gestures are edge-triggered. */
 export class Controller {
   private keys = new Set<string>();
@@ -252,6 +253,47 @@ export class Controller {
     this.previousBackskate = backskate;
     this.taps.clear();
     return frame;
+  }
+  private previousReplay = new Set<string>();
+  /**
+   * Replay transport and camera, from the same pad and keys as play. Call it every frame, before
+   * read() clears the key taps, so a button already held when a replay opens is not a press.
+   */
+  replayInput() {
+    const { pad } = pollGamepads(this.layout, this.lastPad?.index);
+    const key = (k: string) => this.keys.has(k) || this.taps.has(k);
+    const button = (i: number) => !!pad?.buttons[i]?.pressed || (pad?.buttons[i]?.value ?? 0) > 0.5;
+    const trigger = (i: number) => {
+      const value = pad?.buttons[i]?.value ?? 0;
+      return value > 0.08 ? value : 0;
+    };
+    const axis = (i: number) => deadzone(pad?.axes[i] ?? 0);
+    const held = {
+      play: button(0) || key('Space') || key('Enter') || key('KeyK'),
+      exit: button(1) || button(9) || key('Escape') || key('Backspace'),
+      camera: button(3) || key('KeyC'),
+      restart: button(2) || key('Home') || key('Digit0'),
+      stepBack: button(14) || key('Comma'),
+      stepForward: button(15) || key('Period'),
+      slower: button(13) || key('Minus'),
+      faster: button(12) || key('Equal'),
+    };
+    const names = Object.keys(held) as (keyof typeof held)[];
+    const pressed = Object.fromEntries(
+      names.map((name) => [name, held[name] && !this.previousReplay.has(name)]),
+    ) as Record<keyof typeof held, boolean>;
+    this.previousReplay = new Set(names.filter((name) => held[name]));
+    return {
+      ...pressed,
+      /** RT runs forward, LT rewinds; both up to 2×. */
+      scrub: clamp(trigger(7) - trigger(6) + +key('KeyE') - +key('KeyQ'), -1, 1),
+      orbitX: clamp(axis(2) + +key('ArrowRight') - +key('ArrowLeft'), -1, 1),
+      orbitY: clamp(axis(3) + +key('ArrowDown') - +key('ArrowUp'), -1, 1),
+      moveX: clamp(axis(0) + +key('KeyD') - +key('KeyA'), -1, 1),
+      moveZ: clamp(axis(1) + +key('KeyS') - +key('KeyW'), -1, 1),
+      /** + pulls the camera back (LB, F), − pushes in (RB, R). */
+      zoom: clamp(+button(4) + +key('KeyF') - +button(5) - +key('KeyR'), -1, 1),
+    };
   }
   rumble(power: number, duration = 100) {
     const actuator = this.lastPad?.vibrationActuator;

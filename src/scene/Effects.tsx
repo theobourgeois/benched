@@ -1,7 +1,7 @@
 import { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import { runtime } from '../game/store';
+import { runtime, viewMatch, viewTimeScale } from '../game/store';
 interface Particle {
   x: number;
   y: number;
@@ -43,11 +43,12 @@ export function IceSpray() {
     p.life = p.maxLife = 0.25 + Math.random() * 0.35;
   };
   useFrame((_, delta) => {
-    const s = runtime.match,
-      dt = Math.min(delta, 0.05);
+    const s = viewMatch(),
+      dt = Math.min(delta, 0.05) * viewTimeScale();
     if (s !== match.current) {
       match.current = s;
-      lastEvent.current = -1;
+      // Only new bursts: cutting to or from a replay must not re-fire hits already shown.
+      lastEvent.current = s.events.at(-1)?.id ?? -1;
       pool.current.forEach((p) => (p.life = 0));
     }
     spawnTime.current += dt;

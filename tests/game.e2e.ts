@@ -414,3 +414,54 @@ test('shows a bottom locator when you trail the play off-camera', async ({ page 
   await expect(page.locator('.player-locator')).toBeVisible({ timeout: 4000 });
   await expect(page.locator('.player-locator small')).toHaveText('YOU');
 });
+test('a goal rolls a skippable replay, and pause opens a scrubbable instant replay', async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await start(page);
+  await page.waitForTimeout(2000);
+  // The same swept goal the engine tests use, with the goalies pulled so nothing saves it.
+  await changeState(
+    page,
+    `const s = runtime.match;
+     for (const p of s.skaters) if (p.role === 'G') { p.x = 0; p.z = p.team ? -10 : 10; }
+     Object.assign(s.puck, { owner: null, x: 25.8, z: 0.8, y: 0.4, vx: 44, vz: 0, vy: 0, lockout: 1 })`,
+  );
+  await expect(page.locator('.goal-overlay')).toBeVisible();
+  const goalReplay = page.getByRole('region', { name: 'Goal replay' });
+  await expect(goalReplay).toBeVisible({ timeout: 5000 });
+  await expect(page.locator('.replay-bug')).toContainText('REPLAY');
+  await page.getByRole('button', { name: /Skip replay/ }).click();
+  await expect(goalReplay).toHaveCount(0);
+  await expect(page.locator('.faceoff-overlay')).toBeVisible();
+  const s = await state(page);
+  expect(s.score[0] + s.score[1]).toBe(1);
+
+  await expect(page.locator('.fps-counter')).toHaveText(/^\d+ FPS$/);
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Instant replay' }).click();
+  const deck = page.getByRole('region', { name: 'Replay controls' });
+  await expect(deck).toBeVisible();
+  const replay = (path: string) => page.evaluate(`window.__BENCHED__.runtime.replay.${path}`);
+  // Opens held: nothing moves until play.
+  await expect(page.getByRole('button', { name: 'Play replay' })).toBeVisible();
+  const time = (await replay('time')) as number;
+  await page.waitForTimeout(300);
+  expect(await replay('time')).toBe(time);
+  await page.getByRole('button', { name: 'Back one frame' }).click();
+  expect(await replay('time')).toBeLessThan(time);
+  await page.getByRole('button', { name: 'Free cam' }).click();
+  await expect(page.getByRole('button', { name: 'Free cam' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  const distance = (await replay('camera.distance')) as number;
+  await page.mouse.move(700, 300);
+  await page.mouse.wheel(0, 400);
+  await expect.poll(() => replay('camera.distance')).toBeGreaterThan(distance);
+  await page.keyboard.press('Escape');
+  await expect(deck).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: 'Game paused' })).toBeVisible();
+  expect(errors).toEqual([]);
+});

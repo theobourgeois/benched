@@ -75,7 +75,8 @@ export class ArenaAudio {
     if (!ready.length) return false;
     return this.sample(ready[Math.floor(Math.random() * ready.length)], volume, rate);
   }
-  updateSkating(match: MatchState) {
+  /** `scale` quiets the skates in a slowed or held replay. */
+  updateSkating(match: MatchState, scale = 1) {
     const ctx = this.context,
       buffer = this.samples.get('skating');
     if (!ctx || !this.master || !buffer) return;
@@ -92,7 +93,7 @@ export class ArenaAudio {
     const p = match.skaters[match.controlled];
     const speed =
       (match.phase === 'playing' || match.phase === 'goal') && p.downTimer <= 0 && p.diveTimer <= 0
-        ? Math.hypot(p.vx, p.vz)
+        ? Math.hypot(p.vx, p.vz) * scale
         : 0;
     this.skateGain!.gain.setTargetAtTime(
       this.active ? Math.min(0.55, speed / 18) : 0,

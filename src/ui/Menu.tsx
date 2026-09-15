@@ -100,6 +100,21 @@ export function SettingsPanel({ close }: { close: () => void }) {
         <p className="setting-hint" id="beginner-mode-hint">
           Shot target in the net and pass-lane arrow while you aim.
         </p>
+        <label>
+          Goal replays{' '}
+          <button
+            className={`toggle ${settings.goalReplays ? 'on' : ''}`}
+            aria-label="Toggle goal replays"
+            aria-describedby="goal-replays-hint"
+            aria-pressed={settings.goalReplays}
+            onClick={() => updateSettings({ goalReplays: !settings.goalReplays })}
+          >
+            <span />
+          </button>
+        </label>
+        <p className="setting-hint" id="goal-replays-hint">
+          Replays the build-up after a goal. Any button skips it.
+        </p>
         <label htmlFor="camera-setting">
           Camera angle{' '}
           <select

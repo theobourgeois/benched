@@ -4,6 +4,7 @@ import {
   ArrowUpRight,
   Gamepad2,
   HelpCircle,
+  History,
   Pause,
   Play,
   RotateCcw,
@@ -18,7 +19,9 @@ import { difficultyInfo } from '../game/difficulty';
 import { modeInfo } from '../game/modes';
 import {
   beginGame,
+  canInstantReplay,
   continueGame,
+  openInstantReplay,
   pauseGame,
   returnToMenu,
   updateSettings,
@@ -28,6 +31,7 @@ import { cameraUsesAttackUp } from '../game/types';
 import { Brand, SettingsPanel, TeamLogo } from './Menu';
 import { Controls } from './Controls';
 import { FeelHud } from './FeelHud';
+import { FpsCounter } from './FpsCounter';
 export function formatClock(seconds: number) {
   const s = Math.ceil(seconds);
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
@@ -57,6 +61,7 @@ export function Hud() {
   };
   return (
     <div className="hud">
+      <FpsCounter />
       <header className="game-header">
         <Brand small />
         <div className="scoreboard">
@@ -267,6 +272,13 @@ export function Hud() {
             </p>
             <button className="primary-button" onClick={pauseGame}>
               {info.resume} <Play size={18} fill="currentColor" />
+            </button>
+            <button
+              className="secondary-button"
+              onClick={openInstantReplay}
+              disabled={!canInstantReplay()}
+            >
+              <History size={18} /> Instant replay <ArrowUpRight size={16} />
             </button>
             <button className="secondary-button" onClick={() => setControls(true)}>
               <Gamepad2 size={18} /> Skill-stick controls <ArrowUpRight size={16} />
