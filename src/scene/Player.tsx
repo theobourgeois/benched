@@ -5,6 +5,7 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { runtime, viewMatch, viewTimeScale } from '../game/store';
 import { uniformFor } from '../game/clubs';
+import { STICK } from '../game/config';
 import { isOnIce } from '../game/engine';
 import { activeDeke } from '../game/dekes';
 import type { MatchState, Skater } from '../game/types';
@@ -20,7 +21,7 @@ import {
   setWorldQuaternion,
 } from './skaterModel';
 import { GET_UP, fallenAmount, poseSkater } from './skaterPose';
-import { reviewSkaters } from './animationReview';
+import { labHooks, labPose, reviewSkaters } from './animationReview';
 import { createGoalieAction, sampleGoalieAction, shotWindup } from './hockeyMotion';
 import {
   POSE_SIZE,
@@ -46,10 +47,13 @@ import {
   paddleGeometry,
   placeStick,
   shaftGeometry,
+  STICK_URL,
+  stickModel,
   type StickParts,
 } from './stick';
 
 useLoader.preload(FBXLoader, SKATER_URL);
+useLoader.preload(GLTFLoader, STICK_URL);
 useLoader.preload(GLTFLoader, HELMET_PLAYER_URL);
 useLoader.preload(GLTFLoader, HELMET_GOALIE_URL);
 
@@ -58,6 +62,7 @@ const BLADE_ICE_Y = -0.028;
 /** How far down the shaft from the top hand the bottom hand likes to sit, in world units. */
 /** The bottom hand slides up the shaft rather than leave it when the arm cannot reach that far. */
 const BOTTOM_HAND_MIN = 0.14;
+const REACH_SOFT = 0.08;
 /** Forward speed along facing before the bottom hand comes off for a pumping stride. */
 const ONE_HAND_FORWARD = 4.5;
 /** Rearward speed along facing that counts as backskating. */
@@ -66,6 +71,8 @@ const ONE_HAND_BACK = -2;
 const DEKE_ROLL = 0.25;
 /** Only the jump deke leaves the ice; other dekes hop the puck while the skater just unweights. */
 const DEKE_HOP = 0;
+/** The skater faces +z in their own frame. */
+const FRONT = new THREE.Vector3(0, 0, 1);
 
 const topShoulder = new THREE.Vector3(),
   lowShoulder = new THREE.Vector3(),
@@ -93,15 +100,20 @@ function reachableDown(
   reach.subVectors(top, shoulder);
   const t = reach.dot(down);
   const disc = t * t - reach.lengthSq() + radius * radius;
-  if (disc < 0) return THREE.MathUtils.clamp(t, BOTTOM_HAND_MIN, want);
-  const far = t + Math.sqrt(disc);
-  return THREE.MathUtils.clamp(far, BOTTOM_HAND_MIN, want);
+  // Where the reach sphere first touches the shaft the root is vertical, which slid the hand
+  // several centimetres in a frame. Below REACH_SOFT² it turns linear with the same slope, so the
+  // slide stays gradual and the hand stays within reach, at most REACH_SOFT / 2 short of the sphere.
+  const soft = REACH_SOFT * REACH_SOFT;
+  const root =
+    disc >= soft ? Math.sqrt(disc) - REACH_SOFT / 2 : Math.max(disc, -soft) / (2 * REACH_SOFT);
+  return THREE.MathUtils.clamp(t + root, BOTTOM_HAND_MIN, want);
 }
 
 export const Player = memo(function Player({ id }: { id: number }) {
   const template = useLoader(FBXLoader, SKATER_URL);
   const playerHelmet = useLoader(GLTFLoader, HELMET_PLAYER_URL);
   const goalieHelmet = useLoader(GLTFLoader, HELMET_GOALIE_URL);
+  const stickSource = useLoader(GLTFLoader, STICK_URL);
   const group = useRef<THREE.Group>(null),
     fall = useRef<THREE.Group>(null),
     ring = useRef<THREE.Mesh>(null),
@@ -140,8 +152,10 @@ export const Player = memo(function Player({ id }: { id: number }) {
     }),
     [],
   );
-  const blade = goalie ? GOALIE_BLADE : SKATER_BLADE,
-    bladeParts = bladeGeometries(blade);
+  const blade = goalie ? GOALIE_BLADE : SKATER_BLADE;
+  // Goalies keep the procedural paddle stick; skaters carry the modelled one.
+  const bladeParts = goalie ? bladeGeometries(blade) : null,
+    stickMesh = goalie ? null : stickModel(stickSource.scene);
   const heading = useMemo(() => new THREE.Vector3(0, 0, 1), []);
   const goalieAction = useMemo(createGoalieAction, []);
   const gripPose = useMemo(
@@ -234,18 +248,28 @@ export const Player = memo(function Player({ id }: { id: number }) {
     tilt.worldToLocal(bones.upperArmL.getWorldPosition(lowShoulder));
     // The knob is carried ahead of the belt, with an elbow hanging below the shoulder.
     // Fixed stick length then resolves the final socket before either arm is solved.
+    // The top hand rides the right hip on the forehand. Toward the backhand, or reaching wide, it
+    // crosses in front of the belt so the shaft passes in front of the body rather than through it.
+    // It hangs off the top shoulder, so it follows the torso through a deke's lean.
+    const cross = Math.abs(side - STICK.restSide) * (side > STICK.restSide ? 0.13 : 0.2);
     grip
-      .copy(pelvis)
+      .copy(topShoulder)
       .add(
         offset.set(
-          -0.21 + side * 0.13,
-          0.14 + action.handLift + freeHand * swing * 0.025,
-          0.39 + action.check * 0.08,
+          0.085 + cross,
+          -0.29 + action.handLift + freeHand * swing * 0.025,
+          0.125 + cross * 0.4 + action.check * 0.08,
         ),
       );
     if (goalie) grip.copy(pelvis).add(offset.set(-0.22, -0.02, 0.34));
     grip.lerp(offset.set(-0.12, 0.08, -0.45), 1 - stickBlend);
-    placeStick(parts, blade, grip, tip, heading, hosel, topShoulder, rig.armReach - 0.065);
+    placeStick(parts, blade, grip, tip, heading, hosel, {
+      shoulder: topShoulder,
+      armReach: rig.armReach - 0.065,
+      // A blade lifted for a windup or follow-through follows the hands; on the ice it lies flat.
+      handsLead: THREE.MathUtils.smoothstep(tip.y - BLADE_ICE_Y, 0.03, 0.22),
+      torso: { at: pelvis, front: FRONT },
+    });
     if (stickBlend > 0.4) {
       tilt.getWorldQuaternion(frameQ);
       along.subVectors(grip, hosel).normalize();
@@ -255,7 +279,8 @@ export const Player = memo(function Player({ id }: { id: number }) {
         'R',
         tilt.localToWorld(point.copy(grip)),
         alongWorld,
-        tilt.localToWorld(pole.copy(topShoulder).add(offset.set(-0.22, -0.48, -0.1))),
+        // The top elbow hangs down and back rather than winging out to the side.
+        tilt.localToWorld(pole.copy(topShoulder).add(offset.set(-0.12, -0.48, -0.24))),
         1,
       );
       if (!goalie) {
@@ -275,6 +300,11 @@ export const Player = memo(function Player({ id }: { id: number }) {
           tilt.localToWorld(pole.copy(lowShoulder).add(offset.set(0.26, -0.4, 0.02))),
           1,
         );
+        // With the puck at the skates the shaft can pass out of the bottom arm's reach entirely;
+        // that hand comes off the stick, as in a one-handed toe drag, rather than float beside it.
+        // armReach runs shoulder to wrist; the palm on the shaft reaches about a hand past that.
+        const gap = lowHand.distanceTo(lowShoulder) - rig.armReach - 0.06;
+        freeHand = Math.max(freeHand, THREE.MathUtils.smoothstep(gap, 0.02, 0.1));
       }
       if (freeHand > 0) {
         const armNames = ['upperArmL', 'forearmL', 'handL'] as const;
@@ -335,9 +365,23 @@ export const Player = memo(function Player({ id }: { id: number }) {
       curlFingers(rig, 'L', 0.3);
       curlFingers(rig, 'R', 0.3);
     }
+    if (import.meta.env.DEV && labHooks.subject === id) {
+      Object.assign(labPose.action, action);
+      labPose.twoHand = twoHand;
+      labPose.freeHand = freeHand;
+      labPose.release = release;
+      labPose.stickBlend = stickBlend;
+      labPose.crouch = posture.crouch;
+      labPose.swing = swing;
+      labPose.goalie = goalie;
+      labPose.tip = tip.toArray();
+      labPose.grip = grip.toArray();
+      labPose.hosel = hosel.toArray();
+    }
   }
 
   useFrame((state, dt) => {
+    if (import.meta.env.DEV && labHooks.active && labHooks.delta !== null) dt = labHooks.delta;
     const s = viewMatch(),
       skater = s.skaters[id];
     const root = group.current,
@@ -356,7 +400,9 @@ export const Player = memo(function Player({ id }: { id: number }) {
       physics.release();
       showPose(id, null);
     }
-    if (!isOnIce(s, skater)) {
+    const shown =
+      import.meta.env.DEV && labHooks.active ? labHooks.subject === id : isOnIce(s, skater);
+    if (!shown) {
       root.visible = false;
       if (!replay) physics.follow(skater.x, skater.z, goalie, false);
       return;
@@ -411,8 +457,14 @@ export const Player = memo(function Player({ id }: { id: number }) {
       shadow.current!.position.set(0, 0.012, 0);
       ring.current!.position.set(0, 0.016, 0);
     }
+    if (import.meta.env.DEV && labHooks.subject === id && labHooks.afterPose) {
+      labPose.ragdoll = ragdoll;
+      labHooks.afterPose(rig, parts, labPose);
+    }
     ring.current!.visible =
-      !runtime.replay && (s.controlled === id || (s.passHeld && s.passTarget === id));
+      !runtime.replay &&
+      !(import.meta.env.DEV && labHooks.active) &&
+      (s.controlled === id || (s.passHeld && s.passTarget === id));
     const marker = ring.current!.material;
     if (marker instanceof THREE.MeshBasicMaterial)
       marker.color.set(s.controlled === id ? '#e84a4a' : '#d5fa64');
@@ -435,10 +487,29 @@ export const Player = memo(function Player({ id }: { id: number }) {
       <group ref={fall}>
         <primitive object={rig.root} />
         <group ref={stick}>
-          <mesh geometry={bladeParts.blade} material={STICK_MATERIALS.blade} castShadow />
-          <mesh geometry={bladeParts.tape} material={STICK_MATERIALS.tape} />
-          <mesh ref={shaft} geometry={shaftGeometry} material={STICK_MATERIALS.shaft} castShadow />
-          <mesh ref={knob} geometry={knobGeometry} material={STICK_MATERIALS.tape} />
+          {bladeParts && (
+            <>
+              <mesh geometry={bladeParts.blade} material={STICK_MATERIALS.blade} castShadow />
+              <mesh geometry={bladeParts.tape} material={STICK_MATERIALS.tape} />
+            </>
+          )}
+          {stickMesh && (
+            <mesh geometry={stickMesh.geometry} material={stickMesh.material} castShadow />
+          )}
+          {/* Hidden under the modelled stick, they still carry its shaft axis for the ragdoll. */}
+          <mesh
+            ref={shaft}
+            geometry={shaftGeometry}
+            material={STICK_MATERIALS.shaft}
+            castShadow
+            visible={goalie}
+          />
+          <mesh
+            ref={knob}
+            geometry={knobGeometry}
+            material={STICK_MATERIALS.tape}
+            visible={goalie}
+          />
           {goalie && (
             <mesh
               ref={paddle}

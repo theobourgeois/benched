@@ -10,6 +10,11 @@ export const SKATER_URL = `${import.meta.env.BASE_URL}models/skater.fbx`;
 export const HELMET_PLAYER_URL = `${import.meta.env.BASE_URL}models/helmet-player.glb`;
 export const HELMET_GOALIE_URL = `${import.meta.env.BASE_URL}models/helmet-goalie.glb`;
 const HEIGHT = 2;
+/**
+ * Ch01's arms are short for its height (0.55 shoulder to wrist on a 2 unit body, about 13% under
+ * real proportions), which pinned the bottom hand against the top one. Both segments are lengthened.
+ */
+const ARM_STRETCH = 1.15;
 /** Wrist to the middle of the palm, and palm thickness, in world units. */
 const PALM_ALONG = 0.068;
 const PALM_THICK = 0.03;
@@ -295,6 +300,10 @@ export function createSkaterRig(
     });
   }
 
+  for (const side of SIDES) {
+    bones[`forearm${side}`].position.multiplyScalar(ARM_STRETCH);
+    bones[`hand${side}`].position.multiplyScalar(ARM_STRETCH);
+  }
   attachHelmet(helmet, bones.head, goalie ? 'goalie' : 'player');
   crest.colorSpace = THREE.SRGBColorSpace;
   stampOnChest(bones.chest, decal(crest, 32, 21), 1, 13, 7);

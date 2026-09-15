@@ -14,6 +14,16 @@ The Mixamo Ch01 FBX has a valid skin and skeleton, but its animation takes conta
 
 The existing Rapier ragdoll bodies, collision response, impact impulses and recorded fall playback remain in use. Gameplay movement, shot trajectories and hit-power tuning are unchanged. Quick shots, backhands and one-timers release immediately. An already charged slap shot commits to a 75 ms downswing before puck release, so the blade reaches contact without snapping out of the windup. A hit, lost possession or a deke cancels the pending shot. Pause and hitstop freeze this timing with the simulation.
 
+## Stick handling (2026-09-15)
+
+A replay review showed the hands bunched at the top of the shaft, the top hand riding up to the chin with the stick nearly vertical, a winged top elbow, a glove cuff floating off the wrist, and the pose popping between a high and a low solution.
+
+- `stick.ts`: skaters carry `public/models/hockey-stick.glb` (CC BY-NC, see CREDITS). `stickModel` converts it once at load: mirrored so the curve faces the forehand, blade lengthened 1.6× to read on camera, shaft section widened, shaft rebent to a 48° lie. Goalies keep the procedural paddle stick; the hidden procedural shaft still carries the axis for the ragdoll.
+- `placeStick` treats a spec with `lie` as rigid: the blade lies flat on the ice unless the top hand would be out of reach or inside the belly, and then rocks onto its heel or toe about the end still on the ice. Only reach and a plane in front of the belly bound that roll, so the valid rolls form one interval and the hands move continuously; a unit test sweeps the blade across the body and fails on any jump. A raised blade (windup, follow-through, deke lift) follows the hands instead.
+- `skaterModel.ts`: Ch01's arms are lengthened 15%. `skaterPose.ts`: with both hands on the stick the skater sits a little lower, hunches more and dips the bottom-hand shoulder. Hand spread is 0.34. The top-hand target hangs off the top shoulder, crossing in front of the belt toward the backhand; the top elbow hangs down and back. `hockeyEquipment.ts`: the glove cuff rides the forearm.
+- When the shaft passes out of the bottom arm's reach (the puck at the skates, as in a toe drag) the bottom hand comes off the stick instead of floating beside it.
+- Known limit: with the puck pulled in close and near the middle (reach under about 0.8) a rigid stick has to stand up, so the top hand rises to about shoulder height and can sit a few centimetres off the shaft where it gets closer to the shoulder than the arm can fold. Letting the top hand swing around the puck fixed that pose but snapped between sides of the body as the blade crossed, so it was dropped.
+
 ## Review
 
 With `npm run dev` running:

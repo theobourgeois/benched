@@ -5,6 +5,9 @@ import type { BoneName, Side } from './skaterModel';
 /** Room below the existing boot sole for a holder and steel runner. */
 export const SKATE_LIFT = 0.055;
 
+const _up = new THREE.Vector3(0, 1, 0),
+  _axis = new THREE.Vector3();
+
 /** Lightweight fitted equipment follows the original rig, including its animated finger joints. */
 export function fitHockeyEquipment(
   bones: Record<BoneName, THREE.Bone>,
@@ -46,7 +49,17 @@ export function fitHockeyEquipment(
   }
   for (const side of ['L', 'R'] as Side[]) {
     const hand = bones[`hand${side}`];
-    pad(hand, [0.105, 0.07, 0.068], [0, -0.005, 0], shell);
+    // The cuff rides the forearm, flaring toward the elbow, so wrist deviation cannot swing it off
+    // the arm like a loose plate.
+    const wrist = hand.position;
+    const cuffGeometry = new THREE.CylinderGeometry(0.045 / scale, 0.055 / scale, 0.11 / scale, 16);
+    geometries.push(cuffGeometry);
+    const cuff = new THREE.Mesh(cuffGeometry, shell);
+    cuff.castShadow = true;
+    _axis.copy(wrist).normalize();
+    cuff.quaternion.setFromUnitVectors(_up, _axis);
+    cuff.position.copy(wrist).addScaledVector(_axis, -0.03 / scale);
+    bones[`forearm${side}`].add(cuff);
     pad(hand, [0.095, 0.085, 0.055], [0, 0.05, -0.012], shell);
     for (let i = 0; i < 3; i++)
       pad(hand, [0.027, 0.068, 0.018], [(i - 1) * 0.03, 0.055, -0.041], padding, 0.006);

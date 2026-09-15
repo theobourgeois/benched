@@ -231,7 +231,7 @@ export function sampleHockeyAction(p: Skater, charge: number, out: HockeyAction)
   out.bladeReach = -charge * 0.8;
   out.bladeLift = charge * charge * 0.65;
   out.handLift = charge * 0.15;
-  out.handSpread = 0.38 + charge * 0.08;
+  out.handSpread = 0.34 + charge * 0.08;
   out.releaseHand = 0;
   out.check = 0;
   if (p.shotTimer > 0) {
@@ -287,7 +287,7 @@ export function createHockeyAction(): HockeyAction {
     bladeReach: 0,
     bladeLift: 0,
     handLift: 0,
-    handSpread: 0.38,
+    handSpread: 0.34,
     releaseHand: 0,
     check: 0,
   };

@@ -8,7 +8,7 @@ import { Brand, MenuItem, Prompts } from './kit';
 import { SettingsScreen } from './Settings';
 import { TeamSelect } from './TeamSelect';
 
-type Entry = GameMode | 'settings' | 'controls';
+type Entry = GameMode | 'settings' | 'controls' | 'lab';
 const ENTRIES: { id: Entry; label: string }[] = [
   { id: 'exhibition', label: 'Play Now' },
   { id: 'threeOnThree', label: '3 on 3' },
@@ -17,6 +17,7 @@ const ENTRIES: { id: Entry; label: string }[] = [
   { id: 'freeSkate', label: 'Free Skate' },
   { id: 'settings', label: 'Settings' },
   { id: 'controls', label: 'Controls' },
+  ...(import.meta.env.DEV ? [{ id: 'lab' as const, label: 'Animation Lab' }] : []),
 ];
 type Screen = 'main' | 'teams' | 'settings' | 'controls';
 
@@ -31,6 +32,7 @@ export function Menu() {
   const [jersey, setJersey] = useState<Jersey>(match.jerseys[match.homeTeam]);
   const pick = (id: Entry) => {
     if (id === 'settings' || id === 'controls') return setScreen(id);
+    if (id === 'lab') return void import('../dev/lab').then((m) => m.openLab());
     setMode(id);
     setScreen('teams');
   };

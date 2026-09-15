@@ -1,4 +1,12 @@
-import { Component, Suspense, useEffect, useRef, type ReactNode, type RefObject } from 'react';
+import {
+  Component,
+  lazy,
+  Suspense,
+  useEffect,
+  useRef,
+  type ReactNode,
+  type RefObject,
+} from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { Arena } from './Arena';
@@ -24,6 +32,11 @@ import { cameraFraming } from './camera';
 import { playerLocator } from './locator';
 import { PUCK, RULES } from '../game/config';
 import type { InputFrame, Phase } from '../game/types';
+import { labHooks } from './animationReview';
+/** Dev-only animation lab: drives the subject, the close-up camera, overlays and captures. */
+const LabScene = import.meta.env.DEV
+  ? lazy(() => import('./LabScene').then((m) => ({ default: m.LabScene })))
+  : null;
 const _aimNdc = new THREE.Vector3();
 const _aimEdge = new THREE.Vector3();
 const _framing = new THREE.Vector3();
@@ -147,7 +160,8 @@ function Simulation() {
           pause: frame.pause || old.pause,
         }
       : frame;
-    accumulator.current += Math.min(delta, 0.05);
+    accumulator.current +=
+      Math.min(delta, 0.05) * (import.meta.env.DEV && labHooks.active ? labHooks.simScale : 1);
     while (accumulator.current >= RULES.fixedStep) {
       stepMatch(s, pending.current, RULES.fixedStep);
       pending.current = noEdges(pending.current);
@@ -471,6 +485,11 @@ export function GameScene() {
             <Simulation />
             <CameraRig />
             <PlayerLocatorHud marker={locator} />
+            {LabScene && labHooks.active && (
+              <Suspense fallback={null}>
+                <LabScene />
+              </Suspense>
+            )}
           </Canvas>
         </SceneBoundary>
       </div>

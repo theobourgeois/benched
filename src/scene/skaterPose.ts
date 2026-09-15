@@ -234,6 +234,10 @@ export function poseSkater(
   const stumble = Math.min(1, skater.stumbleTimer / 0.25),
     lurch = stumble * Math.sin(skater.stumbleTimer * 22);
   const action = sampleHockeyAction(skater, windup, posture.action);
+  // With both hands on the stick the skater sits lower and hunches over it, and the bottom-hand
+  // shoulder dips, so the bottom hand can reach well down the shaft.
+  const handSupport = twoHand * (1 - action.releaseHand);
+  const carry = goalie ? 0 : handSupport;
   const checking = action.check;
   const lifting = Math.min(1, skater.liftTimer / 0.18);
   const blocking = Math.min(1, skater.blockTimer / 0.12);
@@ -244,6 +248,7 @@ export function poseSkater(
         ? 0.85
         : clamp(
             0.32 +
+              carry * 0.1 +
               skate * 0.27 +
               Math.abs(deke) * 0.06 +
               checking * 0.2 +
@@ -299,6 +304,7 @@ export function poseSkater(
   // the puck, head kept level and looking up ice.
   const bend =
     0.45 +
+    0.22 * carry +
     0.6 * crouch +
     action.bend +
     recovering * 0.2 -
@@ -310,9 +316,7 @@ export function poseSkater(
   // Shoulders sit slightly open toward the top hand, as a left-shot skater carries the stick.
   // A windup coils them toward the blade side; the release unwinds through the shot.
   const twist = -0.08 + deke * 0.2 - pelvisYaw * 0.8 + action.twist;
-  // With both hands on the stick the bottom-hand shoulder dips toward the shaft.
-  const handSupport = twoHand * (1 - action.releaseHand);
-  const dip = goalie ? 0 : 0.09 * handSupport;
+  const dip = 0.09 * carry;
   applyMix(
     rig,
     'spine',
@@ -436,8 +440,8 @@ export function poseSkater(
   for (const side of SIDES) {
     const s = sideSign(side);
     // The bottom-hand clavicle drops and rolls forward to bring that shoulder to the shaft.
-    const low = side === 'L' && !goalie ? handSupport : 0;
-    poseBone(rig, `shoulder${side}`, low * 0.08, 0, s * (0.035 + low * 0.08 + checking * 0.05));
+    const low = side === 'L' ? carry : 0;
+    poseBone(rig, `shoulder${side}`, low * 0.2, 0, s * (0.035 + low * 0.14 + checking * 0.05));
     applyMix(rig, `upperArm${side}`, 0.55 + armDive, 0, s * (0.15 + pump * 0.4), limp);
     applyMix(rig, `forearm${side}`, 0.5 + dive * 0.4, 0, 0, limp);
     applyMix(rig, `hand${side}`, 0.1, 0, 0, limp);

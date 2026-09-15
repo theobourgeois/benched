@@ -92,12 +92,66 @@ describe('anatomical animation constraints', () => {
         new THREE.Vector3(0, height, 1),
         new THREE.Vector3(0, 0, 1),
         new THREE.Vector3(),
-        shoulder,
-        0.48,
+        { shoulder, armReach: 0.48 },
       );
       expect(grip.distanceTo(shoulder)).toBeLessThanOrEqual(0.48 + 1e-8);
       expect(grip.distanceTo(shoulder)).toBeGreaterThanOrEqual(0.25 - 1e-8);
     }
+  });
+
+  const rigidParts = () => ({
+    root: new THREE.Group(),
+    shaft: new THREE.Mesh(),
+    knob: new THREE.Mesh(),
+    paddle: null,
+  });
+  const bladeY = (parts: ReturnType<typeof rigidParts>, x: number) => {
+    parts.root.updateMatrixWorld();
+    return parts.root.localToWorld(new THREE.Vector3(x, 0, 0)).y;
+  };
+
+  it('lays the rigid stick flat and rocks it onto one end only to keep the top hand in reach', () => {
+    const parts = rigidParts(),
+      hosel = new THREE.Vector3(),
+      heading = new THREE.Vector3(0, 0, 1);
+    const tip = new THREE.Vector3(0.58, -0.028, 1.05);
+    const heel = 0.015 + (SKATER_BLADE.height * 0.6) / Math.tan(SKATER_BLADE.lie!);
+    placeStick(parts, SKATER_BLADE, new THREE.Vector3(-0.2, 1, 0.35), tip, heading, hosel);
+    expect(bladeY(parts, heel)).toBeCloseTo(tip.y, 8);
+    expect(bladeY(parts, SKATER_BLADE.length)).toBeCloseTo(tip.y, 8);
+    // Puck pulled in close: a flat blade would put the top hand out of reach.
+    const shoulder = new THREE.Vector3(-0.21, 1.38, 0.18);
+    const close = new THREE.Vector3(0.3, -0.028, 0.6);
+    const grip = new THREE.Vector3(-0.2, 1, 0.35);
+    placeStick(parts, SKATER_BLADE, grip, close, heading, hosel, { shoulder, armReach: 0.54 });
+    expect(grip.distanceTo(shoulder)).toBeLessThanOrEqual(0.54 + 1e-6);
+    const ends = [bladeY(parts, heel), bladeY(parts, SKATER_BLADE.length)];
+    expect(Math.min(...ends)).toBeCloseTo(close.y, 8);
+    expect(Math.max(...ends)).toBeGreaterThan(close.y + 0.01);
+    expect(grip.distanceTo(hosel)).toBeCloseTo(SKATER_BLADE.shaft - 0.1, 8);
+  });
+
+  it('moves the top hand continuously as the blade sweeps across the body', () => {
+    const parts = rigidParts(),
+      hosel = new THREE.Vector3(),
+      heading = new THREE.Vector3(0, 0, 1);
+    const shoulder = new THREE.Vector3(-0.22, 1.35, 0.18);
+    let last: THREE.Vector3 | null = null,
+      worst = 0;
+    for (let i = 0; i <= 400; i++) {
+      const u = i / 400;
+      const tip = new THREE.Vector3(1 - 1.8 * u, -0.028, 0.5 + 0.6 * Math.sin(Math.PI * u));
+      const grip = new THREE.Vector3(-0.2, 1, 0.35);
+      placeStick(parts, SKATER_BLADE, grip, tip, heading, hosel, {
+        shoulder,
+        armReach: 0.54,
+        torso: { at: new THREE.Vector3(0, 0.9, -0.02), front: new THREE.Vector3(0, 0, 1) },
+      });
+      expect(grip.z).toBeGreaterThanOrEqual(-0.02 + 0.14 - 1e-6);
+      if (last) worst = Math.max(worst, grip.distanceTo(last));
+      last = grip.clone();
+    }
+    expect(worst).toBeLessThan(0.03);
   });
 });
 

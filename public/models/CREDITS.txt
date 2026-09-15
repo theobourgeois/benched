@@ -20,3 +20,11 @@ display mesh (~388k tris, no UVs) and cannot follow a skating skeleton.
 At runtime the skeleton is cloned per skater, the shirt/pants are team-tinted,
 and the pose is applied in code (src/scene/skaterModel.ts, src/scene/skaterPose.ts).
 Stick IK and knockdown ragdoll sit on top of the Mixamo bind pose.
+
+hockey-stick.glb
+"Hockey Stick" by grimren13, Sketchfab:
+https://sketchfab.com/3d-models/hockey-stick-9256b0ad52504ea38f013a76618428ad
+License: CC BY-NC 4.0 (http://creativecommons.org/licenses/by-nc/4.0/): attribution
+required, non-commercial use only. Skater sticks only; goalies keep the procedural paddle stick.
+At load the mesh is mirrored so the curve faces the forehand, the blade is lengthened and the
+shaft section widened (src/scene/stick.ts, stickModel).
