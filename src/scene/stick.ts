@@ -112,16 +112,23 @@ export function placeStick(
   parts.root.quaternion.setFromRotationMatrix(_basis.makeBasis(heading, UP, _side));
 
   // The shaft lies in the stick's plane: from the hosel through the top hand, a little past it.
-  const hx = 0.015,
+  const hx = HOSEL_X,
     hy = spec.height * 0.6;
   _flat.subVectors(grip, _heel);
   const gx = _flat.dot(heading) - hx,
     gy = _flat.y - hy;
-  const reach = Math.hypot(gx, gy) || 1,
-    ux = gx / reach,
-    uy = gy / reach,
-    length = reach + KNOB_PAST_HAND,
-    tilt = Math.atan2(-ux, uy);
+  const reach = Math.hypot(gx, gy) || 1;
+  layoutShaft(parts, spec, Math.atan2(-gx / reach, gy / reach), reach + KNOB_PAST_HAND);
+  return hosel.copy(_heel).addScaledVector(heading, hx).addScaledVector(UP, hy);
+}
+
+const HOSEL_X = 0.015;
+/** Lays the shaft, knob and paddle out in the stick's plane at a tilt from vertical and a length. */
+export function layoutShaft(parts: StickParts, spec: BladeSpec, tilt: number, length: number) {
+  const hx = HOSEL_X,
+    hy = spec.height * 0.6,
+    ux = -Math.sin(tilt),
+    uy = Math.cos(tilt);
   parts.shaft.position.set(hx + (ux * length) / 2, hy + (uy * length) / 2, 0);
   parts.shaft.rotation.set(0, 0, tilt);
   parts.shaft.scale.y = length;
@@ -133,5 +140,4 @@ export function placeStick(
     parts.paddle.rotation.set(0, 0, tilt);
     parts.paddle.scale.y = paddle;
   }
-  return hosel.copy(_heel).addScaledVector(heading, hx).addScaledVector(UP, hy);
 }

@@ -37,8 +37,14 @@ const CAMS = {
   hands: { position: [-1.4, 1.1, 2.2], target: [-0.1, 0.75, 0.4], fov: 32 },
   handsR: { position: [-1.5, 0.9, 1.0], target: [-0.15, 0.8, 0.4], fov: 26 },
   handsL: { position: [1.3, 0.9, 1.9], target: [0.05, 0.62, 0.5], fov: 26 },
+  headFront: { position: [0.9, 1.75, 2.2], target: [0, 1.62, 0.2], fov: 22 },
+  headSide: { position: [2.4, 1.7, 0.3], target: [0, 1.62, 0.2], fov: 22 },
 };
-const CAM_SETS = { default: ['front', 'side', 'back'], hands: ['hands', 'handsR', 'handsL'] };
+const CAM_SETS = {
+  default: ['front', 'side', 'back'],
+  hands: ['hands', 'handsR', 'handsL'],
+  head: ['headFront', 'headSide'],
+};
 const POSES = {
   stand: { vx: 0, vz: 0, skateDrive: 0, stride: 0.5, stickSide: 0.58, stickReach: 1.05 },
   glide: { vx: 0, vz: 6, skateDrive: 0, stride: 1.2, stickSide: 0.58, stickReach: 1.05 },
@@ -188,11 +194,7 @@ for (const [pose, fields] of Object.entries(POSES)) {
     Object.assign(p, rest);
   }, fields);
   const camSet =
-    process.env.CAMS === 'hands'
-      ? CAM_SETS.hands
-      : process.env.CAMS === 'all'
-        ? Object.keys(CAMS)
-        : CAM_SETS.default;
+    process.env.CAMS === 'all' ? Object.keys(CAMS) : (CAM_SETS[process.env.CAMS] ?? CAM_SETS.default);
   for (const cam of camSet) {
     const framing = CAMS[cam];
     await page.evaluate((f) => {

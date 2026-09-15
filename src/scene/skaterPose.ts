@@ -13,7 +13,8 @@ import {
   type SkaterRig,
 } from './skaterModel';
 
-const GET_UP = 0.8;
+/** Seconds at the end of a knockdown spent getting back up. */
+export const GET_UP = 0.8;
 const TAU = Math.PI * 2;
 /** The rig root sits a hair above the ice; ankles aim just below zero so the skates bite. */
 const ICE_Y = -0.02;

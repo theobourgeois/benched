@@ -47,6 +47,7 @@ export class ReplayBuffer {
     this.frames = [];
     this.head = 0;
   }
+  /** Snapshots the match; returns the frame so the scene can attach what it drew. */
   record(s: MatchState) {
     if (s !== this.match || s.period !== this.period) {
       this.clear();
@@ -75,6 +76,7 @@ export class ReplayBuffer {
       this.frames[this.head] = frame;
       this.head = (this.head + 1) % this.capacity;
     }
+    return frame;
   }
   /** Recorded frames, oldest first. */
   snapshot(): ReplayFrame[] {

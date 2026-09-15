@@ -7,6 +7,7 @@ import { runtime, viewMatch, viewTimeScale } from '../game/store';
 import { uniformFor } from '../game/clubs';
 import { isOnIce } from '../game/engine';
 import { activeDeke } from '../game/dekes';
+import type { MatchState, Skater } from '../game/types';
 import {
   HELMET_GOALIE_URL,
   HELMET_PLAYER_URL,
@@ -16,7 +17,21 @@ import {
   holdStick,
   reachLimb,
 } from './skaterModel';
-import { fallenAmount, poseSkater } from './skaterPose';
+import { GET_UP, fallenAmount, poseSkater } from './skaterPose';
+import {
+  POSE_SIZE,
+  SkaterPhysics,
+  applyPose,
+  capturePose,
+  createRagdoll,
+  driveRagdoll,
+  leashRagdoll,
+  mixPose,
+  physicsReady,
+  replayPose,
+  showPose,
+  stepPhysics,
+} from './ragdoll';
 import { SvgTextureLoader } from './textures';
 import {
   GOALIE_BLADE,
@@ -27,6 +42,7 @@ import {
   paddleGeometry,
   placeStick,
   shaftGeometry,
+  type StickParts,
 } from './stick';
 
 useLoader.preload(FBXLoader, SKATER_URL);
@@ -59,8 +75,8 @@ const topShoulder = new THREE.Vector3(),
   reach = new THREE.Vector3(),
   offset = new THREE.Vector3(),
   point = new THREE.Vector3(),
-  approach = new THREE.Vector3(),
   pole = new THREE.Vector3(),
+  hips = new THREE.Vector3(),
   frameQ = new THREE.Quaternion();
 
 /** Largest distance down the shaft from the top hand, up to `want`, that a shoulder can reach. */
@@ -85,7 +101,8 @@ export const Player = memo(function Player({ id }: { id: number }) {
   const goalieHelmet = useLoader(GLTFLoader, HELMET_GOALIE_URL);
   const group = useRef<THREE.Group>(null),
     fall = useRef<THREE.Group>(null),
-    ring = useRef<THREE.Mesh>(null);
+    ring = useRef<THREE.Mesh>(null),
+    shadow = useRef<THREE.Mesh>(null);
   const stick = useRef<THREE.Group>(null),
     shaft = useRef<THREE.Mesh>(null),
     knob = useRef<THREE.Mesh>(null),
@@ -101,20 +118,37 @@ export const Player = memo(function Player({ id }: { id: number }) {
     return createSkaterRig(template, helmet, uniform, p.number, crest, goalie);
   }, [template, helmet, uniform, p.number, crest, goalie]);
   useEffect(() => () => rig.dispose(), [rig]);
+  const physics = useMemo(() => new SkaterPhysics(), []);
+  // A new rig starts from its bind pose, so a ragdoll built on the old one no longer fits it.
+  useEffect(() => () => physics.release(), [physics, rig]);
+  useEffect(
+    () => () => {
+      physics.dispose();
+      showPose(id, null);
+    },
+    [physics, id],
+  );
+  const poses = useMemo(
+    () => ({
+      doll: new Float32Array(POSE_SIZE),
+      stand: new Float32Array(POSE_SIZE),
+      drawn: new Float32Array(POSE_SIZE),
+    }),
+    [],
+  );
   const blade = goalie ? GOALIE_BLADE : SKATER_BLADE,
     bladeParts = bladeGeometries(blade);
   const heading = useMemo(() => new THREE.Vector3(0, 0, 1), []);
-  useFrame((_, dt) => {
-    const s = viewMatch(),
-      skater = s.skaters[id];
-    const root = group.current,
-      tilt = fall.current;
-    if (!root || !tilt) return;
-    if (!isOnIce(s, skater)) {
-      root.visible = false;
-      return;
-    }
-    root.visible = true;
+
+  /** The procedural skater: skating pose, stick and hands. */
+  function drawSkater(
+    s: MatchState,
+    skater: Skater,
+    dt: number,
+    root: THREE.Group,
+    tilt: THREE.Group,
+    parts: StickParts,
+  ) {
     const along_ = skater.vx * Math.sin(skater.angle) + skater.vz * Math.cos(skater.angle);
     const dekeMove = activeDeke(skater);
     const oneHand =
@@ -168,14 +202,7 @@ export const Player = memo(function Player({ id }: { id: number }) {
       grip.copy(pelvis).add(offset.set(-0.26, -0.02 + swing * 0.03, 0.26));
     }
     grip.lerp(offset.set(-0.12, 0.08, -0.45), 1 - stickBlend);
-    placeStick(
-      { root: stick.current!, shaft: shaft.current!, knob: knob.current!, paddle: paddle.current },
-      blade,
-      grip,
-      tip,
-      heading,
-      hosel,
-    );
+    placeStick(parts, blade, grip, tip, heading, hosel);
     if (stickBlend > 0.4) {
       tilt.getWorldQuaternion(frameQ);
       along.subVectors(grip, hosel).normalize();
@@ -185,7 +212,6 @@ export const Player = memo(function Player({ id }: { id: number }) {
         'R',
         tilt.localToWorld(point.copy(grip)),
         alongWorld,
-        tilt.localToWorld(approach.copy(topShoulder)),
         tilt.localToWorld(pole.copy(topShoulder).add(offset.set(-0.55, -0.25, -0.4))),
         1,
       );
@@ -203,7 +229,6 @@ export const Player = memo(function Player({ id }: { id: number }) {
           'L',
           tilt.localToWorld(point.copy(lowHand)),
           alongWorld,
-          tilt.localToWorld(approach.copy(lowShoulder)),
           tilt.localToWorld(pole.copy(lowShoulder).add(offset.set(0.55, -0.05, -0.3))),
           1,
         );
@@ -232,6 +257,79 @@ export const Player = memo(function Player({ id }: { id: number }) {
       curlFingers(rig, 'L', 0.3);
       curlFingers(rig, 'R', 0.3);
     }
+  }
+
+  useFrame((state, dt) => {
+    const s = viewMatch(),
+      skater = s.skaters[id];
+    const root = group.current,
+      tilt = fall.current;
+    if (!root || !tilt) return;
+    const replay = runtime.replay;
+    const live = !replay && s.phase !== 'paused' && s.hitstop <= 0;
+    stepPhysics(state.clock.elapsedTime, dt, live);
+    const parts: StickParts = {
+      root: stick.current!,
+      shaft: shaft.current!,
+      knob: knob.current!,
+      paddle: paddle.current,
+    };
+    if (!replay && skater.downTimer <= 0 && physics.doll) {
+      physics.release();
+      showPose(id, null);
+    }
+    if (!isOnIce(s, skater)) {
+      root.visible = false;
+      if (!replay) physics.follow(skater.x, skater.z, goalie, false);
+      return;
+    }
+    root.visible = true;
+    if (!replay) physics.follow(skater.x, skater.z, goalie, skater.downTimer <= 0);
+
+    // A full knockdown is a physics ragdoll; replays show the recorded fall.
+    let ragdoll = false;
+    if (replay) ragdoll = replayPose(replay.frames, replay.time, id, poses.drawn);
+    else if (skater.downTimer > 0 && physicsReady()) {
+      if (!physics.doll) {
+        // First frame down: the bones still hold the pose the hit landed on, one step behind.
+        root.position.set(skater.x, root.position.y, skater.z);
+        root.updateMatrixWorld(true);
+        physics.doll = createRagdoll(rig, parts, blade, skater);
+      }
+      ragdoll = physics.doll !== null;
+      if (physics.doll && live)
+        leashRagdoll(physics.doll, skater.x, skater.z, skater.vx, skater.vz, dt);
+    }
+    if (ragdoll) {
+      root.position.set(skater.x, 0.03, skater.z);
+      root.rotation.y = skater.angle;
+      tilt.rotation.set(0, 0, 0);
+      tilt.position.set(0, 0, 0);
+      root.updateMatrixWorld(true);
+      if (!replay) {
+        driveRagdoll(physics.doll!, rig, parts, blade);
+        if (skater.downTimer < GET_UP) {
+          // Getting up: blend from where the body lies into the stance they skate off in.
+          capturePose(rig, parts, poses.doll);
+          drawSkater(s, { ...skater, downTimer: 0 }, dt, root, tilt, parts);
+          capturePose(rig, parts, poses.stand);
+          const t = THREE.MathUtils.smoothstep(1 - skater.downTimer / GET_UP, 0, 1);
+          mixPose(poses.doll, poses.stand, t, poses.drawn);
+        } else capturePose(rig, parts, poses.drawn);
+        showPose(id, poses.drawn);
+      }
+      applyPose(rig, parts, blade, poses.drawn);
+      curlFingers(rig, 'L', 0.3);
+      curlFingers(rig, 'R', 0.3);
+      // Shadow and marker follow the body, not the simulated position.
+      root.worldToLocal(rig.bones.pelvis.getWorldPosition(hips));
+      shadow.current!.position.set(hips.x, 0.012, hips.z);
+      ring.current!.position.set(hips.x, 0.016, hips.z);
+    } else {
+      drawSkater(s, skater, dt, root, tilt, parts);
+      shadow.current!.position.set(0, 0.012, 0);
+      ring.current!.position.set(0, 0.016, 0);
+    }
     ring.current!.visible =
       !runtime.replay && (s.controlled === id || (s.passHeld && s.passTarget === id));
     const marker = ring.current!.material;
@@ -244,7 +342,12 @@ export const Player = memo(function Player({ id }: { id: number }) {
         <ringGeometry args={[0.73, 0.81, 48]} />
         <meshBasicMaterial color="#e84a4a" transparent opacity={0.9} depthWrite={false} />
       </mesh>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.012, 0]} scale={[0.8, 1, 1]}>
+      <mesh
+        ref={shadow}
+        rotation={[-Math.PI / 2, 0, 0]}
+        position={[0, 0.012, 0]}
+        scale={[0.8, 1, 1]}
+      >
         <circleGeometry args={[0.65, 32]} />
         <meshBasicMaterial color="#10293d" transparent opacity={0.2} depthWrite={false} />
       </mesh>

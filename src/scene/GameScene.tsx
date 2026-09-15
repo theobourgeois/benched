@@ -15,6 +15,7 @@ import {
   viewTimeScale,
 } from '../game/store';
 import { stepMatch, togglePause, netShotTarget } from '../game/engine';
+import { recordRagdollPoses } from './ragdoll';
 import { GOAL_REPLAY, REPLAY_HZ } from '../game/replay';
 import { replayFraming } from './replayCamera';
 import { navigateWithController } from '../input/menuNavigation';
@@ -151,7 +152,7 @@ function Simulation() {
       pending.current = noEdges(pending.current);
       accumulator.current -= RULES.fixedStep;
       if (RECORDED.includes(s.phase) && ++steps.current % RECORD_EVERY === 0)
-        runtime.recorder.record(s);
+        recordRagdollPoses(runtime.recorder.record(s));
     }
     for (const event of s.events)
       if (event.id > lastEvent.current) {

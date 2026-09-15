@@ -83,6 +83,8 @@ export interface SkaterRig {
   mesh: THREE.SkinnedMesh;
   bones: Record<BoneName, THREE.Bone>;
   bind: Record<BoneName, THREE.Quaternion>;
+  /** Bind-pose bone rotations relative to the rig root, where the character faces +z. */
+  bindWorld: Record<BoneName, THREE.Quaternion>;
   fingers: Record<Side, FingerBone[]>;
   ragdoll: Ragdoll;
   /** Model units (Mixamo centimetres) to world units. */
@@ -198,8 +200,9 @@ function attachHelmet(source: THREE.Object3D, head: THREE.Bone, kind: keyof type
   _box.getCenter(_center);
   inner.position.sub(_center);
   wrapper.scale.setScalar(HELMET_CM[kind] / Math.max(_size.y, 1e-3));
-  wrapper.position.set(0, kind === 'goalie' ? 9 : 6, kind === 'goalie' ? 2.4 : 2);
-  wrapper.rotation.x = kind === 'goalie' ? 0.08 : 0.18;
+  wrapper.position.set(0, kind === 'goalie' ? 9 : 7, kind === 'goalie' ? 2.4 : 1.5);
+  // The player helmet is modelled with its visor along +x; turn it to face the head's +z.
+  wrapper.rotation.set(kind === 'goalie' ? 0.08 : 0.08, kind === 'goalie' ? 0 : -Math.PI / 2, 0);
   head.add(wrapper);
 }
 
@@ -297,6 +300,9 @@ export function createSkaterRig(
   const ankle = new THREE.Vector3();
   bones.footL.getWorldPosition(ankle);
   const rootQ = root.getWorldQuaternion(new THREE.Quaternion()).invert();
+  const bindWorld = {} as Record<BoneName, THREE.Quaternion>;
+  for (const name of NAMES)
+    bindWorld[name] = rootQ.clone().multiply(bones[name].getWorldQuaternion(new THREE.Quaternion()));
   const footFlat = {
     L: rootQ.clone().multiply(bones.footL.getWorldQuaternion(new THREE.Quaternion())),
     R: rootQ.clone().multiply(bones.footR.getWorldQuaternion(new THREE.Quaternion())),
@@ -312,6 +318,7 @@ export function createSkaterRig(
     mesh: skinned,
     bones,
     bind,
+    bindWorld,
     fingers,
     ragdoll: { active: false, extra, spin },
     scale,
@@ -426,30 +433,53 @@ const _palm = new THREE.Vector3(),
   _fingersDir = new THREE.Vector3(),
   _across = new THREE.Vector3(),
   _wrist = new THREE.Vector3(),
-  _elbowPole = new THREE.Vector3();
+  _elbow = new THREE.Vector3(),
+  _elbowPole = new THREE.Vector3(),
+  _forearmQ = new THREE.Quaternion(),
+  _handQ = new THREE.Quaternion(),
+  _rollQ = new THREE.Quaternion(),
+  _yAxis = new THREE.Vector3(0, 1, 0);
 /**
- * Wraps a hand around the stick. `point` is on the shaft axis, `along` runs up the shaft toward
- * the knob, and `approach` is where the arm comes from (its shoulder), which sets which way the
- * palm faces. Thumbs point down the shaft toward the blade, like a real overhand grip.
+ * Share of the wrist's twist the forearm takes as pronation. Mixamo rigs have no forearm twist
+ * bones, so leaving it all at the wrist collapses the skin there like a candy wrapper.
+ */
+const FOREARM_TWIST = 0.6;
+/**
+ * Wraps a hand around the stick. `point` is on the shaft axis and `along` runs up the shaft toward
+ * the knob. The knuckle line lies along the shaft and the fingers carry on from the forearm, so the
+ * wrist only deviates sideways rather than folding over. Thumbs point down the shaft toward the
+ * blade, like a real grip.
  */
 export function holdStick(
   rig: SkaterRig,
   side: Side,
   point: THREE.Vector3,
   along: THREE.Vector3,
-  approach: THREE.Vector3,
   pole: THREE.Vector3,
   curl: number,
 ) {
+  const forearm = rig.bones[`forearm${side}`],
+    hand = rig.bones[`hand${side}`];
+  _elbowPole.copy(pole);
+  // A first reach to the shaft finds the elbow, which sets where the forearm points.
+  reachLimb(rig, 'arm', side, point, _elbowPole);
+  forearm.getWorldPosition(_elbow);
+  _fingersDir.subVectors(point, _elbow);
+  _fingersDir.addScaledVector(along, -_fingersDir.dot(along));
+  if (_fingersDir.lengthSq() < 1e-8) _fingersDir.set(0, -1, 0).addScaledVector(along, along.y);
+  _fingersDir.normalize();
   _across.copy(along).multiplyScalar(sideSign(side));
-  _palm.subVectors(point, approach);
-  _palm.addScaledVector(along, -_palm.dot(along));
-  if (_palm.lengthSq() < 1e-8) _palm.set(0, -1, 0);
-  _palm.normalize();
-  _fingersDir.crossVectors(_palm, _across).normalize();
+  _palm.crossVectors(_across, _fingersDir);
   _wrist.copy(point).addScaledVector(_fingersDir, -PALM_ALONG).addScaledVector(_palm, -PALM_THICK);
-  reachLimb(rig, 'arm', side, _wrist, _elbowPole.copy(pole));
-  setWorldBasis(rig.bones[`hand${side}`], _across, _fingersDir, _palm);
+  reachLimb(rig, 'arm', side, _wrist, _elbowPole);
+  // Pronate the forearm part of the way toward the hand; the wrist keeps the rest.
+  forearm.getWorldQuaternion(_forearmQ);
+  _handQ.setFromRotationMatrix(_basis.makeBasis(_across, _fingersDir, _palm));
+  _rollQ.copy(_forearmQ).invert().multiply(_handQ);
+  const twist = 2 * Math.atan2(_rollQ.y, _rollQ.w);
+  const wrapped = Math.atan2(Math.sin(twist), Math.cos(twist));
+  forearm.quaternion.multiply(_rollQ.setFromAxisAngle(_yAxis, wrapped * FOREARM_TWIST));
+  setWorldQuaternion(hand, _handQ);
   curlFingers(rig, side, curl);
 }
 
