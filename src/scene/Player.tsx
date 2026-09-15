@@ -73,6 +73,17 @@ const DEKE_ROLL = 0.25;
 const DEKE_HOP = 0;
 /** The skater faces +z in their own frame. */
 const FRONT = new THREE.Vector3(0, 0, 1);
+/**
+ * Which way each elbow bends, in the skater's frame: out, back and a little down. Fitted to every
+ * lab clip so the shoulder-to-hand line never comes within 15° (top) or 50° (bottom) of it.
+ */
+const TOP_ELBOW = new THREE.Vector3(-0.66, -0.32, -0.68).normalize(),
+  LOW_ELBOW = new THREE.Vector3(0.58, -0.66, -0.47).normalize(),
+  /**
+   * Reaching across for the backhand, the upper arm swings in front of the chest and the elbow drops,
+   * rather than folding back through the body.
+   */
+  TOP_ELBOW_ACROSS = new THREE.Vector3(-0.2, -0.9, 0.4).normalize();
 
 const topShoulder = new THREE.Vector3(),
   lowShoulder = new THREE.Vector3(),
@@ -87,6 +98,7 @@ const topShoulder = new THREE.Vector3(),
   point = new THREE.Vector3(),
   pole = new THREE.Vector3(),
   hips = new THREE.Vector3(),
+  spineUp = new THREE.Vector3(),
   frameQ = new THREE.Quaternion();
 
 /** Largest distance down the shaft from the top hand, up to `want`, that a shoulder can reach. */
@@ -107,6 +119,31 @@ function reachableDown(
   const root =
     disc >= soft ? Math.sqrt(disc) - REACH_SOFT / 2 : Math.max(disc, -soft) / (2 * REACH_SOFT);
   return THREE.MathUtils.clamp(t + root, BOTTOM_HAND_MIN, want);
+}
+
+const armDir = new THREE.Vector3(),
+  bendAway = new THREE.Vector3(),
+  topBend = new THREE.Vector3();
+/**
+ * An elbow pole off the middle of the arm, square to the shoulder-to-hand line. The elbow can only
+ * flip sides when the arm lines up with `bend`, so `bend` is a direction the hands never reach
+ * toward; a pole at a fixed spot beside the shoulder let the hand swing onto it.
+ */
+function elbowPole(
+  shoulder: THREE.Vector3,
+  hand: THREE.Vector3,
+  bend: THREE.Vector3,
+  out: THREE.Vector3,
+) {
+  armDir.subVectors(hand, shoulder);
+  const length = armDir.length();
+  if (length < 1e-6) return out.copy(shoulder).add(bend);
+  armDir.divideScalar(length);
+  bendAway.copy(bend).addScaledVector(armDir, -bend.dot(armDir));
+  return out
+    .copy(shoulder)
+    .addScaledVector(armDir, length / 2)
+    .addScaledVector(bendAway.normalize(), 0.3);
 }
 
 export const Player = memo(function Player({ id }: { id: number }) {
@@ -268,7 +305,14 @@ export const Player = memo(function Player({ id }: { id: number }) {
       armReach: rig.armReach - 0.065,
       // A blade lifted for a windup or follow-through follows the hands; on the ice it lies flat.
       handsLead: THREE.MathUtils.smoothstep(tip.y - BLADE_ICE_Y, 0.03, 0.22),
-      torso: { at: pelvis, front: FRONT },
+      torso: {
+        at: pelvis,
+        front: FRONT,
+        up: tilt
+          .worldToLocal(bones.neck.getWorldPosition(spineUp))
+          .sub(pelvis)
+          .normalize(),
+      },
     });
     if (stickBlend > 0.4) {
       tilt.getWorldQuaternion(frameQ);
@@ -279,8 +323,20 @@ export const Player = memo(function Player({ id }: { id: number }) {
         'R',
         tilt.localToWorld(point.copy(grip)),
         alongWorld,
-        // The top elbow hangs down and back rather than winging out to the side.
-        tilt.localToWorld(pole.copy(topShoulder).add(offset.set(-0.12, -0.48, -0.24))),
+        // The top elbow hangs down and back rather than winging out to the side, and comes round in
+        // front of the chest as the hand crosses the body.
+        tilt.localToWorld(
+          elbowPole(
+            topShoulder,
+            grip,
+            topBend.lerpVectors(
+              TOP_ELBOW,
+              TOP_ELBOW_ACROSS,
+              THREE.MathUtils.smoothstep(grip.x - topShoulder.x, 0.15, 0.45),
+            ),
+            pole,
+          ),
+        ),
         1,
       );
       if (!goalie) {
@@ -297,7 +353,7 @@ export const Player = memo(function Player({ id }: { id: number }) {
           'L',
           tilt.localToWorld(point.copy(lowHand)),
           alongWorld,
-          tilt.localToWorld(pole.copy(lowShoulder).add(offset.set(0.26, -0.4, 0.02))),
+          tilt.localToWorld(elbowPole(lowShoulder, lowHand, LOW_ELBOW, pole)),
           1,
         );
         // With the puck at the skates the shaft can pass out of the bottom arm's reach entirely;

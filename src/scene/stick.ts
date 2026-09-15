@@ -268,10 +268,37 @@ const _flat = new THREE.Vector3(),
 const INNER_REACH = 0.25;
 /** How far ahead of the skater's axis the rigid stick's top hand stays: the belly. */
 const BODY_FRONT = 0.14;
-/** How far a point is in front of the belly, measured flat; negative inside it. */
-function clearance(point: THREE.Vector3, torso: NonNullable<StickReach['torso']>) {
-  const ahead = (point.x - torso.at.x) * torso.front.x + (point.z - torso.at.z) * torso.front.z;
-  return ahead - BODY_FRONT;
+/**
+ * How far the top hand stays from the pelvis-to-neck line, square to it: the jersey reaches 0.09 to
+ * 0.145 ahead of that line between the hips and the chest, plus the glove.
+ */
+const TORSO_FRONT = 0.17;
+/**
+ * How far a point is in front of the belly, measured flat; negative inside it. With the spine
+ * direction the belly is taken at the point's own height: the torso leans forward, so at the hands
+ * it is well ahead of the pelvis, and a plane through the pelvis let the hands sink into it.
+ */
+function clearance(
+  point: THREE.Vector3,
+  torso: NonNullable<StickReach['torso']>,
+  height = point.y,
+  deep = 1,
+) {
+  const flat = (point.x - torso.at.x) * torso.front.x + (point.z - torso.at.z) * torso.front.z;
+  if (!torso.up || deep <= 0) return flat - BODY_FRONT;
+  const upright = Math.max(torso.up.y, 0.3);
+  const rise = (height - torso.at.y) / upright;
+  const ahead = flat - (torso.up.x * torso.front.x + torso.up.z * torso.front.z) * rise;
+  return THREE.MathUtils.lerp(flat - BODY_FRONT, ahead - TORSO_FRONT / upright, deep);
+}
+/**
+ * How much of the leaning belly applies, by how far ahead the blade is. With the puck out front the
+ * hands fit ahead of the belly. Pulled in to the skates they cannot, and holding them out there
+ * jammed them up against the shoulder, so a close blade keeps the plane through the pelvis.
+ */
+function bellyDepth(tip: THREE.Vector3, torso: NonNullable<StickReach['torso']>) {
+  const ahead = (tip.x - torso.at.x) * torso.front.x + (tip.z - torso.at.z) * torso.front.z;
+  return THREE.MathUtils.smoothstep(ahead, 0.9, 1.15);
 }
 /** How far a rigid stick may rock onto its heel or toe, and the search step for it. */
 const MAX_ROLL = 0.9,
@@ -289,7 +316,12 @@ export interface StickReach {
    * rather than a keep-out disc, so the top hand crosses in front of the body continuously instead
    * of snapping between passing in front and passing behind. Rigid sticks only.
    */
-  torso?: { at: THREE.Vector3; front: THREE.Vector3 };
+  torso?: {
+    at: THREE.Vector3;
+    front: THREE.Vector3;
+    /** The pelvis-to-neck direction, so the belly plane follows the torso's lean. */
+    up?: THREE.Vector3;
+  };
 }
 
 /**
@@ -418,10 +450,16 @@ function placeRigid(
   // the arm IK's own bend limit already handles a hand close to the shoulder. When nothing works,
   // as with the puck at the skates, the fallback weighs reach heavily: a hand off the stick looks
   // far worse than one pressed toward the belly.
+  // The belly is taken at the flat blade's hand height, so it stays one upright plane over the
+  // rolls. Taken at each roll's own height, it leaned back with the spine below the belt: hands
+  // rocked down by the knees passed as clear, the valid rolls split in two, and the hands jumped
+  // a metre between the ends.
+  const belt = torso ? (place(0), _socket.y) : 0,
+    deep = torso ? bellyDepth(tip, torso) : 0;
   const miss = (roll: number) => {
     const d = place(roll);
     let over = shoulder ? 4 * Math.max(0, d - armReach) : 0;
-    if (torso) over += Math.max(0, -clearance(_socket, torso));
+    if (torso) over += Math.max(0, -clearance(_socket, torso, belt, deep));
     return over;
   };
 
@@ -470,7 +508,7 @@ function placeRigid(
     _leadQ.copy(parts.root.quaternion);
     _want.copy(grip);
     if (torso) {
-      const short = -clearance(_want, torso);
+      const short = -clearance(_want, torso, _want.y, deep);
       if (short > 0) {
         _want.x += torso.front.x * short;
         _want.z += torso.front.z * short;

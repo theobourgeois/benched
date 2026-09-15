@@ -388,9 +388,10 @@ describe('skating and defense', () => {
     const a = s.skaters[0],
       b = s.skaters[6];
     Object.assign(b, { x: 0, z: 0, angle: 0, cooldown: 10 });
+    // Face to face, so the poker's blade meets the puck on the carrier's blade.
     Object.assign(a, {
-      x: 1.16,
-      z: 2.1,
+      x: 2 * STICK.restSide,
+      z: 2 * STICK.restReach,
       angle: Math.PI,
       cooldown: 0,
       stickSide: STICK.restSide,

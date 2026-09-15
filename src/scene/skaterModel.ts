@@ -436,7 +436,10 @@ export function reachLimb(
     _end,
     _hinge,
   );
-  if (limb === 'arm') _hinge.multiplyScalar(sideSign(side));
+  // limbFrame reads the bind-pose hinge as straight down. With this sign the back of the elbow (the
+  // olecranon) faces the pole; the other sign turned both arms half a turn, so the crease faced out
+  // and the elbow looked bent backwards.
+  if (limb === 'arm') _hinge.multiplyScalar(-sideSign(side));
   const orient = (name: BoneName, from: THREE.Vector3, to: THREE.Vector3) => {
     _along.subVectors(to, from).normalize();
     _third.crossVectors(_hinge, _along).normalize();

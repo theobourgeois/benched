@@ -158,7 +158,11 @@ export const SHOT = {
 /** Blade pose in player space: +side is the skater's left (forehand for a left shot). */
 export const STICK = {
   restSide: 0.58,
-  restReach: 1.05,
+  /**
+   * How far ahead the puck rides. With the rigid stick's lie and the forward lean, closer than this
+   * leaves the top hand nowhere to go but into the belly or up by the chin.
+   */
+  restReach: 1.3,
   /** Lower-hand hinge the blade sweeps around on a deke or toe drag. */
   pivotSide: 0.18,
   pivotReach: 0.28,
