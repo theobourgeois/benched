@@ -1556,6 +1556,19 @@ a {
   background: #eaff6c;
   box-shadow: 0 0 6px #d5fa64cc;
 }
+/* Accuracy: the shot lands somewhere inside this ring. */
+.shot-aim-marker::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: max(14px, calc(var(--spread, 0px) * 2));
+  height: max(14px, calc(var(--spread, 0px) * 2));
+  translate: -50% -50%;
+  border: 1.5px solid #eaff6c;
+  border-radius: 50%;
+  opacity: 0.38;
+}
 .player-locator {
   position: absolute;
   left: 0;

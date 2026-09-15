@@ -697,6 +697,17 @@ export const FEEL_PARAMS: FeelParam[] = [
   ),
   p(
     'shot',
+    'puckCarry',
+    'Shooter carry',
+    0,
+    0.6,
+    0.01,
+    'Share of the skater’s pace a released puck keeps. Shots still land on the aim point.',
+    'shots and passes take on your speed',
+    'the puck leaves at stick speed only',
+  ),
+  p(
+    'shot',
     'passSpeed',
     'Pass speed',
     10,

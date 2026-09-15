@@ -12,10 +12,12 @@ import {
   stickTip,
   togglePause,
   netShotTarget,
+  shotSpread,
 } from '../src/game/engine';
 import {
   attackDirection,
   EMPTY_INPUT,
+  IRON,
   PHYSICS,
   PUCK,
   RINK,
@@ -146,6 +148,79 @@ describe('puck physics', () => {
     const n = constrainToRink(corner, 0.2);
     expect(n).not.toBeNull();
     expect(Math.hypot(corner.x - 23, corner.z - 6)).toBeCloseTo(6.8);
+  });
+  it('drops a puck that catches the underside of the crossbar into the net', () => {
+    const s = openIce(),
+      reach = IRON.radius + IRON.puckFace;
+    Object.assign(s.puck, { x: 25.8, z: 0.5, y: IRON.crossbarY - reach * 0.8, vx: 30, lockout: 1 });
+    for (let i = 0; i < 120 && s.phase === 'playing'; i++) stepMatch(s);
+    expect(s.score).toEqual([1, 0]);
+    expect(s.events.find((e) => e.type === 'crossbar')?.barDown).toBe(true);
+    expect(s.events.find((e) => e.type === 'goal')?.barDown).toBe(true);
+  });
+  it('rings a square crossbar hit back out', () => {
+    const s = openIce();
+    Object.assign(s.puck, { x: 25.8, z: 0.5, y: IRON.crossbarY, vx: 30, lockout: 1 });
+    for (let i = 0; i < 60; i++) stepMatch(s);
+    expect(s.score).toEqual([0, 0]);
+    expect(s.puck.vx).toBeLessThan(0);
+    const ring = s.events.find((e) => e.type === 'crossbar');
+    expect(ring?.barDown).toBeUndefined();
+  });
+  it('lets a puck go in off the inside of the post', () => {
+    const s = openIce(),
+      reach = IRON.radius + IRON.puckRim;
+    Object.assign(s.puck, {
+      x: 25.8,
+      z: RINK.goalHalfWidth - reach * 0.8,
+      y: 0.4,
+      vx: 30,
+      lockout: 1,
+    });
+    for (let i = 0; i < 60 && s.phase === 'playing'; i++) stepMatch(s);
+    expect(s.events.some((e) => e.type === 'post')).toBe(true);
+    expect(s.score).toEqual([1, 0]);
+    expect(s.events.find((e) => e.type === 'goal')?.barDown).toBeUndefined();
+  });
+  it('rings a post the drawn puck clips, and the corner where the post meets the crossbar', () => {
+    for (const at of [
+      { z: RINK.goalHalfWidth - IRON.radius - PUCK.radius * 0.9, y: 0.4 },
+      { z: RINK.goalHalfWidth + 0.03, y: IRON.crossbarY + 0.03 },
+    ]) {
+      const s = openIce();
+      Object.assign(s.puck, { x: 25.8, ...at, vx: 30, lockout: 1 });
+      for (let i = 0; i < 60 && s.phase === 'playing'; i++) stepMatch(s);
+      expect(s.events.some((e) => e.type === 'post' || e.type === 'crossbar')).toBe(true);
+    }
+  });
+  it('lands a shot inside its aim circle even while skating across the slot', () => {
+    for (let tick = 0; tick < 24; tick++) {
+      const s = openIce(),
+        p = s.skaters[0];
+      Object.assign(p, { x: 16, z: -1, angle: Math.PI / 2, vx: 2, vz: 8 });
+      s.tick = tick * 13;
+      s.puck.owner = p.id;
+      const aimed = netShotTarget(s, p, 0.4, 0.4),
+        spread = shotSpread(s, p, 0.3, aimed);
+      shootPuck(s, p, 0.3, 0.4, 0.4);
+      while (s.puck.x < RINK.goalX - 0.3) stepMatch(s);
+      const lead = (RINK.goalX - s.puck.x) / s.puck.vx;
+      const z = s.puck.z + s.puck.vz * lead,
+        y = s.puck.y + s.puck.vy * lead;
+      expect(Math.hypot(z - aimed.z, y - aimed.y)).toBeLessThan(spread + 0.05);
+    }
+  });
+  it('opens the aim circle for skating across the shot and for a backhand', () => {
+    const s = openIce(),
+      p = s.skaters[0];
+    Object.assign(p, { x: 16, z: 0, angle: Math.PI / 2, vx: 0, vz: 0 });
+    const set = shotSpread(s, p, 0);
+    p.vz = 8;
+    const crossing = shotSpread(s, p, 0);
+    p.vz = 0;
+    p.stickSide = -0.5;
+    expect(crossing).toBeGreaterThan(set * 1.5);
+    expect(shotSpread(s, p, 0)).toBeGreaterThan(set);
   });
   it('lets the goalie make a save and rebound the puck', () => {
     const s = openIce();
@@ -862,12 +937,12 @@ describe('contact, elevation and puck handling', () => {
     expect(s.shotAim).toBeCloseTo(0.75);
     expect(s.shotLift).toBeCloseTo(0.6);
   });
-  it('sends two identical skill-stick shots to the same place', () => {
-    const shots = [3, 90].map((tick) => {
+  it('sends two identical skill-stick shots on the same tick to the same place', () => {
+    const shots = [0, 1].map(() => {
       const s = openIce(),
         p = s.skaters[0];
       Object.assign(p, { x: 16, z: 0, angle: Math.PI / 2, vx: 0, vz: 0 });
-      s.tick = tick;
+      s.tick = 90;
       s.puck.owner = p.id;
       shootPuck(s, p, 0.35, 0.55, 0.8);
       return [s.puck.vx, s.puck.vz, s.puck.vy];

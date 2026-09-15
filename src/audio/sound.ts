@@ -1,4 +1,4 @@
-import type { GameEvent, MatchState } from '../game/types';
+import type { GameEvent, GameMode, MatchState } from '../game/types';
 
 const SAMPLE_NAMES = [
   'shot',
@@ -10,7 +10,6 @@ const SAMPLE_NAMES = [
   'hit',
   'boards',
   'post',
-  'post2',
   'save',
   'save2',
   'goal',
@@ -52,7 +51,7 @@ export class ArenaAudio {
       }),
     ).then(() => {});
   }
-  private sample(name: string, volume: number, rate = 1) {
+  private sample(name: string, volume: number, rate = 1, delay = 0) {
     const buffer = this.samples.get(name),
       ctx = this.context;
     if (!this.active || !buffer || !ctx || !this.master) return false;
@@ -67,7 +66,7 @@ export class ArenaAudio {
       source.disconnect();
       gain.disconnect();
     };
-    source.start();
+    source.start(ctx.currentTime + delay);
     return true;
   }
   private pick(names: readonly string[], volume: number, rate = 1) {
@@ -116,7 +115,7 @@ export class ArenaAudio {
     void this.context.resume();
     this.loadSamples();
   }
-  play(event: GameEvent) {
+  play(event: GameEvent, mode: GameMode) {
     const jitter = (span: number) => 1 + (Math.random() - 0.5) * span;
     switch (event.type) {
       case 'shot':
@@ -134,13 +133,16 @@ export class ArenaAudio {
         else this.pick(['boards', 'save'], 0.45 + event.power, jitter(0.1));
         break;
       case 'post':
-        this.pick(['post', 'post2'], 0.8, jitter(0.06));
+      case 'crossbar':
+        this.sample('post', 0.65 + event.power * 0.35, jitter(0.04));
         break;
       case 'save':
         this.pick(['save', 'save2', 'boards'], 0.7, jitter(0.08));
         break;
       case 'goal':
-        this.sample('goal', 0.9);
+        if (mode === 'freeSkate') break;
+        // A bar-down rings out before the horn.
+        this.sample('goal', 0.9, 1, event.barDown ? 0.35 : 0);
         break;
       case 'horn':
         this.sample('horn', 0.85);

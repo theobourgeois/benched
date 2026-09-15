@@ -6,6 +6,13 @@ export function normalized(x: number, z: number): Vec2 {
   const d = Math.hypot(x, z);
   return d > 0.0001 ? { x: x / d, z: z / d } : { x: 0, z: 0 };
 }
+/** Repeatable noise in [0, 1) from integers, so the simulation stays deterministic. */
+export function hash01(a: number, b: number) {
+  let h = Math.imul(a ^ 0x9e3779b9, 0x85ebca6b) ^ Math.imul(b + 0x632be5ab, 0xc2b2ae35);
+  h = Math.imul(h ^ (h >>> 16), 0x7feb352d);
+  h = Math.imul(h ^ (h >>> 15), 0x846ca68b);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
 export function turnToward(a: number, b: number, t: number) {
   return a + Math.atan2(Math.sin(b - a), Math.cos(b - a)) * clamp(t, 0, 1);
 }

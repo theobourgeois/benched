@@ -164,6 +164,6 @@ export function driveReplay(r: ReplaySession, input: ReplayInput, dt: number) {
     });
   }
   const { events, finished } = advanceReplay(r, dt, r.kind === 'instant' ? input.scrub : 0);
-  for (const event of events) runtime.audio.play(event);
+  for (const event of events) runtime.audio.play(event, runtime.match.mode);
   if (finished) closeReplay();
 }

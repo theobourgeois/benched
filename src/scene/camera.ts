@@ -22,6 +22,8 @@ type TrackingAngle = {
   targetY: number;
   targetYIn: number;
   attackBias: number;
+  /** Share of the framing that tracks the controlled skater instead of the puck. */
+  follow: number;
 };
 
 const ANGLES: Record<Exclude<CameraMode, 'wide'>, TrackingAngle> = {
@@ -38,20 +40,22 @@ const ANGLES: Record<Exclude<CameraMode, 'wide'>, TrackingAngle> = {
     targetY: 0.7,
     targetYIn: 0.45,
     attackBias: 1.6,
+    follow: 0.2,
   },
   tight: {
-    height: 16,
-    heightDrop: 5.5,
-    back: 17,
-    backIn: 5,
-    fov: 34,
-    fovDrop: 3,
-    look: 1.2,
-    attackLook: 7.5,
-    netLook: 0,
-    targetY: 1.05,
-    targetYIn: 0.2,
-    attackBias: 2,
+    height: 19,
+    heightDrop: 4,
+    back: 12,
+    backIn: 3,
+    fov: 40,
+    fovDrop: 2,
+    look: 0.8,
+    attackLook: 2,
+    netLook: 0.6,
+    targetY: 0.6,
+    targetYIn: 0.35,
+    attackBias: 1,
+    follow: 0.65,
   },
   high: {
     height: 27,
@@ -66,6 +70,7 @@ const ANGLES: Record<Exclude<CameraMode, 'wide'>, TrackingAngle> = {
     targetY: 0.12,
     targetYIn: 0.85,
     attackBias: 1.2,
+    follow: 0.2,
   },
 };
 
@@ -126,8 +131,8 @@ function trackingFraming(match: MatchState, aspect: number, angle: TrackingAngle
   const attackLook = clamp((match.puck.x * direction + 16) / 24, 0, 1);
   const lift = match.puck.owner === match.controlled ? match.shotLift : 0;
   const x = clamp(
-    match.puck.x * (0.8 - netView * 0.22) +
-      player.x * 0.2 +
+    match.puck.x * (1 - angle.follow - netView * 0.22) +
+      player.x * angle.follow +
       direction * (angle.attackBias + netView * (RINK.goalX - 21)),
     -23,
     23,

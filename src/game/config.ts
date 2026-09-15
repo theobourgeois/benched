@@ -55,6 +55,8 @@ export const PHYSICS = {
   playerRadius: 0.58,
   pickupRadius: 0.88,
   shotSpeed: 34,
+  /** Share of the shooter's skating velocity a released puck carries. */
+  puckCarry: 0.23,
   passSpeed: 21,
   /** Dump a pass this far when no teammate is in the aim cone. */
   passDump: 10,
@@ -121,6 +123,37 @@ export const PHYSICS = {
   diveSpeed: 10.2,
   diveTime: 0.78,
   liftRange: 1.38,
+};
+/**
+ * Goal frame as the arena draws it: post axes at z = ±goalHalfWidth and the crossbar axis at
+ * crossbarY, all on the goal line.
+ */
+export const IRON = {
+  radius: 0.065,
+  crossbarY: 1.4,
+  /** The drawn puck's rim against a post, so a puck that visibly clips the iron rings it. */
+  puckRim: PUCK.radius,
+  /** The drawn puck's flat face against the crossbar, with a little slack for tilt. */
+  puckFace: 0.03,
+  restitution: 0.45,
+  /** Share of glancing speed the puck keeps along the pipe. */
+  friction: 0.9,
+  /** Beat the play holds on a bar-down ring, so the ding lands. */
+  ringHold: 0.06,
+};
+/** Shot placement and accuracy. Spread is an angle, so the aim circle grows with distance. */
+export const SHOT = {
+  /** Highest aim point, just under the crossbar so a slightly high top-shelf shot rings it. */
+  topShelf: 1.24,
+  /** Widest aim point, inside the posts. */
+  corner: 1.46,
+  spread: 0.01,
+  /** Per m/s of skating across the shot line. */
+  spreadLateral: 0.0016,
+  spreadBackhand: 0.012,
+  spreadPower: 0.005,
+  /** Shooting across the body, scaled by how far the shot turns from the skater's facing. */
+  spreadFacing: 0.014,
 };
 /** Blade pose in player space: +side is the skater's left (forehand for a left shot). */
 export const STICK = {

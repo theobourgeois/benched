@@ -1,10 +1,20 @@
-import { attackDirection, EMPTY_INPUT, PHYSICS, PUCK, RINK, RULES, STICK } from './config';
+import {
+  attackDirection,
+  EMPTY_INPUT,
+  IRON,
+  PHYSICS,
+  PUCK,
+  RINK,
+  RULES,
+  SHOT,
+  STICK,
+} from './config';
 import { activeDeke, classifyOneTouch, clearDeke, startDeke, stepDeke } from './dekes';
 import { decideAI } from './ai';
 import { DEFAULT_MATCHUP, type Club } from './clubs';
 import { cpuTune, DEFAULT_DIFFICULTY } from './difficulty';
 import { skateVelocity } from './skating';
-import { clamp, constrainToRink, distance, normalized } from './math';
+import { clamp, constrainToRink, distance, hash01, normalized } from './math';
 import { isOnIce, modeInfo, SHOOTOUT_ROUNDS } from './modes';
 import type {
   DekeSpecial,
@@ -14,6 +24,7 @@ import type {
   MatchState,
   Jersey,
   Phase,
+  Puck,
   Skater,
   Team,
   Vec2,
@@ -65,6 +76,7 @@ export function createMatch(
     passRange: 0,
     tick: 0,
     hitstop: 0,
+    barTick: -1,
     events: [],
     notice: '',
     noticeTimer: 0,
@@ -197,8 +209,20 @@ export function resetFormation(s: MatchState) {
   }
   if (s.mode === 'shootout') setupShootoutAttempt(s);
 }
-export function emit(s: MatchState, type: GameEvent['type'], power = 1, at?: Vec2) {
-  s.events.push({ id: (s.events.at(-1)?.id ?? 0) + 1, type, power, x: at?.x, z: at?.z });
+export function emit(
+  s: MatchState,
+  type: GameEvent['type'],
+  power = 1,
+  detail?: { x?: number; z?: number; barDown?: boolean },
+) {
+  s.events.push({
+    id: (s.events.at(-1)?.id ?? 0) + 1,
+    type,
+    power,
+    x: detail?.x,
+    z: detail?.z,
+    ...(detail?.barDown && { barDown: true }),
+  });
   if (s.events.length > 32) s.events.shift();
 }
 export function startMatch(s: MatchState) {
@@ -301,13 +325,34 @@ export function stickTip(p: Skater) {
 }
 /** Where a left-stick shot is aimed on the attacking net. */
 export function netShotTarget(s: MatchState, p: Skater, aim: number, height: number) {
-  const dir = attackDirection(p.team, s.period),
-    post = RINK.goalHalfWidth - 0.16;
   return {
-    x: dir * RINK.goalX,
-    y: 0.14 + clamp(height, 0, 1) * (RINK.goalHeight - 0.22),
-    z: clamp(aim, -1, 1) * post,
+    x: attackDirection(p.team, s.period) * RINK.goalX,
+    y: 0.14 + clamp(height, 0, 1) * (SHOT.topShelf - 0.14),
+    z: clamp(aim, -1, 1) * SHOT.corner,
   };
+}
+/**
+ * Radius of the aim circle on the net, in metres. A set forehand is tight; skating across the
+ * shot, a backhand, shooting across the body or a hard wind-up opens it up.
+ */
+export function shotSpread(
+  s: MatchState,
+  p: Skater,
+  power: number,
+  target = netShotTarget(s, p, s.shotAim, s.shotLift),
+) {
+  const tip = stickTip(p),
+    range = Math.hypot(target.x - tip.x, target.z - tip.z),
+    line = normalized(target.x - tip.x, target.z - tip.z);
+  const across = Math.abs(p.vx * line.z - p.vz * line.x),
+    facing = 1 - (Math.sin(p.angle) * line.x + Math.cos(p.angle) * line.z);
+  const angle =
+    SHOT.spread +
+    across * SHOT.spreadLateral +
+    (p.stickSide < 0 ? SHOT.spreadBackhand : 0) +
+    clamp(power, 0, 1) * SHOT.spreadPower +
+    clamp(facing, 0, 1) * SHOT.spreadFacing;
+  return angle * range;
 }
 const REST_ANGLE = Math.atan2(STICK.restSide - STICK.pivotSide, STICK.restReach - STICK.pivotReach);
 function fromPivot(angle: number, radius: number) {
@@ -522,8 +567,8 @@ function releasePuck(
   puck.owner = null;
   puck.x = origin?.x ?? p.x + v.x * 1.15;
   puck.z = origin?.z ?? p.z + v.z * 1.15;
-  puck.vx = v.x * speed + p.vx * 0.23;
-  puck.vz = v.z * speed + p.vz * 0.23;
+  puck.vx = v.x * speed + p.vx * PHYSICS.puckCarry;
+  puck.vz = v.z * speed + p.vz * PHYSICS.puckCarry;
   puck.y = origin?.y ?? 0.15;
   puck.vy = lift;
   puck.lockout = 0.16;
@@ -537,20 +582,51 @@ export function shootPuck(s: MatchState, p: Skater, power: number, aim = 0, heig
   power = clamp(power + (oneTimer ? 0.28 : 0), 0, 1);
   const tip = stickTip(p),
     backhand = p.stickSide < 0,
-    target = netShotTarget(s, p, aim, height);
-  const dx = target.x - tip.x,
-    dz = target.z - tip.z,
-    v = normalized(dx, dz);
+    aimed = netShotTarget(s, p, aim, height);
+  const spread = shotSpread(s, p, power, aimed),
+    miss = hash01(s.tick, p.id) * Math.PI * 2,
+    missBy = spread * Math.sqrt(hash01(p.id, s.tick));
+  const target = {
+    x: aimed.x,
+    y: Math.max(PUCK.restY, aimed.y + Math.sin(miss) * missBy),
+    z: aimed.z + Math.cos(miss) * missBy,
+  };
+  const toward = normalized(target.x - tip.x, target.z - tip.z);
   const origin = {
-    x: tip.x + v.x * 0.32,
-    z: tip.z + v.z * 0.32,
+    x: tip.x + toward.x * 0.32,
+    z: tip.z + toward.z * 0.32,
     y: 0.15 + clamp(height, 0, 1) * 0.42,
   };
   const speed =
     PHYSICS.shotSpeed * (0.66 + power * 0.45) * (oneTimer ? 1.08 : 1) * (backhand ? 0.88 : 1);
-  const travel = Math.max(0.06, Math.hypot(target.x - origin.x, target.z - origin.z) / speed);
+  // The puck keeps some of the skater's glide. Aim off it so the shot goes where the marker says.
+  const line = normalized(target.x - origin.x, target.z - origin.z),
+    carryX = p.vx * PHYSICS.puckCarry,
+    carryZ = p.vz * PHYSICS.puckCarry,
+    along = carryX * line.x + carryZ * line.z,
+    driftX = carryX - along * line.x,
+    driftZ = carryZ - along * line.z,
+    forward = Math.sqrt(Math.max(0, speed * speed - driftX * driftX - driftZ * driftZ));
+  const range = Math.hypot(target.x - origin.x, target.z - origin.z),
+    ground = Math.max(1, forward + along),
+    drag = PHYSICS.puckDrag,
+    slowed = 1 - (range * drag) / ground;
+  // Drag slows the puck on the way, so it arrives later, and lower, than range / speed.
+  const travel = Math.max(
+    0.06,
+    drag > 1e-4 && slowed > 0.05 ? -Math.log(slowed) / drag : range / ground,
+  );
   const loft = Math.min(12, (target.y - origin.y + 4.9 * travel * travel) / travel);
-  releasePuck(s, p, dx, dz, speed, loft, true, origin);
+  releasePuck(
+    s,
+    p,
+    line.x * forward - driftX,
+    line.z * forward - driftZ,
+    speed,
+    loft,
+    true,
+    origin,
+  );
   p.shotTimer = oneTimer ? 0.22 : 0.34;
   p.shotDuration = p.shotTimer;
   p.shotStyle = backhand ? 'backhand' : power > 0.55 ? 'slap' : 'wrist';
@@ -1190,8 +1266,114 @@ function goal(s: MatchState, scoringTeam: Team) {
   s.scoringTeam = scoringTeam;
   s.phase = 'goal';
   s.countdown = s.mode === 'freeSkate' ? 1.6 : s.mode === 'shootout' ? 2.2 : RULES.goalSeconds;
-  emit(s, 'goal');
+  emit(s, 'goal', 1, { barDown: s.barTick >= 0 && s.tick - s.barTick < 40 });
   return true;
+}
+/** First fraction of a step at which a point leaving (ax, ay) along (dx, dy) comes within r of the origin. */
+function sweepCircle(ax: number, ay: number, dx: number, dy: number, r: number) {
+  const c = ax * ax + ay * ay - r * r;
+  if (c <= 0) return 0;
+  const a = dx * dx + dy * dy,
+    b = ax * dx + ay * dy;
+  if (a < 1e-12 || b >= 0) return null;
+  const disc = b * b - a * c;
+  if (disc < 0) return null;
+  const t = (-b - Math.sqrt(disc)) / a;
+  return t <= 1 ? t : null;
+}
+interface IronHit {
+  kind: 'post' | 'crossbar';
+  sign: number;
+  t: number;
+  nx: number;
+  ny: number;
+  nz: number;
+}
+/**
+ * Sweeps the puck against the posts and crossbar as round pipes, so where it catches the iron
+ * decides whether it rings in, out, over or down. Bounces it off the first contact.
+ */
+function strikeIron(p: Puck, oldX: number, oldY: number, oldZ: number, dt: number) {
+  const dx = p.x - oldX,
+    dy = p.y - oldY,
+    dz = p.z - oldZ,
+    postReach = IRON.radius + IRON.puckRim,
+    barReach = IRON.radius + IRON.puckFace;
+  let hit: IronHit | null = null;
+  // The posts run up into the crossbar and the crossbar out over the posts, so the corner has no gap.
+  for (const sign of [-1, 1]) {
+    const ax = oldX - sign * RINK.goalX;
+    for (const side of [-1, 1]) {
+      const az = oldZ - side * RINK.goalHalfWidth,
+        t = sweepCircle(ax, az, dx, dz, postReach);
+      if (t === null || (hit && t >= hit.t) || oldY + dy * t > IRON.crossbarY + IRON.radius)
+        continue;
+      const cx = ax + dx * t,
+        cz = az + dz * t,
+        d = Math.hypot(cx, cz) || 1;
+      hit = { kind: 'post', sign, t, nx: cx / d, ny: 0, nz: cz / d };
+    }
+    const ay = oldY - IRON.crossbarY,
+      t = sweepCircle(ax, ay, dx, dy, barReach);
+    if (
+      t === null ||
+      (hit && t >= hit.t) ||
+      Math.abs(oldZ + dz * t) > RINK.goalHalfWidth + IRON.radius
+    )
+      continue;
+    const cx = ax + dx * t,
+      cy = ay + dy * t,
+      d = Math.hypot(cx, cy) || 1;
+    hit = { kind: 'crossbar', sign, t, nx: cx / d, ny: cy / d, nz: 0 };
+  }
+  if (!hit) return null;
+  const vn = p.vx * hit.nx + p.vy * hit.ny + p.vz * hit.nz;
+  if (vn >= 0) return null;
+  const x = oldX + dx * hit.t,
+    y = oldY + dy * hit.t,
+    z = oldZ + dz * hit.t;
+  const bounce = (v: number, n: number) => (v - vn * n) * IRON.friction - vn * n * IRON.restitution;
+  p.vx = bounce(p.vx, hit.nx);
+  p.vy = bounce(p.vy, hit.ny);
+  p.vz = bounce(p.vz, hit.nz);
+  const rest = (1 - hit.t) * dt;
+  p.x = x + p.vx * rest;
+  p.y = y + p.vy * rest;
+  p.z = z + p.vz * rest;
+  return { ...hit, x, y, z, speed: -vn };
+}
+function ringIron(s: MatchState, ring: NonNullable<ReturnType<typeof strikeIron>>) {
+  const p = s.puck;
+  p.shot = false;
+  p.lockout = Math.max(p.lockout, 0.12);
+  // Caught under the crossbar and driven down behind the line.
+  const barDown =
+    s.phase !== 'goal' &&
+    ring.kind === 'crossbar' &&
+    ring.ny < 0 &&
+    p.vx * ring.sign > 0 &&
+    p.vy < 0;
+  emit(s, ring.kind, clamp(ring.speed / 30, 0.2, 1), { barDown });
+  if (barDown) {
+    s.barTick = s.tick;
+    s.hitstop = Math.max(s.hitstop, IRON.ringHold);
+  } else if (s.phase !== 'goal') notice(s, 'OFF THE IRON');
+}
+/** A puck wholly inside the frame as it crosses the goal line is in. */
+function crossGoalLine(
+  s: MatchState,
+  a: { x: number; y: number; z: number },
+  b: { x: number; y: number; z: number },
+) {
+  for (const sign of [-1, 1]) {
+    if (a.x * sign >= RINK.goalX || b.x * sign < RINK.goalX) continue;
+    const t = (sign * RINK.goalX - a.x) / (b.x - a.x);
+    if (
+      Math.abs(a.z + (b.z - a.z) * t) < RINK.goalHalfWidth &&
+      a.y + (b.y - a.y) * t < IRON.crossbarY
+    )
+      goal(s, teamAttackingNet(sign, s.period));
+  }
 }
 function teamAttackingNet(sign: number, period: number): Team {
   return (attackDirection(0, period) === sign ? 0 : 1) as Team;
@@ -1285,26 +1467,15 @@ function advancePuck(s: MatchState, dt: number) {
   }
   p.vx *= Math.exp(-PHYSICS.puckDrag * dt);
   p.vz *= Math.exp(-PHYSICS.puckDrag * dt);
-  // Swept goal-line crossing prevents fast shots tunnelling through the goal mouth.
+  // Swept iron and goal-line tests keep fast shots from tunnelling through the frame.
+  const ring = s.phase === 'goal' ? null : strikeIron(p, oldX, oldY, oldZ, dt);
+  const from = ring ?? { x: oldX, y: oldY, z: oldZ };
+  if (ring) {
+    crossGoalLine(s, { x: oldX, y: oldY, z: oldZ }, ring);
+    ringIron(s, ring);
+  }
+  crossGoalLine(s, from, p);
   for (const sign of [-1, 1]) {
-    const line = sign * RINK.goalX;
-    if (oldX * sign < RINK.goalX && p.x * sign >= RINK.goalX) {
-      const t = (line - oldX) / (p.x - oldX),
-        z = oldZ + (p.z - oldZ) * t,
-        y = oldY + (p.y - oldY) * t;
-      if (Math.abs(z) < RINK.goalHalfWidth - 0.12 && y < RINK.goalHeight - 0.06) {
-        goal(s, teamAttackingNet(sign, s.period));
-      } else if (
-        (Math.abs(Math.abs(z) - RINK.goalHalfWidth) < 0.22 && y < RINK.goalHeight + 0.1) ||
-        (Math.abs(z) < RINK.goalHalfWidth && Math.abs(y - RINK.goalHeight) < 0.18)
-      ) {
-        p.x = oldX;
-        p.vx *= -0.78;
-        p.shot = false;
-        emit(s, 'post');
-        notice(s, 'OFF THE IRON');
-      }
-    }
     // Back and side netting: entering from behind never counts as a goal.
     if (
       p.x * sign > RINK.goalX &&
@@ -1312,14 +1483,14 @@ function advancePuck(s: MatchState, dt: number) {
       Math.abs(p.z) < RINK.goalHalfWidth &&
       p.y < RINK.goalHeight
     ) {
-      if (oldX * sign >= RINK.goalX + 1.5) {
+      if (from.x * sign >= RINK.goalX + 1.5) {
         p.x = sign * (RINK.goalX + 1.52);
         p.vx *= -0.4;
-      } else if (Math.abs(oldZ) >= RINK.goalHalfWidth) {
-        p.z = Math.sign(oldZ || 1) * (RINK.goalHalfWidth + 0.12);
+      } else if (Math.abs(from.z) >= RINK.goalHalfWidth) {
+        p.z = Math.sign(from.z || 1) * (RINK.goalHalfWidth + 0.12);
         p.vz *= -0.4;
       } else if (s.phase !== 'goal') {
-        p.z = Math.sign(oldZ || 1) * (RINK.goalHalfWidth + 0.12);
+        p.z = Math.sign(from.z || 1) * (RINK.goalHalfWidth + 0.12);
         p.vz *= -0.4;
       }
     }

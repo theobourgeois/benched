@@ -2,11 +2,16 @@ import { attackDirection } from '../game/config';
 import { clamp } from '../game/math';
 import { cameraUsesAttackUp, type InputFrame, type MatchState, type Settings } from '../game/types';
 
-/** Map a screen-space stick onto the net: lateral is posts, up is shelf. */
+/**
+ * Map a screen-space stick onto the net: lateral is posts, up is shelf. The round stick gate is
+ * stretched to the square net, so a full diagonal reaches the top corner.
+ */
 export function netAimFromStick(lateral: number, up: number, forcedHigh = false) {
+  const edge = Math.max(Math.abs(lateral), Math.abs(up)),
+    stretch = edge > 1e-3 ? Math.min(1, Math.hypot(lateral, up) / 0.9) / edge : 0;
   return {
-    aimZ: clamp(lateral, -1, 1),
-    shotHeight: forcedHigh ? 1 : clamp((up + 1) / 2, 0, 1),
+    aimZ: clamp(lateral * stretch, -1, 1),
+    shotHeight: forcedHigh ? 1 : clamp((up * stretch + 1) / 2, 0, 1),
   };
 }
 

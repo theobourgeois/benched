@@ -121,11 +121,13 @@ export interface InputFrame {
 }
 export interface GameEvent {
   id: number;
-  type: 'shot' | 'pass' | 'hit' | 'goal' | 'post' | 'save' | 'faceoff' | 'horn';
+  type: 'shot' | 'pass' | 'hit' | 'goal' | 'post' | 'crossbar' | 'save' | 'faceoff' | 'horn';
   power: number;
   /** Where it happened on the ice, when it was not the puck. */
   x?: number;
   z?: number;
+  /** A crossbar ring dropping into the net, and the goal it becomes. */
+  barDown?: boolean;
 }
 export interface MatchState {
   mode: GameMode;
@@ -166,6 +168,8 @@ export interface MatchState {
   tick: number;
   /** Seconds the simulation holds still after a knockdown, for impact. */
   hitstop: number;
+  /** Tick the puck last rang the crossbar, or -1. */
+  barTick: number;
   events: GameEvent[];
   notice: string;
   noticeTimer: number;

@@ -14,7 +14,7 @@ import {
   viewMatch,
   viewTimeScale,
 } from '../game/store';
-import { stepMatch, togglePause, netShotTarget } from '../game/engine';
+import { stepMatch, togglePause, netShotTarget, shotSpread } from '../game/engine';
 import { recordRagdollPoses } from './ragdoll';
 import { GOAL_REPLAY, REPLAY_HZ } from '../game/replay';
 import { replayFraming } from './replayCamera';
@@ -25,6 +25,7 @@ import { playerLocator } from './locator';
 import { PUCK, RULES } from '../game/config';
 import type { InputFrame, Phase } from '../game/types';
 const _aimNdc = new THREE.Vector3();
+const _aimEdge = new THREE.Vector3();
 const _framing = new THREE.Vector3();
 /** Simulation steps per replay snapshot. */
 const RECORD_EVERY = Math.max(1, Math.round(1 / RULES.fixedStep / REPLAY_HZ));
@@ -156,14 +157,31 @@ function Simulation() {
     }
     for (const event of s.events)
       if (event.id > lastEvent.current) {
-        runtime.audio.play(event);
+        runtime.audio.play(event, s.mode);
         if (event.type === 'goal') goalReplay.current = goalReplayWanted(s);
-        if (['shot', 'hit', 'goal', 'post', 'save'].includes(event.type)) {
+        if (['shot', 'hit', 'goal', 'post', 'crossbar', 'save'].includes(event.type)) {
           const bigHit = event.type === 'hit' && event.power >= 0.5;
           if (bigHit) impact.shake = Math.max(impact.shake, event.power >= 0.75 ? 1 : 0.45);
+          if (event.barDown && event.type === 'crossbar')
+            impact.shake = Math.max(impact.shake, 0.3);
+          const iron = event.type === 'crossbar';
           runtime.controller.rumble(
-            event.type === 'goal' ? 1 : bigHit ? Math.max(0.7, event.power) : event.power * 0.7,
-            event.type === 'goal' ? 650 : bigHit ? 280 : event.type === 'hit' ? 160 : 100,
+            event.type === 'goal'
+              ? 1
+              : bigHit
+                ? Math.max(0.7, event.power)
+                : iron
+                  ? Math.max(0.55, event.power)
+                  : event.power * 0.7,
+            event.type === 'goal'
+              ? 650
+              : bigHit
+                ? 280
+                : event.type === 'hit'
+                  ? 160
+                  : iron
+                    ? 130
+                    : 100,
           );
         }
         lastEvent.current = event.id;
@@ -364,6 +382,13 @@ function ShotAimHud({ marker }: { marker: RefObject<HTMLDivElement | null> }) {
     const x = (_aimNdc.x * 0.5 + 0.5) * size.width;
     const y = (-_aimNdc.y * 0.5 + 0.5) * size.height;
     el.style.transform = `translate(${x}px, ${y}px)`;
+    const spread = shotSpread(s, p, s.shotCharge, target);
+    _aimEdge.set(target.x, target.y + spread, target.z).project(camera);
+    const ring = Math.hypot(
+      (_aimEdge.x - _aimNdc.x) * 0.5 * size.width,
+      (_aimEdge.y - _aimNdc.y) * 0.5 * size.height,
+    );
+    el.style.setProperty('--spread', `${ring.toFixed(1)}px`);
   });
   return null;
 }

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { PerspectiveCamera, Vector3 } from 'three';
 import { createMatch, netShotTarget, resetFormation, startMatch } from '../src/game/engine';
 import { attackDirection, EMPTY_INPUT } from '../src/game/config';
-import { screenInputToRink } from '../src/input/coordinates';
+import { netAimFromStick, screenInputToRink } from '../src/input/coordinates';
 import { cameraFraming } from '../src/scene/camera';
 import { playerLocator } from '../src/scene/locator';
 import type { Team } from '../src/game/types';
@@ -84,6 +84,16 @@ describe('end-to-end arena camera', () => {
     expect(screenInputToRink({ ...EMPTY_INPUT, moveX: 1 }, match, 'wide').aimZ).toBe(0);
     expect(screenInputToRink({ ...EMPTY_INPUT, moveX: 1 }, match, 'wide').shotHeight).toBe(1);
   });
+  it('reaches the top corner from a full pad diagonal on the round stick gate', () => {
+    for (const edge of [Math.SQRT1_2, 0.65]) {
+      const aim = netAimFromStick(edge, edge);
+      expect(aim.aimZ).toBeCloseTo(1);
+      expect(aim.shotHeight).toBeCloseTo(1);
+    }
+    const nudge = netAimFromStick(0.3, 0);
+    expect(nudge.aimZ).toBeCloseTo(0.3 / 0.9);
+    expect(nudge.shotHeight).toBeCloseTo(0.5);
+  });
   it('keeps the skater in frame at center ice and still shows the net as a goal mouth', () => {
     const match = createMatch();
     match.phase = 'playing';
@@ -122,8 +132,13 @@ describe('end-to-end arena camera', () => {
     const broadcast = cameraFraming(match, 'broadcast', 1.5);
     const tight = cameraFraming(match, 'tight', 1.5);
     const high = cameraFraming(match, 'high', 1.5);
-    expect(tight.position[1]).toBeLessThan(broadcast.position[1]);
-    expect(tight.fov).toBeLessThan(broadcast.fov);
+    const player = match.skaters[match.controlled];
+    const pitch = (f: typeof tight) =>
+      Math.atan2(f.position[1] - f.target[1], Math.abs(f.position[0] - f.target[0]));
+    expect(Math.abs(tight.position[0] - player.x)).toBeLessThan(
+      Math.abs(broadcast.position[0] - player.x),
+    );
+    expect(pitch(tight)).toBeGreaterThan(pitch(broadcast));
     expect(high.position[1]).toBeGreaterThan(broadcast.position[1]);
     expect(cameraFraming(match, 'wide', 1.5).target).toEqual([0, 0, 0]);
   });
