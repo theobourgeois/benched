@@ -233,9 +233,10 @@ function Simulation() {
     if (net && !net.isHost) {
       // A guest runs no simulation. It says what it is trying to do and draws what it is told,
       // so there is no second version of the match to disagree with the host's.
-      net.sendInput(pending.current[runtime.myTeam] ?? EMPTY_INPUT, s.tick);
-      pending.current[runtime.myTeam] = noEdges(pending.current[runtime.myTeam] ?? EMPTY_INPUT);
-      if (net.applyLatest(s) && RECORDED.includes(s.phase))
+      // Presses are kept until a frame actually goes out, so none is lost between sends.
+      if (net.sendInput(pending.current[runtime.myTeam] ?? EMPTY_INPUT))
+        pending.current[runtime.myTeam] = noEdges(pending.current[runtime.myTeam] ?? EMPTY_INPUT);
+      if (net.view(s, Math.min(delta, 0.05)) && RECORDED.includes(s.phase))
         recordRagdollPoses(runtime.recorder.record(s));
       drainEvents(s);
       runtime.audio.updateSkating(s, 1, runtime.myTeam);

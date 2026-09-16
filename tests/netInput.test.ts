@@ -39,8 +39,9 @@ describe('an input frame on the wire', () => {
   });
 
   it('comes back as it went, buttons and sticks alike', () => {
-    const { frame, tick } = decodeInput(encodeInput(busy, 1234));
-    expect(tick).toBe(1234);
+    const { frame, stamp, echo } = decodeInput(encodeInput(busy, 1234, 987654));
+    expect(stamp).toBe(1234);
+    expect(echo).toBe(987654);
     for (const key of Object.keys(busy) as (keyof InputFrame)[]) {
       const a = busy[key] ?? null,
         b = frame[key] ?? null;

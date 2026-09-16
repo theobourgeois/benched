@@ -12,7 +12,7 @@ const state = (page: Page) =>
   );
 const net = (page: Page) =>
   page.evaluate(`(() => { const n = window.__BENCHED__.runtime.net;
-    return n ? { status: n.status, room: n.room, host: n.isHost, team: n.team, players: n.players.length } : null; })()`);
+    return n ? { status: n.status, room: n.room, host: n.isHost, team: n.team, players: n.players.length, direct: n.stats.direct, rtt: n.stats.rtt } : null; })()`);
 const live = (page: Page) => page.locator('.hud[data-phase="playing"]');
 
 /** A pad each, so both ends are driven the way a person would. */
@@ -75,6 +75,12 @@ test('two browsers meet in a room, drop the puck, and play one match', async ({ 
   expect(started.sides.map((s: { human: boolean }) => s.human)).toEqual([true, true]);
   expect(guestStarted.mode).toBe(started.mode);
   expect(guestStarted.myTeam).not.toBe(started.myTeam);
+
+  // The two browsers open a line straight between them, and the room drops out of the play.
+  await expect.poll(async () => (await net(guestPage))?.direct, { timeout: 15000 }).toBe(true);
+  await expect.poll(async () => (await net(hostPage))?.direct, { timeout: 15000 }).toBe(true);
+  // Each end times its own round trip off the other's echo.
+  await expect.poll(async () => (await net(guestPage))?.rtt, { timeout: 10000 }).toBeGreaterThan(0);
 
   // The guest's clock advances, which it can only do off the host's snapshots.
   const firstTick = (await state(guestPage)).tick;

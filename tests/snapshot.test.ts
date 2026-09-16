@@ -81,8 +81,8 @@ describe('snapshot round trip', () => {
     const quiet = encodeSnapshot(createMatch()).byteLength;
     expect(quiet).toBeLessThan(1400);
     expect(SNAPSHOT_BYTES).toBeLessThan(2048);
-    // Thirty a second is the rate the host publishes at.
-    expect(quiet * 30).toBeLessThan(48_000);
+    // Sixty a second is the rate the host publishes at: under a hundred kilobytes a second.
+    expect(quiet * 60).toBeLessThan(100_000);
   });
 
   it('carries the calls the other end has not heard, once each', () => {

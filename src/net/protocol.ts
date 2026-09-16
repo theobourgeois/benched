@@ -48,6 +48,25 @@ export interface MatchSetup {
   hostTeam: Team;
 }
 
+/**
+ * One step of the handshake for a line straight between the two browsers, carried through the
+ * room. Shaped like what the browser hands over, without depending on its types, because the
+ * room is not a browser.
+ */
+export interface SessionDescription {
+  type: 'offer' | 'answer';
+  sdp?: string;
+}
+export interface IceCandidate {
+  candidate?: string;
+  sdpMid?: string | null;
+  sdpMLineIndex?: number | null;
+  usernameFragment?: string | null;
+}
+export type Signal = { sdp: SessionDescription } | { candidate: IceCandidate | null };
+/** Longer than any handshake step has reason to be. */
+export const SIGNAL_LIMIT = 16 * 1024;
+
 export type ClientMessage =
   | { t: 'hello'; name: string }
   | { t: 'name'; name: string }
@@ -55,12 +74,14 @@ export type ClientMessage =
   | { t: 'club'; club: string }
   | { t: 'ready'; ready: boolean }
   | { t: 'start'; setup: MatchSetup }
+  | { t: 'signal'; data: Signal }
   | { t: 'leave' };
 
 export type ServerMessage =
   | { t: 'room'; you: string; players: Player[] }
   | { t: 'full' }
   | { t: 'start'; setup: MatchSetup }
+  | { t: 'signal'; from: string; data: Signal }
   | { t: 'gone'; id: string };
 
 /** The first byte of every binary message says what the rest of it is. */

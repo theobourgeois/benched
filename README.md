@@ -41,8 +41,15 @@ practice and stays local.
 
 One browser runs the simulation and the other draws what it is told, so there is no second
 simulation to disagree with the first. The host has a small latency advantage, which is the
-trade for never having to reconcile two versions of a match. There is no pause online — the
-other person is still playing — so the pause button asks whether you mean to leave.
+trade for never having to reconcile two versions of a match. The guest draws a few hundredths
+of a second behind the newest thing it has heard, blended between snapshots, so the match moves
+every frame rather than every packet. There is no pause online — the other person is still
+playing — so the pause button asks whether you mean to leave.
+
+Play traffic goes straight between the two browsers when it can: the host offers a WebRTC data
+channel through the room, and once it opens the room drops out of the play. Two networks that
+cannot reach each other directly fall back to the room relaying. The FPS counter shows the round
+trip and which of the two roads is in use.
 
 Rooms are a Cloudflare Worker (`workers/room.ts`) backed by a Durable Object. It holds who is in
 the room and relays bytes between them; it never simulates hockey.

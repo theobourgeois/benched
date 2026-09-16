@@ -1,6 +1,7 @@
 import { Server, routePartykitRequest, type Connection, type ConnectionContext } from 'partyserver';
 import {
   ROOM_CAPACITY,
+  SIGNAL_LIMIT,
   WIRE_INPUT,
   WIRE_SNAPSHOT,
   tagOf,
@@ -13,7 +14,8 @@ import {
 /**
  * A room for two. It holds who is in it, which side they picked and whether they are ready, then
  * gets out of the way: once the puck drops it relays bytes between the two of them and nothing
- * else. It deliberately does not simulate hockey — a durable object is a poor place to run a
+ * else. It also carries the handshake for a line straight between the two browsers, which,
+ * when it opens, takes the play traffic instead. It deliberately does not simulate hockey — a durable object is a poor place to run a
  * hundred and twenty steps a second, and it does not need to, because one of the browsers does.
  *
  * Everything here is untrusted input from a browser. Nothing is read without a shape check.
@@ -79,6 +81,14 @@ export class Room extends Server<Env> {
     const seat = this.seats.get(connection.id);
     if (!message || !seat) return;
     switch (message.t) {
+      case 'signal': {
+        // A handshake step for the other person. Opaque here, beyond being a bounded object.
+        if (raw.length > SIGNAL_LIMIT || !message.data || typeof message.data !== 'object') return;
+        for (const other of this.getConnections())
+          if (other.id !== connection.id)
+            this.sendTo(other, { t: 'signal', from: connection.id, data: message.data });
+        return;
+      }
       case 'hello':
       case 'name':
         seat.name = clean(message.name) || seat.name;

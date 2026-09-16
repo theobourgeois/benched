@@ -13,8 +13,10 @@ const SPECIALS: readonly (DekeSpecial | null)[] = [null, 'jump', 'throughLegs', 
 const CELLIES: readonly (CellyKind | null)[] = [null, 'helicopter', 'jump', 'limp', 'dance'];
 
 const FIELDS: readonly Field[] = [
-  // The tick this frame was meant for, so the host can tell a fresh one from a repeat.
-  { key: 'tick', kind: 'f32' },
+  // The sender's clock, and the newest snapshot stamp it has seen. The host reads the second
+  // back to measure its own round trip, and sends the first back for the guest to do the same.
+  { key: 'stamp', kind: 'f32' },
+  { key: 'echo', kind: 'f32' },
   unit('moveX'),
   unit('moveZ'),
   unit('stickX'),
@@ -49,16 +51,22 @@ const FIELDS: readonly Field[] = [
 ];
 
 export const INPUT_BYTES = sizeOf(FIELDS);
-/** An input frame with the tick it was meant for. */
+/** An input frame with the sender's clock and the snapshot stamp it is answering. */
 export interface StampedInput {
-  tick: number;
+  stamp: number;
+  echo: number;
   frame: InputFrame;
 }
 
-export function encodeInput(frame: InputFrame, tick: number, into?: ArrayBuffer): ArrayBuffer {
+export function encodeInput(
+  frame: InputFrame,
+  stamp: number,
+  echo = 0,
+  into?: ArrayBuffer,
+): ArrayBuffer {
   const buffer = into ?? new ArrayBuffer(INPUT_BYTES);
   const at = new Cursor(new DataView(buffer));
-  const values: Record<string, unknown> = { ...frame, tick };
+  const values: Record<string, unknown> = { ...frame, stamp, echo };
   for (const field of FIELDS) at.write(field, values[field.key]);
   return buffer;
 }
@@ -67,6 +75,10 @@ export function decodeInput(buffer: ArrayBuffer): StampedInput {
   const at = new Cursor(new DataView(buffer));
   const values: Record<string, unknown> = {};
   for (const field of FIELDS) values[field.key] = at.read(field);
-  const { tick, ...rest } = values;
-  return { tick: tick as number, frame: { ...EMPTY_INPUT, ...rest } as InputFrame };
+  const { stamp, echo, ...rest } = values;
+  return {
+    stamp: stamp as number,
+    echo: echo as number,
+    frame: { ...EMPTY_INPUT, ...rest } as InputFrame,
+  };
 }

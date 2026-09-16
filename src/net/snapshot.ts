@@ -1,5 +1,5 @@
 import { TEAMS } from '../game/types';
-import { Cursor, metres, sizeOf, timer, unit, type Field } from './wire';
+import { blendField, Cursor, metres, sizeOf, timer, unit, type Field } from './wire';
 import type {
   CellyKind,
   DekeKind,
@@ -59,18 +59,18 @@ const SKATER: readonly Field[] = [
   metres('vx'),
   metres('vz'),
   { key: 'angle', kind: 'angle' },
-  { key: 'stamina', kind: 'u8', scale: 255 },
+  { key: 'stamina', kind: 'u8', scale: 255, blend: 'lerp' },
   timer('cooldown'),
   timer('checkTimer'),
   // Stride winds on without resetting, so it keeps full precision.
-  { key: 'stride', kind: 'f32' },
+  { key: 'stride', kind: 'f32', blend: 'lerp' },
   unit('skateDrive'),
   unit('edgeLean'),
   timer('downTimer'),
   timer('stumbleTimer'),
   unit('rush'),
   { key: 'hitLock', kind: 'i16', scale: 1 },
-  { key: 'checkPower', kind: 'u8', scale: 255 },
+  { key: 'checkPower', kind: 'u8', scale: 255, blend: 'lerp' },
   { key: 'checkLanded', kind: 'bool' },
   timer('hitImmunity'),
   { key: 'fallAngle', kind: 'angle' },
@@ -112,7 +112,7 @@ const SKATER: readonly Field[] = [
 const PUCK_FIELDS: readonly Field[] = [
   metres('x'),
   metres('z'),
-  { key: 'y', kind: 'i16', scale: 1000 },
+  { key: 'y', kind: 'i16', scale: 1000, blend: 'lerp' },
   metres('vx'),
   metres('vz'),
   metres('vy'),
@@ -141,8 +141,8 @@ const SIDE: readonly Field[] = [
 const MATCH: readonly Field[] = [
   { key: 'phase', kind: 'enum', values: PHASES },
   { key: 'period', kind: 'u8', scale: 1 },
-  { key: 'clock', kind: 'f32' },
-  { key: 'countdown', kind: 'f32' },
+  { key: 'clock', kind: 'f32', blend: 'time' },
+  { key: 'countdown', kind: 'f32', blend: 'time' },
   { key: 'scoreHome', kind: 'u8', scale: 1 },
   { key: 'scoreAway', kind: 'u8', scale: 1 },
   { key: 'shotsHome', kind: 'u8', scale: 1 },
@@ -150,17 +150,22 @@ const MATCH: readonly Field[] = [
   { key: 'hitsHome', kind: 'u8', scale: 1 },
   { key: 'hitsAway', kind: 'u8', scale: 1 },
   { key: 'scoringTeam', kind: 'i16', scale: 1 },
-  { key: 'tick', kind: 'f32' },
+  { key: 'tick', kind: 'f32', blend: 'lerp' },
   timer('hitstop'),
-  { key: 'noticeTimer', kind: 'u16', scale: 1000 },
+  { key: 'noticeTimer', kind: 'u16', scale: 1000, blend: 'time' },
   { key: 'noticeTeam', kind: 'i16', scale: 1 },
   { key: 'shootoutShooter', kind: 'u8', scale: 1 },
   { key: 'shootoutRound', kind: 'u8', scale: 1 },
   { key: 'shootoutTaken0', kind: 'u8', scale: 1 },
   { key: 'shootoutTaken1', kind: 'u8', scale: 1 },
-  { key: 'possessionHome', kind: 'f32' },
-  { key: 'possessionAway', kind: 'f32' },
+  { key: 'possessionHome', kind: 'f32', blend: 'lerp' },
+  { key: 'possessionAway', kind: 'f32', blend: 'lerp' },
+  // The host's clock when this was sent, and the newest input stamp it has heard. Each end
+  // reads back only the stamp it issued, so the two clocks never have to agree.
+  { key: 'stamp', kind: 'f32' },
+  { key: 'echo', kind: 'f32' },
 ];
+const MATCH_INDEX = Object.fromEntries(MATCH.map((f, i) => [f.key, i]));
 
 /**
  * Whistles, hits and horns. The watching client has no simulation to raise its own, so what the
@@ -194,6 +199,7 @@ export const SNAPSHOT_BYTES =
   sizeOf(MATCH) +
   sizeOf(SIDE) * 2 +
   sizeOf(PUCK_FIELDS) +
+  1 +
   sizeOf(SKATER) * 12 +
   1 +
   sizeOf(EVENT) * MAX_EVENTS;
@@ -212,15 +218,26 @@ function skaterValues(p: Skater): Record<string, unknown> {
   };
 }
 
+/** A clock reading that fits a float exactly: whole milliseconds, wrapping every ~17 minutes. */
+export const STAMP_WRAP = 1 << 20;
+export const stampNow = (now = performance.now()) => Math.round(now) % STAMP_WRAP;
+/** Milliseconds since a stamp was issued, on the clock that issued it. */
+export const sinceStamp = (stamp: number, now = performance.now()) =>
+  (stampNow(now) - stamp + STAMP_WRAP) % STAMP_WRAP;
+
 /**
  * `sinceEvent` is the last call the other end already heard, so each one crosses exactly once.
- * Pass -1 to send everything the match still remembers.
+ * Pass -1 to send everything the match still remembers. `stamp` is the sender's clock and
+ * `echo` the newest stamp it has heard from the other end, which is how each side measures its
+ * own round trip.
  */
-export function encodeSnapshot(s: MatchState, sinceEvent = -1): ArrayBuffer {
+export function encodeSnapshot(s: MatchState, sinceEvent = -1, stamp = 0, echo = 0): ArrayBuffer {
   const buffer = new ArrayBuffer(SNAPSHOT_BYTES);
   const at = new Cursor(new DataView(buffer));
   const match: Record<string, unknown> = {
     ...s,
+    stamp,
+    echo,
     scoreHome: s.score[0],
     scoreAway: s.score[1],
     shotsHome: s.shots[0],
@@ -252,6 +269,7 @@ export function encodeSnapshot(s: MatchState, sinceEvent = -1): ArrayBuffer {
     passTo: s.puck.passTo ?? -1,
   };
   for (const field of PUCK_FIELDS) at.write(field, puck[field.key]);
+  at.write({ key: 'count', kind: 'u8', scale: 1 }, s.skaters.length);
   for (const p of s.skaters) {
     const values = skaterValues(p);
     for (const field of SKATER) at.write(field, values[field.key]);
@@ -274,13 +292,101 @@ export function encodeSnapshot(s: MatchState, sinceEvent = -1): ArrayBuffer {
 }
 
 /**
+ * A snapshot read off the wire, still in the order of the field tables, so two of them can be
+ * blended field by field without either being poured into a match first.
+ */
+export interface Snapshot {
+  match: unknown[];
+  sides: [unknown[], unknown[]];
+  puck: unknown[];
+  skaters: unknown[][];
+  events: GameEvent[];
+}
+
+const readAll = (at: Cursor, fields: readonly Field[], into?: unknown[]) => {
+  const out = into ?? new Array<unknown>(fields.length);
+  for (let i = 0; i < fields.length; i++) out[i] = at.read(fields[i]);
+  return out;
+};
+
+export function decodeSnapshot(buffer: ArrayBuffer): Snapshot {
+  const at = new Cursor(new DataView(buffer));
+  const match = readAll(at, MATCH);
+  const sides: [unknown[], unknown[]] = [readAll(at, SIDE), readAll(at, SIDE)];
+  const puck = readAll(at, PUCK_FIELDS);
+  const roster = at.read({ key: 'count', kind: 'u8', scale: 1 }) as number;
+  const skaters: unknown[][] = [];
+  for (let i = 0; i < roster; i++) skaters.push(readAll(at, SKATER));
+  const count = at.read({ key: 'count', kind: 'u8', scale: 1 }) as number;
+  const events: GameEvent[] = [];
+  for (let i = 0; i < count; i++) {
+    const values: Record<string, unknown> = {};
+    for (const field of EVENT) values[field.key] = at.read(field);
+    events.push({
+      id: values.id as number,
+      type: values.type as GameEvent['type'],
+      power: values.power as number,
+      ...(values.placed ? { x: values.x as number, z: values.z as number } : {}),
+      ...(values.barDown ? { barDown: true } : {}),
+    });
+  }
+  return { match, sides, puck, skaters, events };
+}
+
+/** The simulation step a snapshot was taken on: the host's timeline, which the watcher follows. */
+export const snapshotTick = (snap: Snapshot) => snap.match[MATCH_INDEX.tick] as number;
+export const snapshotStamp = (snap: Snapshot) => snap.match[MATCH_INDEX.stamp] as number;
+export const snapshotEcho = (snap: Snapshot) => snap.match[MATCH_INDEX.echo] as number;
+
+const blendAll = (
+  fields: readonly Field[],
+  a: unknown[],
+  b: unknown[],
+  t: number,
+  span: number,
+  into: unknown[],
+) => {
+  for (let i = 0; i < fields.length; i++) into[i] = blendField(fields[i], a[i], b[i], t, span);
+  return into;
+};
+
+/**
+ * The match `t` of the way from one snapshot to the next, which are `span` seconds apart. What
+ * moves is drawn between them; what is discrete takes the nearer one. The calls are left out:
+ * they belong to a moment, not to the space between two, and the session hands them over as each
+ * moment is reached.
+ */
+export function blendSnapshots(a: Snapshot, b: Snapshot, t: number, span: number, into?: Snapshot) {
+  const out: Snapshot = into ?? {
+    match: [],
+    sides: [[], []],
+    puck: [],
+    skaters: [],
+    events: [],
+  };
+  blendAll(MATCH, a.match, b.match, t, span, out.match);
+  for (const team of TEAMS) blendAll(SIDE, a.sides[team], b.sides[team], t, span, out.sides[team]);
+  blendAll(PUCK_FIELDS, a.puck, b.puck, t, span, out.puck);
+  const n = Math.min(a.skaters.length, b.skaters.length);
+  out.skaters.length = n;
+  for (let i = 0; i < n; i++)
+    out.skaters[i] = blendAll(SKATER, a.skaters[i], b.skaters[i], t, span, out.skaters[i] ?? []);
+  out.events = [];
+  return out;
+}
+
+const byKey = (fields: readonly Field[], values: unknown[]) => {
+  const out: Record<string, unknown> = {};
+  for (let i = 0; i < fields.length; i++) out[fields[i].key] = values[i];
+  return out;
+};
+
+/**
  * Pose an existing match onto a snapshot, in place. The object identity is kept deliberately:
  * the scene treats a new match object as a cut, and the replay recorder clears its buffer on one.
  */
-export function applySnapshot(s: MatchState, buffer: ArrayBuffer) {
-  const at = new Cursor(new DataView(buffer));
-  const match: Record<string, unknown> = {};
-  for (const field of MATCH) match[field.key] = at.read(field);
+export function poseSnapshot(s: MatchState, snap: Snapshot) {
+  const match = byKey(MATCH, snap.match);
   s.phase = match.phase as Phase;
   s.period = match.period as number;
   s.clock = match.clock as number;
@@ -298,8 +404,7 @@ export function applySnapshot(s: MatchState, buffer: ArrayBuffer) {
   s.shootoutTaken = [match.shootoutTaken0 as number, match.shootoutTaken1 as number];
   s.possession = [match.possessionHome as number, match.possessionAway as number];
   for (const team of TEAMS) {
-    const values: Record<string, unknown> = {};
-    for (const field of SIDE) values[field.key] = at.read(field);
+    const values = byKey(SIDE, snap.sides[team]);
     const side = s.sides[team];
     side.human = values.human as boolean;
     side.controlled = values.controlled as number;
@@ -313,8 +418,7 @@ export function applySnapshot(s: MatchState, buffer: ArrayBuffer) {
     side.passRange = values.passRange as number;
     side.drawInput = values.drawInput as number;
   }
-  const puck: Record<string, unknown> = {};
-  for (const field of PUCK_FIELDS) puck[field.key] = at.read(field);
+  const puck = byKey(PUCK_FIELDS, snap.puck);
   s.puck.x = puck.x as number;
   s.puck.z = puck.z as number;
   s.puck.y = puck.y as number;
@@ -326,9 +430,10 @@ export function applySnapshot(s: MatchState, buffer: ArrayBuffer) {
   s.puck.lockout = puck.lockout as number;
   s.puck.shot = puck.shot as boolean;
   s.puck.passTo = (puck.passTo as number) < 0 ? null : (puck.passTo as number);
-  for (const p of s.skaters) {
-    const values: Record<string, unknown> = {};
-    for (const field of SKATER) values[field.key] = at.read(field);
+  s.skaters.forEach((p, i) => {
+    const raw = snap.skaters[i];
+    if (!raw) return;
+    const values = byKey(SKATER, raw);
     for (const field of SKATER) {
       if (field.key.startsWith('pending')) continue;
       (p as unknown as Record<string, unknown>)[field.key] = values[field.key];
@@ -345,18 +450,11 @@ export function applySnapshot(s: MatchState, buffer: ArrayBuffer) {
       : null;
     // A buffered check is the host's own business; it never reaches the blade on a watcher.
     p.queuedCheck = null;
-  }
-  const count = at.read({ key: 'count', kind: 'u8', scale: 1 }) as number;
-  s.events = [];
-  for (let i = 0; i < count; i++) {
-    const values: Record<string, unknown> = {};
-    for (const field of EVENT) values[field.key] = at.read(field);
-    s.events.push({
-      id: values.id as number,
-      type: values.type as GameEvent['type'],
-      power: values.power as number,
-      ...(values.placed ? { x: values.x as number, z: values.z as number } : {}),
-      ...(values.barDown ? { barDown: true } : {}),
-    });
-  }
+  });
+  s.events = snap.events;
+}
+
+/** Pose a match straight onto what is in the buffer. */
+export function applySnapshot(s: MatchState, buffer: ArrayBuffer) {
+  poseSnapshot(s, decodeSnapshot(buffer));
 }
