@@ -33,6 +33,11 @@ export const runtime = {
   controllerTwo: new Controller(false),
   /** The room this client is in, while it is online. */
   net: null as NetSession | null,
+  /**
+   * Online play has no pause, so the pause button asks whether you mean to leave instead. It
+   * cannot stop the game — the other person is still playing it.
+   */
+  leaving: false,
   audio: new ArenaAudio(),
   /** Recent play, recorded by the simulation loop. */
   recorder: new ReplayBuffer(),
@@ -117,6 +122,7 @@ export function beginOnlineMatch(setup: MatchSetup, myTeam: Team) {
   runtime.audio.unlock();
   runtime.replay = null;
   runtime.myTeam = myTeam;
+  runtime.leaving = false;
   const clubs: [Club, Club] = [
     clubByKey(setup.clubs[0]) ?? DEFAULT_MATCHUP[0],
     clubByKey(setup.clubs[1]) ?? DEFAULT_MATCHUP[1],
@@ -129,7 +135,13 @@ export function beginOnlineMatch(setup: MatchSetup, myTeam: Team) {
 export function leaveOnline() {
   runtime.net?.close();
   runtime.net = null;
+  runtime.leaving = false;
   returnToMenu();
+}
+/** Ask, or stop asking, whether to leave an online match. */
+export function askToLeave(asking: boolean) {
+  runtime.leaving = asking;
+  publish();
 }
 export function returnToMenu() {
   runtime.replay = null;

@@ -2583,3 +2583,19 @@ a {
     font-size: 32px;
   }
 }
+
+/* Online has no pause, so this sits over a game that is still running. */
+.online-overlay {
+  z-index: 6;
+  background: rgba(3, 9, 17, 0.72);
+  backdrop-filter: blur(3px);
+}
+.online-overlay .plate {
+  display: grid;
+  gap: 4px;
+  padding-bottom: 12px;
+}
+.online-overlay .online-lede,
+.online-overlay .room-notice {
+  margin: 14px 20px 6px;
+}

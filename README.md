@@ -20,6 +20,41 @@ npm run preview
 
 Deploy `dist/` to any static host with HTTPS. Localhost is suitable for development. The Gamepad API needs a secure context and an active page; a plain HTTP LAN address may not expose controllers.
 
+## Two players
+
+**2 Players** on the main menu puts somebody on the other bench. Each seat claims its own
+controller: seat one takes the first pad and the keyboard, seat two takes a pad seat one is not
+holding. Both seats map their stick through the same camera, because there is one screen, so up
+is up for whoever is holding one.
+
+A browser hides a controller until it has seen a press from that exact one, so a second pad that
+is plugged in but silent will not appear. Press a face button on it. **Settings → Test
+controller** has a tab per seat with a lit dot for each, which is the quickest way to tell which
+pads the browser can actually see.
+
+## Online
+
+**Online** opens a room for two. Create a game and you get a four-character code and an invite
+link; whoever opens the link lands straight in the lobby. Both players ready up and the host
+drops the puck. Exhibition, 3-on-3, 1-on-1 and shootout are playable online; free skate is
+practice and stays local.
+
+One browser runs the simulation and the other draws what it is told, so there is no second
+simulation to disagree with the first. The host has a small latency advantage, which is the
+trade for never having to reconcile two versions of a match. There is no pause online — the
+other person is still playing — so the pause button asks whether you mean to leave.
+
+Rooms are a Cloudflare Worker (`workers/room.ts`) backed by a Durable Object. It holds who is in
+the room and relays bytes between them; it never simulates hockey.
+
+```sh
+npm run rooms          # rooms on localhost:8787, for development
+npm run rooms:deploy   # deploy them to your own Cloudflare account
+```
+
+`VITE_ROOM_HOST` points the game at a room server: `.env.development` uses the local one and
+`.env.production` the deployed one. Set it to your own worker if you deploy under another name.
+
 ## Skill stick
 
 Connect an Xbox controller by USB or Bluetooth and press any button after opening the page. Open **Settings → Test controller** for live stick/button indicators. Pairing in macOS alone does not mean the browser has exposed the device; keep the game tab active and press A. The game accepts standard-mapped controllers and recognizable four-axis Xbox layouts with missing mapping labels. The test panel explains blocked, unavailable, insecure, and unrecognized inputs; unsupported raw layouts are not guessed.

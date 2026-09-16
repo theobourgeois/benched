@@ -14,6 +14,7 @@ import { Player } from './Player';
 import { IceSpray } from './Effects';
 import {
   driveReplay,
+  askToLeave,
   goalReplayWanted,
   mySide,
   publish,
@@ -212,7 +213,11 @@ function Simulation() {
     // Pausing is a request from a person, not something the physics can decide: with two sticks
     // on the ice the engine cannot know whose pause it is, so it is resolved out here. Either
     // seat can call it.
-    // Nobody gets to freeze somebody else's game, so online play has no local pause.
+    // Nobody gets to freeze somebody else's game, so the pause button asks about leaving instead.
+    if (net && pending.current.some((frame) => frame?.pause)) {
+      pending.current = pending.current.map((frame) => frame && noEdges(frame)) as SideInputs;
+      askToLeave(!runtime.leaving);
+    }
     if (!net && pending.current.some((frame) => frame?.pause)) {
       togglePause(s);
       pending.current = pending.current.map((frame) => frame && noEdges(frame)) as SideInputs;

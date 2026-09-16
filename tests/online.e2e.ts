@@ -111,9 +111,14 @@ test('two browsers meet in a room, drop the puck, and play one match', async ({ 
     )
     .toBeLessThan(2);
 
-  // Leaving tells the other person rather than freezing them.
+  // Leaving tells the other person rather than freezing them, and offers a way out.
   await guestPage.close();
   await expect.poll(async () => (await net(hostPage))?.players, { timeout: 10000 }).toBe(1);
+  await expect(hostPage.getByRole('heading', { name: 'Opponent left' })).toBeVisible({
+    timeout: 10000,
+  });
+  await hostPage.getByRole('button', { name: 'Quit to Menu' }).click();
+  await expect(hostPage.getByRole('navigation', { name: 'Main menu' })).toBeVisible();
   await hostPage.close();
 });
 

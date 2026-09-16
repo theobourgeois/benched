@@ -15,8 +15,15 @@ import { normaliseCode } from '../net/protocol';
  * server to rewrite deep links: `/play/7K2M` would simply be a missing file.
  */
 function inviteCode() {
-  const raw = new URLSearchParams(location.search).get('join');
+  const params = new URLSearchParams(location.search);
+  const raw = params.get('join');
   const code = raw ? normaliseCode(raw) : '';
+  // Consume it. Left in the address bar, quitting to the menu would walk straight back in.
+  if (raw !== null) {
+    params.delete('join');
+    const query = params.toString();
+    history.replaceState(null, '', location.pathname + (query ? `?${query}` : ''));
+  }
   return code.length === 4 ? code : '';
 }
 

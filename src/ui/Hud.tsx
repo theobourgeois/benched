@@ -3,9 +3,11 @@ import { useState, type CSSProperties } from 'react';
 import { attackDirection } from '../game/config';
 import { modeInfo } from '../game/modes';
 import {
+  askToLeave,
   beginGame,
   canInstantReplay,
   continueGame,
+  leaveOnline,
   openInstantReplay,
   pauseGame,
   returnToMenu,
@@ -29,7 +31,7 @@ import { step, useNav } from '../input/menuNavigation';
 import { ControlsScreen } from './Controls';
 import { FeelHud } from './FeelHud';
 import { FpsCounter } from './FpsCounter';
-import { MenuItem, Prompts, TeamLogo } from './kit';
+import { MenuItem, Prompts, TeamLogo, TitleBar } from './kit';
 import { SettingsScreen } from './Settings';
 
 export function formatClock(seconds: number) {
@@ -66,6 +68,7 @@ export function Hud() {
         </div>
       )}
       {s.phase === 'playing' && !cameraUsesAttackUp(settings.camera) && <AttackArrow s={s} />}
+      {runtime.net && <OnlineOverlay />}
       {s.phase !== 'intermission' && s.phase !== 'final' && (
         <>
           <PlayerCard s={s} team={runtime.myTeam} />
@@ -118,6 +121,57 @@ function ScoreBug({ s }: { s: MatchState }) {
       <div className="bug-clock">
         <span>{s.mode === 'shootout' ? shootoutMark(s.shootoutRound) : periodMark(s.period)}</span>
         <strong>{formatClock(s.clock)}</strong>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Online there is nothing to pause, so this covers the two things that still need saying: the
+ * other person has gone, or you pressed the button that used to pause and probably meant to
+ * leave. It never stops the simulation, because the other end is still playing it.
+ */
+function OnlineOverlay() {
+  const { net, leaving } = useGame();
+  const gone = net?.notice;
+  const [index, setIndex] = useState(0);
+  const items = gone
+    ? [{ label: 'Quit to Menu', run: leaveOnline }]
+    : [
+        { label: 'Back to the game', run: () => askToLeave(false) },
+        { label: 'Leave game', run: leaveOnline },
+      ];
+  useNav((a) => {
+    if (!gone && a === 'back') return askToLeave(false);
+    if (a === 'up' || a === 'down') setIndex(step(index, a === 'up' ? -1 : 1, items.length));
+    if (a === 'confirm') items[index].run();
+  });
+  if (!gone && !leaving) return null;
+  return (
+    <div className="screen online-overlay" role="dialog" aria-modal="true" aria-label="Online game">
+      <div className="stage-frame narrow">
+        <div className="plate">
+          <TitleBar crumb="Online" title={gone ? 'Opponent left' : 'Leave game?'} />
+          {gone && <p className="room-notice">{gone}</p>}
+          {!gone && (
+            <p className="online-lede">
+              There is no pause online — the other person is still playing. You can leave, and they
+              will be told.
+            </p>
+          )}
+          <nav className="menu-list" aria-label="Online options">
+            {items.map((item, i) => (
+              <MenuItem
+                key={item.label}
+                focused={i === index}
+                onFocus={() => setIndex(i)}
+                onSelect={item.run}
+              >
+                {item.label}
+              </MenuItem>
+            ))}
+          </nav>
+        </div>
       </div>
     </div>
   );
