@@ -430,8 +430,8 @@ export function reachLimb(
     pole,
     a,
     b,
-    limb === 'arm' ? 0.18 : 0.08,
-    limb === 'arm' ? 2.55 : 2.65,
+    limb === 'arm' ? 0.18 : 0.12,
+    limb === 'arm' ? 2.55 : 2.5,
     _mid,
     _end,
     _hinge,
@@ -557,7 +557,7 @@ export function holdStick(
   forearm.getWorldQuaternion(_forearmQ);
   _rollQ.copy(_forearmQ).multiply(rig.bind[`hand${side}`]);
   _handQ.premultiply(_inverseHand.copy(_rollQ).invert());
-  limitWrist(_handQ);
+  limitWrist(_handQ, 0.65);
   _handQ.premultiply(_rollQ);
   // Recompute the wrist from the constrained palm, so limiting rotation cannot open the grip.
   _fingersDir.set(0, 1, 0).applyQuaternion(_handQ);

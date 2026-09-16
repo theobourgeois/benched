@@ -10,7 +10,7 @@ export const RULES = {
   periodSeconds: 300,
   periods: 3,
   faceoffSeconds: 3,
-  goalSeconds: 4,
+  goalSeconds: 8,
   fixedStep: 1 / 120,
 };
 /** Visual puck size. A real puck is 3.8 cm radius × 2.5 cm thick; this is a bit larger so it still reads from the broadcast camera. */
@@ -24,9 +24,11 @@ export const PHYSICS = {
   /** Top skating speed. Real NHL pace is about 9 m/s; this runs a touch hotter for arcade feel. */
   maxSpeed: 9.6,
   hustleSpeed: 11.2,
-  /** Carrying the puck costs a little top end, so a chaser can close but not walk them down. */
+  /** Carrying the puck costs a little top end in traffic. A rushing carrier with a beaten
+   * defender behind them strides at full speed. */
   carrySpeed: 0.965,
-  /** Hustling with the puck costs more; a chasing defender can run a carrier down. */
+  /** Hustling with the puck costs more in traffic. Beaten defenders on a rush cannot exceed
+   * open-ice hustle, so they cannot outskate a breakaway from behind. */
   carryHustle: 0.92,
   /** Forward push in m/s². Hustle earns a higher top end, never a faster first stride. */
   skateAcceleration: 12,
@@ -54,6 +56,10 @@ export const PHYSICS = {
   puckDrag: 0.24,
   playerRadius: 0.58,
   pickupRadius: 0.88,
+  /** Opponent must be this close to smother a tape-to-tape pass; occupying the lane is not enough. */
+  passIntercept: 0.42,
+  /** Teammates can take a lifted pass this high, so a hop over a body still lands on tape. */
+  passCatchHeight: 1.12,
   shotSpeed: 34,
   /** Share of the shooter's skating velocity a released puck carries. */
   puckCarry: 0.23,
@@ -204,6 +210,7 @@ export const EMPTY_INPUT = {
   hustle: false,
   backskate: false,
   pause: false,
+  celly: null,
 };
 export const attackDirection = (team: number, period: number) =>
   (team === 0 ? 1 : -1) * (period === 2 ? -1 : 1);

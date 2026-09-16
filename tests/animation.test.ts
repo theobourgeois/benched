@@ -188,7 +188,7 @@ describe('hockey motion timing', () => {
       shotStyle: 'backhand',
       shotSide: -0.6,
       shotReach: 0.7,
-      shotDuration: 0.34,
+      shotDuration: 0.6,
     });
     s.puck.owner = p.id;
     p.stickSide = 0.6;

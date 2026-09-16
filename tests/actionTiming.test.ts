@@ -36,13 +36,15 @@ describe('charged-shot contact timing', () => {
       expect(s.shots[p.team]).toBe(0);
     }
     const beforeContact = sampleHockeyAction(p, shotWindup(p, 0), createHockeyAction());
-    expect(beforeContact.bladeLift).toBeLessThan(0.001);
+    // The blade is still descending on the last pre-contact frame; it reaches the ice at release.
+    expect(beforeContact.bladeLift).toBeLessThan(0.08);
     s.tick++;
     advancePendingShot(s, p, 1 / 120);
     expect(p.pendingShot).toBeNull();
     expect(s.puck.owner).toBeNull();
     expect(s.shots[p.team]).toBe(1);
     expect(p.shotStyle).toBe('slap');
+    expect(sampleHockeyAction(p, 0, createHockeyAction()).bladeLift).toBe(0);
     advancePendingShot(s, p, 1);
     expect(s.shots[p.team]).toBe(1);
   });

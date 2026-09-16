@@ -31,6 +31,7 @@ import { screenInputToRink } from '../input/coordinates';
 import { cameraFraming } from './camera';
 import { playerLocator } from './locator';
 import { PUCK, RULES } from '../game/config';
+import { hasActiveCelly } from '../game/cellys';
 import type { InputFrame, Phase } from '../game/types';
 import { labHooks } from './animationReview';
 /** Dev-only animation lab: drives the subject, the close-up camera, overlays and captures. */
@@ -59,6 +60,7 @@ const noEdges = (input: InputFrame) => ({
   check: false,
   switchPlayer: false,
   pause: false,
+  celly: null,
 });
 function Simulation() {
   const accumulator = useRef(0),
@@ -205,7 +207,8 @@ function Simulation() {
     else if (
       goalReplay.current &&
       s.phase === 'goal' &&
-      s.countdown <= RULES.goalSeconds - GOAL_REPLAY.celebrate
+      s.countdown <= RULES.goalSeconds - GOAL_REPLAY.celebrate &&
+      !hasActiveCelly(s)
     ) {
       goalReplay.current = false;
       startGoalReplay();

@@ -6,6 +6,7 @@ export type Phase = 'menu' | 'faceoff' | 'playing' | 'goal' | 'intermission' | '
 export type DekeKind =
   'stride' | 'burst' | 'protect' | 'jump' | 'throughLegs' | 'windmill' | 'spin';
 export type DekeSpecial = 'jump' | 'throughLegs' | 'windmill' | 'spin';
+export type CellyKind = 'helicopter' | 'jump' | 'limp' | 'dance';
 export interface Vec2 {
   x: number;
   z: number;
@@ -66,6 +67,8 @@ export interface Skater extends Vec2 {
   shotDuration?: number;
   shotSide?: number;
   shotReach?: number;
+  /** Windup load held at release; the pose unwinds it through the shot instead of snapping. */
+  shotLoad?: number;
   /** Window after a tape-to-tape catch where a one-timer is live. */
   passTimer: number;
   /** Belly-flop block; player is sliding, not ragdolled. */
@@ -78,6 +81,9 @@ export interface Skater extends Vec2 {
   dekeTimer: number;
   /** Player's right is +1, left is −1. */
   dekeDir: number;
+  /** Post-goal celebration clip. */
+  cellyKind: CellyKind | null;
+  cellyTimer: number;
 }
 export interface Puck extends Vec2 {
   y: number;
@@ -88,6 +94,8 @@ export interface Puck extends Vec2 {
   lastTouch: Team | null;
   lockout: number;
   shot: boolean;
+  /** Aimed tape-to-tape receiver while the pass is still live; dumps and shots leave this empty. */
+  passTo: number | null;
 }
 export interface InputFrame {
   moveX: number;
@@ -130,6 +138,8 @@ export interface InputFrame {
   hustle: boolean;
   backskate: boolean;
   pause: boolean;
+  /** Face-button celly after a goal: A chopper, X leap, Y dance, B limp. */
+  celly: CellyKind | null;
 }
 export interface GameEvent {
   id: number;

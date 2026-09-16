@@ -506,7 +506,7 @@ test('a goal rolls a skippable replay, and pause opens a scrubbable instant repl
   );
   await expect(page.locator('.goal-call')).toBeVisible();
   const goalReplay = page.getByRole('region', { name: 'Goal replay' });
-  await expect(goalReplay).toBeVisible({ timeout: 5000 });
+  await expect(goalReplay).toBeVisible({ timeout: 10000 });
   await expect(page.locator('.replay-bug')).toContainText('REPLAY');
   await page.getByRole('button', { name: /Skip replay/ }).click();
   await expect(goalReplay).toHaveCount(0);

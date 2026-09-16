@@ -301,6 +301,7 @@ export function createRagdoll(
   stick: StickParts,
   spec: BladeSpec,
   skater: Skater,
+  opts?: { limp?: boolean },
 ): Ragdoll | null {
   if (!R || !world) return null;
   const slot = claimSlot();
@@ -312,14 +313,21 @@ export function createRagdoll(
   rig.root.updateMatrixWorld(true);
   const at = (b: BoneName) => rig.bones[b].getWorldPosition(new THREE.Vector3());
 
+  const limp = opts?.limp === true;
   const base = new THREE.Vector3(skater.vx, 0, skater.vz);
   const dir = new THREE.Vector3(Math.sin(skater.fallAngle), 0, Math.cos(skater.fallAngle));
-  const drive = Math.max(3, base.dot(dir));
+  const drive = limp ? Math.max(0.4, base.length() * 0.25) : Math.max(3, base.dot(dir));
   const velocityAt = (height: number) =>
     base
       .clone()
-      .addScaledVector(dir, drive * (0.75 * (height / 1.3) - 0.4))
-      .add(_v2.set(jitter(0.5), jitter(0.2), jitter(0.5)));
+      .addScaledVector(dir, drive * (limp ? 0.15 : 0.75 * (height / 1.3) - 0.4))
+      .add(
+        _v2.set(
+          jitter(limp ? 1.2 : 0.5),
+          jitter(limp ? 0.8 : 0.2) + (limp ? 1.4 : 0),
+          jitter(limp ? 1.2 : 0.5),
+        ),
+      );
 
   const bodies = new Map<BoneName, { body: RigidBody; p: THREE.Vector3; q: THREE.Quaternion }>();
   const parts: Part[] = [];
@@ -340,7 +348,15 @@ export function createRagdoll(
         .setCcdEnabled(true)
         .setAdditionalSolverIterations(4),
     );
-    if (partSpec.bone === 'pelvis') body.setAngvel({ x: jitter(1.5), y: jitter(2.5), z: jitter(1.5) }, true);
+    if (partSpec.bone === 'pelvis')
+      body.setAngvel(
+        {
+          x: jitter(limp ? 5 : 1.5),
+          y: jitter(limp ? 6 : 2.5),
+          z: jitter(limp ? 5 : 1.5),
+        },
+        true,
+      );
     for (const shape of shapesFor(partSpec.bone, at, q))
       w.createCollider(
         colliderFor(api, shape, p, q)
@@ -352,10 +368,7 @@ export function createRagdoll(
       );
     if (partSpec.parent && partSpec.limits) {
       const parent = bodies.get(partSpec.parent)!;
-      const anchor = p
-        .clone()
-        .sub(parent.p)
-        .applyQuaternion(_q.copy(parent.q).invert());
+      const anchor = p.clone().sub(parent.p).applyQuaternion(_q.copy(parent.q).invert());
       const joint = w.createImpulseJoint(
         api.JointData.spherical(anchor, { x: 0, y: 0, z: 0 }),
         parent.body,
@@ -368,7 +381,12 @@ export function createRagdoll(
       // them on any axis. A zero-velocity motor is plain joint damping.
       const raw = (w.impulseJoints as unknown as { raw: RawJoints }).raw;
       axes.forEach((axis, k) => {
-        raw.jointSetLimits(joint.handle, axis, partSpec.limits![k * 2], partSpec.limits![k * 2 + 1]);
+        raw.jointSetLimits(
+          joint.handle,
+          axis,
+          partSpec.limits![k * 2],
+          partSpec.limits![k * 2 + 1],
+        );
         raw.jointConfigureMotorVelocity(joint.handle, axis, 0, JOINT_DAMPING);
       });
     }

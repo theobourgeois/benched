@@ -10,8 +10,8 @@ export const INSTANT_LOOKBACK = 6;
 export const REPLAY_SPEEDS = [0.25, 0.5, 1] as const;
 /** Goal replay: the build-up at full speed, then the finish in slow motion. */
 export const GOAL_REPLAY = {
-  /** Live celebration before the replay rolls. */
-  celebrate: 1.4,
+  /** Live celebration before the replay rolls. Long enough to watch a celly. */
+  celebrate: 5,
   before: 4,
   after: 0.9,
   /** Slow motion starts this long before the puck crosses the line. */
@@ -186,6 +186,7 @@ export function sampleReplay(view: MatchState, frames: ReplayFrame[], time: numb
     p.shotDuration = action.shotDuration;
     p.shotSide = action.shotSide;
     p.shotReach = action.shotReach;
+    p.shotLoad = action.shotLoad;
     if (to.shotTimer > from.shotTimer && t < 1) p.shotTimer = from.shotTimer;
     if (to.checkTimer > from.checkTimer && t < 1) p.checkTimer = from.checkTimer;
     if ((to.saveTimer ?? 0) > (from.saveTimer ?? 0) && t < 1) {

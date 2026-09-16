@@ -11,6 +11,10 @@ export type DekePose = {
   lift: number;
   cut: number;
   surge: number;
+  /** Head lead into the move, in radians: sells the fake before the body commits. */
+  headYaw: number;
+  /** Extra knee bend through the move, 0 to 1. */
+  dip: number;
 };
 
 const REST_ANGLE = Math.atan2(STICK.restSide - STICK.pivotSide, STICK.restReach - STICK.pivotReach);
@@ -39,19 +43,19 @@ function mix(a: number, b: number, t: number) {
 export function dekeDuration(kind: DekeKind): number {
   switch (kind) {
     case 'stride':
-      return 0.44;
+      return 0.56;
     case 'burst':
-      return 0.4;
+      return 0.48;
     case 'protect':
-      return 0.42;
+      return 0.52;
     case 'jump':
       return 0.5;
     case 'throughLegs':
-      return 0.56;
+      return 0.72;
     case 'windmill':
-      return 0.52;
+      return 0.68;
     case 'spin':
-      return 0.64;
+      return 0.72;
     default: {
       const _never: never = kind;
       return _never;
@@ -81,56 +85,67 @@ export function classifyOneTouch(angle: number, moveX: number, moveZ: number) {
 
 function stridePose(u: number, dir: number): DekePose {
   const d = dir || 1;
-  const sweep = ease(clamp((u - 0.04) / 0.26, 0, 1));
-  const recover = ease(clamp((u - 0.48) / 0.52, 0, 1));
-  const wide = sweep * (1 - recover * 0.82);
-  const peak = fromPivot(REST_ANGLE - d * 1.05, 0.9);
-  const gather = pulse(u, 0.2);
+  // NHL 14 one-touch side: snap the puck wide, sit on the edge, then recover.
+  const snap = ease(clamp(u / 0.16, 0, 1));
+  const recover = ease(clamp((u - 0.52) / 0.48, 0, 1));
+  const wide = snap * (1 - recover);
+  const gather = pulse(u, 0.18);
   return {
-    side: mix(STICK.restSide, peak.side, wide),
-    reach: mix(STICK.restReach, peak.reach, wide) - 0.18 * gather + 0.1 * pulse(u, 0.42),
-    hop: 0.22 * pulse(u, 0.3),
-    yaw: d * 0.16 * pulse(u, 0.34),
-    lean: d * 0.28 * pulse(u, 0.36),
-    lift: 0.03 * pulse(u, 0.3),
-    cut: 16 * pulse(u, 0.28),
-    surge: 7 * pulse(u, 0.4),
+    side: mix(STICK.restSide, d > 0 ? -0.88 : 1.28, wide),
+    reach: mix(STICK.restReach, d > 0 ? 1.04 : 1.42, wide) - 0.04 * gather,
+    hop: 0.16 * pulse(u, 0.28),
+    yaw: d * 0.42 * pulse(u, 0.32),
+    lean: d * 0.72 * pulse(u, 0.34),
+    lift: 0.03 * pulse(u, 0.28),
+    cut: 22 * pulse(u, 0.3),
+    surge: 10 * pulse(u, 0.38),
+    // The head fakes away from the cut first, then leads into it.
+    headYaw: -d * 0.5 * pulse(u, 0.14) + d * 0.72 * pulse(u, 0.5),
+    dip: 0.45 * pulse(u, 0.28) + 0.35 * pulse(u, 0.55),
   };
 }
 
 function burstPose(u: number, dir: number): DekePose {
-  const tuck = pulse(u, 0.38);
+  const d = dir;
+  const lunge = pulse(u, 0.32);
+  const gather = pulse(u, 0.16);
   return {
-    side: mix(STICK.restSide, dir * -0.12, tuck * 0.7),
-    reach: STICK.restReach + 0.4 * pulse(u, 0.34) - 0.08 * pulse(u, 0.18),
-    hop: 0.14 * pulse(u, 0.28),
-    yaw: dir * 0.08 * tuck,
-    lean: dir * 0.12 * tuck,
-    lift: 0.045 * pulse(u, 0.3),
-    cut: 5 * Math.abs(dir) * pulse(u, 0.3),
-    surge: 18 * pulse(u, 0.32),
+    side: mix(STICK.restSide, STICK.restSide * 0.25 + d * -0.22, lunge),
+    reach: STICK.restReach + 0.58 * pulse(u, 0.34) - 0.14 * gather,
+    hop: 0.12 * pulse(u, 0.26),
+    yaw: d * 0.14 * lunge,
+    lean: d * 0.28 * lunge,
+    lift: 0.03 * pulse(u, 0.28),
+    cut: 12 * pulse(u, 0.3),
+    surge: 24 * pulse(u, 0.28),
+    headYaw: 0.22 * lunge,
+    dip: 0.62 * gather + 0.22 * lunge,
   };
 }
 
 function protectPose(u: number, dir: number): DekePose {
-  const hold = ease(clamp(u / 0.26, 0, 1)) * (1 - ease(clamp((u - 0.72) / 0.28, 0, 1)) * 0.45);
+  const hold = ease(clamp(u / 0.18, 0, 1)) * (1 - ease(clamp((u - 0.55) / 0.45, 0, 1)));
   const shield = dir || -1;
   return {
-    side: mix(STICK.restSide, shield < 0 ? 0.9 : -0.62, hold),
-    reach: mix(STICK.restReach, 0.4, hold),
-    hop: 0.04 * pulse(u, 0.22),
-    yaw: shield * -0.22 * hold,
-    lean: shield * -0.32 * hold,
+    side: mix(STICK.restSide, shield < 0 ? 1.22 : -0.92, hold),
+    reach: mix(STICK.restReach, 0.92, hold),
+    hop: 0.05 * pulse(u, 0.2),
+    yaw: shield * -0.78 * hold,
+    lean: shield * -0.62 * hold,
     lift: 0,
-    cut: 4 * pulse(u, 0.24),
-    surge: -9 * pulse(u, 0.22),
+    cut: 9 * pulse(u, 0.22),
+    surge: -14 * pulse(u, 0.2),
+    // Eyes over the shoulder, reading the defender being shielded off.
+    headYaw: shield * -0.72 * hold,
+    dip: 0.72 * hold,
   };
 }
 
 function jumpPose(u: number, dir: number): DekePose {
-  const crouch = u < 0.16 ? ease(u / 0.16) : 0;
+  const crouch = pulse(u, 0.14) * (1 - ease((u - 0.16) / 0.24));
   const flight = u < 0.16 ? 0 : Math.sin(Math.PI * clamp((u - 0.16) / 0.58, 0, 1));
-  const hop = flight * 0.36 - crouch * 0.03;
+  // Compress at the knees, not by moving both skate blades below the ice.
+  const hop = flight * 0.36;
   return {
     side: mix(STICK.restSide, STICK.restSide - dir * 0.22, pulse(u, 0.45)),
     reach: STICK.restReach - 0.28 * pulse(u, 0.2) + 0.22 * pulse(u, 0.58),
@@ -140,6 +155,8 @@ function jumpPose(u: number, dir: number): DekePose {
     lift: Math.max(0, hop) * 0.55,
     cut: 6 * pulse(u, 0.34),
     surge: 11 * pulse(u, 0.4),
+    headYaw: dir * 0.22 * flight,
+    dip: crouch * 0.6 + flight * 0.25 + 0.3 * pulse(clamp((u - 0.7) / 0.3, 0, 1), 0.3),
   };
 }
 
@@ -178,6 +195,8 @@ function throughLegsPose(u: number, dir: number): DekePose {
     lift: 0.02 * pulse(u, 0.5),
     cut: 8 * pulse(u, 0.5),
     surge: 10 * pulse(u, 0.54),
+    headYaw: d * 0.3 * pulse(u, 0.5),
+    dip: 0.5 * pulse(u, 0.4),
   };
 }
 
@@ -193,26 +212,31 @@ function windmillPose(u: number, dir: number): DekePose {
     reach: blade.reach,
     hop: 0.1 * pulse(u, 0.38),
     yaw: d * 0.2 * pulse(u, 0.4),
-    lean: d * 0.24 * Math.sin(Math.PI * u),
+    lean: d * 0.3 * Math.sin(Math.PI * u) ** 2,
     lift: 0.035 * pulse(u, 0.36),
     cut: 12 * pulse(u, 0.32),
     surge: 6 * pulse(u, 0.42),
+    headYaw: d * 0.4 * Math.sin(Math.PI * u) ** 2,
+    dip: 0.3 * Math.sin(Math.PI * u) ** 2,
   };
 }
 
 function spinPose(u: number, dir: number): DekePose {
   const d = dir || 1;
-  const spin = ease(u);
-  const blade = fromPivot(REST_ANGLE - d * spin * Math.PI * 0.35, 0.74);
+  const carve = Math.sin(Math.PI * u) ** 2;
   return {
-    side: blade.side,
-    reach: blade.reach,
-    hop: 0.08 * pulse(u, 0.42),
-    yaw: d * Math.PI * 2 * spin,
-    lean: d * 0.18 * Math.sin(Math.PI * u),
-    lift: 0.02 * pulse(u, 0.4),
+    // Puck stays on the blade in front of the body; the 360 is the facing, not a stick sweep.
+    side: STICK.restSide,
+    reach: STICK.restReach - 0.06 * carve,
+    hop: 0.06 * pulse(u, 0.35),
+    yaw: d * Math.PI * 2 * u,
+    lean: d * 0.48 * carve,
+    lift: 0.015 * pulse(u, 0.38),
     cut: 0,
-    surge: 5 * pulse(u, 0.36),
+    surge: 8 * pulse(u, 0.3),
+    // Head leads the turn a little, then settles — no fake into the middle first.
+    headYaw: d * 0.35 * Math.sin(Math.PI * u),
+    dip: 0.55 * carve,
   };
 }
 

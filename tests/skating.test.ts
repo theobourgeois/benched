@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createMatch, launchCheck, stepMatch } from '../src/game/engine';
-import { skateVelocity } from '../src/game/skating';
+import { skateVelocity, backcheckScales, isBackcheckingRush } from '../src/game/skating';
 import { decideAI } from '../src/game/ai';
 import { startDeke, stepDeke } from '../src/game/dekes';
 import { EMPTY_INPUT, PHYSICS, RULES } from '../src/game/config';
@@ -92,6 +92,8 @@ describe('momentum skating', () => {
     expect(Math.sin(p.angle)).toBeLessThan(-0.9);
   });
   it('lets a chaser close on an equally hustling carrier without a catch-up boost', () => {
+    // Traffic stride: the carry-hustle tax is the only close. A beaten defender on a rush is
+    // capped separately so this does not become a breakaway turbo.
     const defender = skater(8),
       carrier = skater(8);
     let gap = 3;
@@ -371,5 +373,70 @@ describe('CPU difficulty', () => {
     expect(look('legend', 1)).toBe(true);
     expect(look('rookie', 1)).toBe(false);
     expect(look('rookie', 0)).toBe(true);
+  });
+});
+
+describe('breakaway backcheck', () => {
+  function rush(difficulty: Difficulty = 'allStar') {
+    const s = createMatch();
+    s.phase = 'playing';
+    s.difficulty = difficulty;
+    const carrier = s.skaters[0],
+      chaser = s.skaters[6];
+    Object.assign(carrier, { x: 3, z: 0, vx: 10, vz: 0, angle: Math.PI / 2, stamina: 1 });
+    Object.assign(chaser, { x: 0, z: 0, vx: 10, vz: 0, angle: Math.PI / 2, stamina: 1 });
+    Object.assign(s.puck, { owner: carrier.id, x: carrier.x, z: carrier.z, vx: carrier.vx });
+    for (const p of s.skaters) {
+      if (p.id === carrier.id || p.id === chaser.id) continue;
+      Object.assign(p, {
+        x: p.role === 'G' ? (p.team === 0 ? -26 : 26) : 22,
+        z: p.team === 0 ? 11 : -11,
+        vx: 0,
+        vz: 0,
+      });
+    }
+    return { s, carrier, chaser };
+  }
+
+  it('treats an empty-handed skater behind a rushing carrier as a backcheck', () => {
+    const { s, carrier, chaser } = rush();
+    expect(isBackcheckingRush(s, chaser)).toBe(true);
+    expect(isBackcheckingRush(s, carrier)).toBe(false);
+    chaser.x = 6;
+    expect(isBackcheckingRush(s, chaser)).toBe(false);
+  });
+
+  it('does not let a backchecker outrun a hustling carrier from behind', () => {
+    const { s, carrier, chaser } = rush();
+    let gap = carrier.x - chaser.x;
+    for (let i = 0; i < 240; i++) {
+      const cap = backcheckScales(s, chaser, 1.14, 1.14);
+      skateVelocity(chaser, 1, 0, true, false, dt, false, PHYSICS.edgeGrip, cap.push, cap.speed);
+      skateVelocity(carrier, 1, 0, true, false, dt, false);
+      carrier.x += carrier.vx * dt;
+      chaser.x += chaser.vx * dt;
+      s.puck.x = carrier.x;
+      gap = carrier.x - chaser.x;
+    }
+    expect(gap).toBeGreaterThan(2.7);
+    expect(speed(chaser)).toBeLessThanOrEqual(speed(carrier) + 0.08);
+  });
+
+  it('does not let a Legend CPU run down a rushing carrier', () => {
+    const { s, carrier, chaser } = rush('legend');
+    const start = carrier.x - chaser.x;
+    for (let i = 0; i < 240; i++) stepMatch(s, { ...EMPTY_INPUT, moveX: 1, hustle: true });
+    expect(carrier.x - chaser.x).toBeGreaterThan(start - 0.45);
+    expect(speed(chaser)).toBeLessThanOrEqual(PHYSICS.hustleSpeed + 0.12);
+  });
+
+  it('still lets a backchecker close if the carrier is not rushing', () => {
+    const { s, carrier, chaser } = rush();
+    Object.assign(carrier, { vx: 1, vz: 0 });
+    Object.assign(chaser, { vx: 1, vz: 0 });
+    expect(isBackcheckingRush(s, chaser)).toBe(false);
+    const start = carrier.x - chaser.x;
+    for (let i = 0; i < 180; i++) stepMatch(s, EMPTY_INPUT);
+    expect(carrier.x - chaser.x).toBeLessThan(start - 0.6);
   });
 });

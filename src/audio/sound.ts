@@ -91,7 +91,10 @@ export class ArenaAudio {
     }
     const p = match.skaters[match.controlled];
     const speed =
-      (match.phase === 'playing' || match.phase === 'goal') && p.downTimer <= 0 && p.diveTimer <= 0
+      (match.phase === 'playing' || match.phase === 'goal') &&
+      p.downTimer <= 0 &&
+      p.diveTimer <= 0 &&
+      p.cellyKind !== 'limp'
         ? Math.hypot(p.vx, p.vz) * scale
         : 0;
     this.skateGain!.gain.setTargetAtTime(

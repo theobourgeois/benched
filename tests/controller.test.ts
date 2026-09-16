@@ -94,7 +94,7 @@ describe('Xbox skill stick', () => {
       chip: false,
     });
   });
-  it('windmills when RB is tapped onto a held skill-stick deke, and spins on RB plus LT', () => {
+  it('windmills when RB is tapped onto a held skill-stick deke, and spins on an LT tap', () => {
     const pad = setupPad(),
       mill = new Controller();
     pad.axes[2] = 1;
@@ -104,10 +104,25 @@ describe('Xbox skill stick', () => {
 
     const spin = new Controller();
     pad.axes[2] = 0;
-    pad.buttons[5].pressed = true;
-    spin.read(1 / 60, true);
+    pad.buttons[5].pressed = false;
     pad.buttons[6].pressed = true;
-    expect(spin.read(1 / 60, true)).toMatchObject({ dekeSpecial: 'spin', chip: false });
+    expect(spin.read(1 / 60, true)).toMatchObject({ dekeSpecial: null, backskate: true });
+    pad.buttons[6].pressed = false;
+    expect(spin.read(1 / 60, true)).toMatchObject({
+      dekeSpecial: 'spin',
+      chip: false,
+      backskate: false,
+    });
+  });
+  it('holds LT to backskate and does not spin after a long press', () => {
+    const pad = setupPad(),
+      hold = new Controller();
+    pad.buttons[6].pressed = true;
+    expect(hold.read(1 / 60, true)).toMatchObject({ backskate: true, dekeSpecial: null });
+    for (let i = 0; i < 20; i++) hold.read(1 / 60, true);
+    expect(hold.read(1 / 60, true)).toMatchObject({ backskate: true, dekeSpecial: null });
+    pad.buttons[6].pressed = false;
+    expect(hold.read(1 / 60, true).dekeSpecial).toBeNull();
   });
   it('dives on both bumpers and checks with a skill-stick flick', () => {
     const pad = setupPad(),

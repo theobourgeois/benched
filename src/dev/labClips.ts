@@ -3,10 +3,12 @@
 // become clips too.
 import { PHYSICS, PUCK, STICK } from '../game/config';
 import { dekeDuration, sampleDeke } from '../game/dekes';
+import { cellyDuration } from '../game/cellys';
 import { GOALIE_SAVE_TIME, SHOT_DOWNSWING } from '../game/actionTiming';
-import type { DekeKind, Skater } from '../game/types';
+import type { CellyKind, DekeKind, Skater } from '../game/types';
 
-export type ClipGroup = 'Skating' | 'Puck' | 'Shots' | 'Dekes' | 'Contact' | 'Goalie' | 'Takes';
+export type ClipGroup =
+  'Skating' | 'Puck' | 'Shots' | 'Dekes' | 'Cellys' | 'Contact' | 'Goalie' | 'Takes';
 /** Skater fields a clip drives. Everything else is reset to REST_SKATER first. */
 export type ClipSkater = Partial<Omit<Skater, 'id' | 'team' | 'role' | 'number' | 'name'>>;
 /** A point in the skater's frame: x to their left, y up, z ahead. */
@@ -56,6 +58,7 @@ export const REST_SKATER = {
   saveHeight: 0,
   shotStyle: 'wrist',
   shotDuration: 0.34,
+  shotLoad: 0,
   shotSide: STICK.restSide,
   shotReach: STICK.restReach,
   stickSide: STICK.restSide,
@@ -65,6 +68,8 @@ export const REST_SKATER = {
   dekeKind: null,
   dekeTimer: 0,
   dekeDir: 1,
+  cellyKind: null,
+  cellyTimer: 0,
   fallAngle: 0.6,
   passTimer: 0,
 } satisfies ClipSkater;
@@ -114,7 +119,7 @@ function shotClip(style: ShotStyle, label: string, look: string): LabClip {
   const { load, charge, speed, lift, side } = SHOT[style];
   const downswing = style === 'slap' ? SHOT_DOWNSWING : 0;
   const releaseAt = load + downswing;
-  const duration = style === 'pass' ? 0.28 : 0.34;
+  const duration = style === 'pass' ? 0.45 : 0.6;
   return clip({
     id: style === 'pass' || style === 'backhand' ? style : `${style}-shot`,
     label,
@@ -133,6 +138,8 @@ function shotClip(style: ShotStyle, label: string, look: string): LabClip {
         shotStyle: style,
         shotDuration: duration,
         shotTimer: released ? Math.max(0, duration - since) : 0,
+        // What the windup was holding at release; the pose unwinds it through the shot.
+        shotLoad: released ? (style === 'slap' ? 0 : charge) : 0,
         pendingShot:
           style === 'slap' && t >= load && !released
             ? { timer: releaseAt - t, load: 1, power: 1, aim: 0, height: 0.5, tick: 0 }
@@ -210,6 +217,31 @@ function dekeClip(kind: DekeKind, dir: number, id: string, label: string, look: 
         stickSide: side,
         stickReach: reach,
       });
+    },
+  });
+}
+
+function cellyClip(kind: CellyKind, id: string, label: string, look: string) {
+  const lead = 0.15,
+    length = cellyDuration(kind);
+  return clip({
+    id,
+    label,
+    group: 'Cellys',
+    duration: lead + length + 0.25,
+    loop: false,
+    look,
+    frame(t) {
+      const into = t - lead;
+      const on = into >= 0 && into < length;
+      return hold(
+        {
+          ...skate(t, kind === 'dance' ? 1.4 : 3.2, kind === 'dance' ? 0.85 : 0.2),
+          cellyKind: on ? kind : null,
+          cellyTimer: on ? into : 0,
+        },
+        'none',
+      );
     },
   });
 }
@@ -413,7 +445,7 @@ export const CLIPS: LabClip[] = [
     1,
     'deke-right',
     'One-touch cut right',
-    'Hard lateral push off the outside skate, blade pulls the puck across.',
+    'Hard lateral push off the outside skate, puck yanked wide across the body.',
   ),
   dekeClip(
     'stride',
@@ -422,13 +454,19 @@ export const CLIPS: LabClip[] = [
     'One-touch cut left',
     'Mirror of the right cut. Compare them: they should be symmetrical.',
   ),
-  dekeClip('burst', 1, 'deke-burst', 'Burst', 'Chin up, big first push, puck pushed ahead.'),
+  dekeClip(
+    'burst',
+    1,
+    'deke-burst',
+    'Burst',
+    'Puck punched ahead of the skates, body lunges through the gap.',
+  ),
   dekeClip(
     'protect',
     1,
     'deke-protect',
     'Protect',
-    'Body turns between the defender and the puck; blade drawn in.',
+    'Shoulders turn between the defender and the puck; blade drawn in to the hip.',
   ),
   dekeClip(
     'jump',
@@ -456,7 +494,31 @@ export const CLIPS: LabClip[] = [
     1,
     'deke-spin',
     'Spin-o-rama',
-    'Full turn on the edges, puck kept on the blade, no limbs through the body.',
+    'Immediate 360 on the edges, puck stays on the blade in front. No gather to center.',
+  ),
+  cellyClip(
+    'helicopter',
+    'celly-helicopter',
+    'Celly · helicopter',
+    'Stick spins overhead like a rotor; the body leans back and turns under it.',
+  ),
+  cellyClip(
+    'jump',
+    'celly-jump',
+    'Celly · leap',
+    'Deep crouch, then a huge jump with a spin and a stick raised over the head.',
+  ),
+  cellyClip(
+    'limp',
+    'celly-limp',
+    'Celly · limp',
+    'The skater goes slack. Live play uses the knockdown ragdoll; here the pose collapses.',
+  ),
+  cellyClip(
+    'dance',
+    'celly-dance',
+    'Celly · dance',
+    'Hips, knees and stick all moving on different beats; a little too much.',
   ),
   clip({
     id: 'check',
@@ -564,7 +626,14 @@ export interface TakeFrame {
   puck: { x: number; y: number; z: number; owned: boolean };
   charge: number;
 }
-const DISCRETE = new Set(['dekeKind', 'shotStyle', 'pendingShot', 'checkLanded', 'queuedCheck']);
+const DISCRETE = new Set([
+  'dekeKind',
+  'cellyKind',
+  'shotStyle',
+  'pendingShot',
+  'checkLanded',
+  'queuedCheck',
+]);
 function mixSkater(a: ClipSkater, b: ClipSkater, w: number): ClipSkater {
   const out: Record<string, unknown> = {};
   for (const key of Object.keys(a) as (keyof ClipSkater)[]) {

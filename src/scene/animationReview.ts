@@ -1,6 +1,6 @@
 import type { SkaterRig } from './skaterModel';
 import type { StickParts } from './stick';
-import type { HockeyAction } from './hockeyMotion';
+import { createHockeyAction, type HockeyAction } from './hockeyMotion';
 
 /** Populated only in development. Used by the browser rig checks and Blender clip export. */
 export const reviewSkaters = new Map<number, { rig: SkaterRig; stick: StickParts }>();
@@ -30,20 +30,7 @@ export const labPose: PoseDebug = {
   swing: 0,
   ragdoll: false,
   goalie: false,
-  action: {
-    bend: 0,
-    twist: 0,
-    hipX: 0,
-    hipZ: 0,
-    hipDrop: 0,
-    bladeSide: 0,
-    bladeReach: 0,
-    bladeLift: 0,
-    handLift: 0,
-    handSpread: 0,
-    releaseHand: 0,
-    check: 0,
-  },
+  action: createHockeyAction(),
   tip: [0, 0, 0],
   grip: [0, 0, 0],
   hosel: [0, 0, 0],

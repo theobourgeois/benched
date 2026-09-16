@@ -209,12 +209,7 @@ export function stickModel(scene: THREE.Object3D) {
     ny = nAlong * uy - nAcross * ux;
     nz /= deep;
     const [stretched, slope] = stretchBlade(x);
-    position.setXYZ(
-      i,
-      MODEL_HEEL + stretched * MODEL_SCALE,
-      y * MODEL_SCALE,
-      z * MODEL_SCALE,
-    );
+    position.setXYZ(i, MODEL_HEEL + stretched * MODEL_SCALE, y * MODEL_SCALE, z * MODEL_SCALE);
     _src.set(nx / slope, ny, nz).normalize();
     normal.setXYZ(i, _src.x, _src.y, _src.z);
   }
@@ -262,8 +257,7 @@ const _flat = new THREE.Vector3(),
   _local = new THREE.Vector3(),
   _socket = new THREE.Vector3(),
   _want = new THREE.Vector3(),
-  _leadPos = new THREE.Vector3(),
-  _leadQ = new THREE.Quaternion();
+  _leadPos = new THREE.Vector3();
 /** The top hand needs room to bend its elbow: a socket against the shoulder is unreachable too. */
 const INNER_REACH = 0.25;
 /** How far ahead of the skater's axis the rigid stick's top hand stays: the belly. */
@@ -301,8 +295,7 @@ function bellyDepth(tip: THREE.Vector3, torso: NonNullable<StickReach['torso']>)
   return THREE.MathUtils.smoothstep(ahead, 0.9, 1.15);
 }
 /** How far a rigid stick may rock onto its heel or toe, and the search step for it. */
-const MAX_ROLL = 0.9,
-  ROLL_STEP = 0.01;
+const MAX_ROLL = 0.9;
 
 /** Where the top-hand socket may go. */
 export interface StickReach {
@@ -456,12 +449,6 @@ function placeRigid(
   // a metre between the ends.
   const belt = torso ? (place(0), _socket.y) : 0,
     deep = torso ? bellyDepth(tip, torso) : 0;
-  const miss = (roll: number) => {
-    const d = place(roll);
-    let over = shoulder ? 4 * Math.max(0, d - armReach) : 0;
-    if (torso) over += Math.max(0, -clearance(_socket, torso, belt, deep));
-    return over;
-  };
 
   let roll = 0;
   if (handsLead > 0) {
@@ -471,41 +458,42 @@ function placeRigid(
     roll = handsLead * Math.atan2(Math.sin(want - flat), Math.cos(want - flat));
     roll = THREE.MathUtils.clamp(roll, -MAX_ROLL, MAX_ROLL);
   }
-  if (miss(roll) > 0) {
-    let found: number | null = null;
-    for (let step = ROLL_STEP; found === null && step <= 2 * MAX_ROLL; step += ROLL_STEP) {
-      for (const direction of [1, -1]) {
-        const candidate = roll + direction * step;
-        if (Math.abs(candidate) > MAX_ROLL || miss(candidate) > 0) continue;
-        let good = candidate,
-          bad = candidate - direction * ROLL_STEP;
-        for (let i = 0; i < 14; i++) {
-          const mid = (good + bad) / 2;
-          if (miss(mid) > 0) bad = mid;
-          else good = mid;
-        }
-        found = good;
-        break;
+  if (limits && handsLead < 1) {
+    // A soft clearance cost starts yielding before a reach limit. Choosing the first feasible
+    // sample made the hand velocity discontinuous at tangency; choosing a discrete fallback
+    // also quantized close toe drags. Minimize continuously around the best sampled interval.
+    const preferred = roll;
+    const soft = (x: number) => (x + Math.sqrt(x * x + 0.0004)) * 0.5;
+    const cost = (r: number) => {
+      const d = place(r);
+      const reach = shoulder ? soft(d - armReach + 0.015) : 0;
+      const body = torso ? soft(-clearance(_socket, torso, belt, deep)) : 0;
+      return 80 * reach * reach + 8 * body * body + 0.012 * (r - preferred) ** 2;
+    };
+    let best = Infinity;
+    for (let r = -MAX_ROLL; r <= MAX_ROLL + 1e-9; r += 0.06) {
+      const value = cost(r);
+      if (value < best) {
+        best = value;
+        roll = r;
       }
     }
-    if (found === null) {
-      let best = Infinity;
-      for (let r = -MAX_ROLL; r <= MAX_ROLL + 1e-9; r += ROLL_STEP) {
-        const m = miss(r);
-        if (m < best) {
-          best = m;
-          found = r;
-        }
-      }
+    let lo = Math.max(-MAX_ROLL, roll - 0.06),
+      hi = Math.min(MAX_ROLL, roll + 0.06);
+    for (let i = 0; i < 24; i++) {
+      const a = lo + (hi - lo) / 3,
+        b = hi - (hi - lo) / 3;
+      if (cost(a) < cost(b)) hi = b;
+      else lo = a;
     }
-    roll = found ?? roll;
+    roll = (lo + hi) / 2;
   }
+
   place(roll);
   if (handsLead > 0) {
     // A raised blade has nothing to rest on: the top hand stays where the hands want it, clamped
     // to reach and clear of the body, and the shaft points through the tip.
     _leadPos.copy(parts.root.position);
-    _leadQ.copy(parts.root.quaternion);
     _want.copy(grip);
     if (torso) {
       const short = -clearance(_want, torso, _want.y, deep);
@@ -518,23 +506,23 @@ function placeRigid(
       _local.subVectors(_want, shoulder);
       const d = _local.length();
       if (d > 1e-6)
-        _want.copy(shoulder).addScaledVector(_local, THREE.MathUtils.clamp(d, INNER_REACH, armReach) / d);
+        _want
+          .copy(shoulder)
+          .addScaledVector(_local, THREE.MathUtils.clamp(d, INNER_REACH, armReach) / d);
     }
-    // Its own stick plane, through the hands and the tip.
-    _flat.set(tip.x - _want.x, 0, tip.z - _want.z);
-    if (_flat.lengthSq() > 1e-6) _flat.normalize();
-    else _flat.copy(heading);
-    _side.crossVectors(_flat, UP);
-    _planeQ.setFromRotationMatrix(_basis.makeBasis(_flat, UP, _side));
+    // Keep one swing plane through take-off and landing. Slerping two independently chosen
+    // planes switched the shortest quaternion arc and snapped the hands across the shaft.
     _local.subVectors(tip, _want);
     const toward =
-      Math.atan2(_local.y, _local.dot(_flat)) - Math.atan2(-socketY, contact - socketX);
-    parts.root.quaternion.copy(_planeQ).multiply(_rollQ.setFromAxisAngle(FORWARD_FACE, toward));
+      Math.atan2(_local.y, _local.dot(heading)) - Math.atan2(-socketY, contact - socketX);
+    const blendedRoll = THREE.MathUtils.lerp(roll, toward, handsLead);
+    parts.root.quaternion
+      .copy(_planeQ)
+      .multiply(_rollQ.setFromAxisAngle(FORWARD_FACE, blendedRoll));
     parts.root.position
       .copy(_want)
       .sub(_local.set(socketX, socketY, 0).applyQuaternion(parts.root.quaternion));
     parts.root.position.lerpVectors(_leadPos, parts.root.position, handsLead);
-    parts.root.quaternion.slerpQuaternions(_leadQ, parts.root.quaternion, handsLead);
     _socket
       .copy(parts.root.position)
       .add(_local.set(socketX, socketY, 0).applyQuaternion(parts.root.quaternion));

@@ -56,6 +56,10 @@ export class Controller {
     rb: false,
     switchPlayer: false,
     pause: false,
+    faceA: false,
+    faceB: false,
+    faceX: false,
+    faceY: false,
   };
   private windup = 0;
   private arcDrag = false;
@@ -64,7 +68,7 @@ export class Controller {
   private bumperTime = 0;
   private bumperChipped = false;
   private moveMag = 0;
-  private previousBackskate = false;
+  private triggerTime = 0;
   private previousUI: Record<MenuButton, boolean> = { ...NO_MENU_BUTTONS };
   /** Seconds each direction has been held, for menu auto-repeat. */
   private heldFor: Record<MenuButton, number> = { ...NO_MENU_TIMES };
@@ -103,7 +107,7 @@ export class Controller {
     this.bumperTime = 0;
     this.bumperChipped = false;
     this.moveMag = 0;
-    this.previousBackskate = false;
+    this.triggerTime = 0;
     this.onDisconnect?.();
   };
   attach() {
@@ -131,7 +135,7 @@ export class Controller {
       this.bumperTime = 0;
       this.bumperChipped = false;
       this.moveMag = 0;
-      this.previousBackskate = false;
+      this.triggerTime = 0;
       this.onDisconnect?.();
     }
     this.lastPad = pad;
@@ -159,7 +163,7 @@ export class Controller {
     const moveMag = Math.hypot(moveX, moveZ);
     const rbPress = rb && !this.previous.rb && !both;
     const passHeld = button(7) || tapped('Space');
-    const backskate = button(6) || key('ControlLeft');
+    const lt = button(6) || key('ControlLeft');
     let chip = false,
       saucer = false,
       poke = false,
@@ -167,11 +171,17 @@ export class Controller {
       checkPower = 0,
       deke = false,
       dekeSpecial: InputFrame['dekeSpecial'] = null;
+    // Tap LT (or Ctrl) for a spin-o-rama; holding it still backskates.
+    const backskate = lt;
+    if (lt) this.triggerTime += dt;
+    else {
+      if (hasPuck && this.triggerTime > 0 && this.triggerTime < 0.28) dekeSpecial = 'spin';
+      this.triggerTime = 0;
+    }
     if (hasPuck) {
       if (rb && !both && !passHeld) {
         const sideStick = Math.abs(stickX) > 0.62 && Math.abs(stickY) < 0.38;
         if (rbPress && sideStick) dekeSpecial = 'windmill';
-        else if (backskate && !this.previousBackskate) dekeSpecial = 'spin';
         else if ((rbPress && moveMag > 0.55) || (moveMag > 0.55 && this.moveMag <= 0.55))
           deke = true;
         if (stickFlick) {
@@ -204,6 +214,10 @@ export class Controller {
       this.bumperChipped = false;
     }
     const dive = (both && !this.previous.both) || (!hasPuck && this.taps.has('KeyF'));
+    const faceA = button(0) || tapped('Digit1') || tapped('KeyZ');
+    const faceB = button(1) || tapped('Digit2') || tapped('KeyB');
+    const faceX = button(2) || tapped('Digit3') || tapped('KeyX');
+    const faceY = button(3) || tapped('Digit4') || tapped('KeyY');
     const held = {
       up: stickY < -0.55,
       pass: passHeld,
@@ -273,12 +287,21 @@ export class Controller {
       pause: held.pause && !this.previous.pause,
       hustle: button(10) || key('ShiftLeft') || key('ShiftRight'),
       backskate,
+      celly:
+        !this.previous.faceA && faceA
+          ? ('helicopter' as const)
+          : !this.previous.faceB && faceB
+            ? ('limp' as const)
+            : !this.previous.faceX && faceX
+              ? ('jump' as const)
+              : !this.previous.faceY && faceY
+                ? ('dance' as const)
+                : null,
     };
     if (shoot || check) this.windup = 0;
-    this.previous = held;
+    this.previous = { ...held, faceA, faceB, faceX, faceY };
     this.stickMag = stickMag;
     this.moveMag = moveMag;
-    this.previousBackskate = backskate;
     this.taps.clear();
     return frame;
   }

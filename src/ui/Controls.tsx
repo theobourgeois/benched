@@ -11,7 +11,7 @@ const PAD: Group[] = [
     rows: [
       ['LS', 'Skate'],
       ['hold LS click', 'Hustle'],
-      ['LT', 'Backskate'],
+      ['hold LT', 'Backskate'],
       ['A', 'Switch skater'],
       ['☰', 'Pause'],
     ],
@@ -41,7 +41,7 @@ const PAD: Group[] = [
       ['hold RB + RS ↑', 'Jump deke'],
       ['hold RB + RS ↓', 'Between the legs'],
       ['tap RB + RS ← →', 'Windmill'],
-      ['hold RB + LT', 'Spin-o-rama'],
+      ['tap LT', 'Spin-o-rama'],
       ['RS click + RS ↓', 'Toe drag'],
     ],
   },
@@ -58,6 +58,15 @@ const PAD: Group[] = [
     ],
   },
   { title: 'Faceoffs', rows: [['RT / RB', 'Win the draw as the puck drops']] },
+  {
+    title: 'After a goal',
+    rows: [
+      ['A', 'Helicopter — stick rotor'],
+      ['X', 'Leap — jump off the ice'],
+      ['Y', 'Dance'],
+      ['B', 'Go limp'],
+    ],
+  },
 ];
 
 const KEYBOARD: Group[] = [
@@ -66,7 +75,7 @@ const KEYBOARD: Group[] = [
     rows: [
       ['W A S D', 'Skate'],
       ['Shift', 'Hustle'],
-      ['Ctrl', 'Backskate'],
+      ['hold Ctrl', 'Backskate'],
       ['Q', 'Switch skater'],
       ['Esc', 'Pause'],
     ],
@@ -96,7 +105,7 @@ const KEYBOARD: Group[] = [
       ['hold E + ↑', 'Jump deke'],
       ['hold E + ↓', 'Between the legs'],
       ['tap E + ← →', 'Windmill'],
-      ['hold E + Ctrl', 'Spin-o-rama'],
+      ['tap Ctrl', 'Spin-o-rama'],
       ['hold C + ↓', 'Toe drag'],
     ],
   },
@@ -113,6 +122,15 @@ const KEYBOARD: Group[] = [
     ],
   },
   { title: 'Faceoffs', rows: [['Space / E', 'Win the draw as the puck drops']] },
+  {
+    title: 'After a goal',
+    rows: [
+      ['Z / 1', 'Helicopter — stick rotor'],
+      ['X / 3', 'Leap — jump off the ice'],
+      ['Y / 4', 'Dance'],
+      ['B / 2', 'Go limp'],
+    ],
+  },
 ];
 
 const isWord = (token: string) => /^([a-z]+|[+/])$/.test(token);

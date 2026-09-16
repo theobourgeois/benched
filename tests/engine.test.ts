@@ -25,6 +25,7 @@ import {
   STICK,
 } from '../src/game/config';
 import { decideAI } from '../src/game/ai';
+import { dekeDuration } from '../src/game/dekes';
 import { constrainToRink } from '../src/game/math';
 import type { MatchState } from '../src/game/types';
 function tick(s: MatchState, seconds: number) {
@@ -90,7 +91,7 @@ describe('puck physics', () => {
     stepMatch(s);
     expect(s.score).toEqual([1, 0]);
     expect(s.phase).toBe('goal');
-    tick(s, 3);
+    tick(s, RULES.goalSeconds - 1);
     expect(s.score).toEqual([1, 0]);
     tick(s, 1.1);
     expect(s.phase).toBe('faceoff');
@@ -1095,7 +1096,7 @@ describe('contact, elevation and puck handling', () => {
     spin.puck.owner = p.id;
     stepMatch(spin, { ...EMPTY_INPUT, dekeSpecial: 'spin' });
     expect(p.dekeKind).toBe('spin');
-    for (let i = 0; i < 90; i++) stepMatch(spin);
+    tick(spin, dekeDuration('spin') + RULES.fixedStep);
     expect(p.dekeKind).toBeNull();
     expect(spin.puck.owner).toBe(p.id);
     expect(Math.sin(p.angle)).toBeGreaterThan(0.95);
@@ -1166,6 +1167,52 @@ describe('aimed passing', () => {
     expect(s.puck.owner).toBeNull();
     expect(s.controlled).toBe(0);
     expect(s.puck.vx).toBeGreaterThan(0);
+  });
+  it('hops a defender in the lane so the aimed teammate still takes the pass', () => {
+    const s = openIce();
+    const passer = s.skaters[0],
+      receiver = s.skaters[1],
+      thief = s.skaters[6];
+    Object.assign(passer, { x: 0, z: 0, vx: 0, vz: 0, angle: Math.PI / 2, cooldown: 0 });
+    Object.assign(receiver, { x: 0, z: -10, vx: 0, vz: 0, cooldown: 0 });
+    Object.assign(thief, { x: 0, z: -4, vx: 0, vz: 0, cooldown: 0, angle: 0 });
+    s.skaters
+      .filter((q) => q.id !== passer.id && q.id !== receiver.id && q.id !== thief.id)
+      .forEach((q) => Object.assign(q, { x: -18, z: 10, cooldown: 10 }));
+    s.controlled = passer.id;
+    s.puck.owner = passer.id;
+    passPuck(s, passer, 0, -1);
+    expect(s.puck.passTo).toBe(receiver.id);
+    expect(s.puck.vy).toBeGreaterThan(2.5);
+    expect(s.notice).toBe('PASS');
+    for (let i = 0; i < 160 && s.puck.owner === null; i++) stepMatch(s);
+    expect(s.puck.owner).toBe(receiver.id);
+  });
+  it('does not let a stick in the lane vacuum a tape-to-tape pass', () => {
+    const s = openIce();
+    const receiver = s.skaters[1],
+      thief = s.skaters[6];
+    Object.assign(receiver, { x: 0, z: -8, vx: 0, vz: 0, cooldown: 0, angle: Math.PI / 2 });
+    Object.assign(thief, { x: 0.7, z: 0, vx: 0, vz: 0, cooldown: 0, angle: Math.PI });
+    s.skaters
+      .filter((q) => q.id !== receiver.id && q.id !== thief.id)
+      .forEach((q) => Object.assign(q, { x: -18, z: 10, cooldown: 10 }));
+    s.controlled = receiver.id;
+    Object.assign(s.puck, {
+      owner: null,
+      x: 0,
+      z: 0,
+      y: 0.13,
+      vx: 0,
+      vz: -18,
+      vy: 0,
+      shot: false,
+      lockout: 0,
+      lastTouch: 0,
+      passTo: receiver.id,
+    });
+    stepMatch(s);
+    expect(s.puck.owner).not.toBe(thief.id);
   });
 });
 describe('tighter gameplay', () => {

@@ -176,11 +176,13 @@ export function FeelHud({
           ? 'off balance'
           : you.checkTimer > 0
             ? 'checking'
-            : you.dekeKind
-              ? `deke · ${you.dekeKind}`
-              : match.puck.owner === match.controlled
-                ? 'puck'
-                : 'open ice';
+            : you.cellyKind
+              ? `celly · ${you.cellyKind}`
+              : you.dekeKind
+                ? `deke · ${you.dekeKind}`
+                : match.puck.owner === match.controlled
+                  ? 'puck'
+                  : 'open ice';
   const dirty = changed;
 
   return (
