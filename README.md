@@ -55,6 +55,29 @@ npm run rooms:deploy   # deploy them to your own Cloudflare account
 `VITE_ROOM_HOST` points the game at a room server: `.env.development` uses the local one and
 `.env.production` the deployed one. Set it to your own worker if you deploy under another name.
 
+## Deploying
+
+The game and the rooms are hosted separately, and it is the skater model that splits them: at
+53 MB it is over the 25 MiB per-file limit on Cloudflare's static hosting, and well under the
+100 MB GitHub allows. Most of that size is textures embedded in the FBX; converting the model
+would let both live on one origin.
+
+- **The game** goes to GitHub Pages. Pushing `main` builds it and publishes it — see
+  `.github/workflows/pages.yml`. A project page is served from a subdirectory, so the workflow
+  passes `--base=/<repo>/`.
+- **The rooms** go to Cloudflare with `npm run rooms:deploy`.
+
+After a deploy, `tests/deployed.e2e.ts` checks that the shipped bundle really reaches the room
+server it was built for:
+
+```sh
+npm run build && npx vite preview --port 4173
+E2E_BASE_URL=http://localhost:4173 npx playwright test tests/deployed.e2e.ts
+```
+
+Both halves need HTTPS: the Gamepad API refuses to expose controllers without a secure context,
+which is also why a plain `http://` LAN address is no good for testing across two machines.
+
 ## Skill stick
 
 Connect an Xbox controller by USB or Bluetooth and press any button after opening the page. Open **Settings → Test controller** for live stick/button indicators. Pairing in macOS alone does not mean the browser has exposed the device; keep the game tab active and press A. The game accepts standard-mapped controllers and recognizable four-axis Xbox layouts with missing mapping labels. The test panel explains blocked, unavailable, insecure, and unrecognized inputs; unsupported raw layouts are not guessed.

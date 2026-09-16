@@ -208,5 +208,8 @@ export class NetSession {
   }
 }
 
-/** Where the rooms live. Set VITE_ROOM_HOST to point a build at a deployed worker. */
-export const ROOM_HOST = (import.meta.env.VITE_ROOM_HOST as string) || 'localhost:8787';
+/**
+ * Where the rooms live. Set by `.env.development` and `.env.production`; falling back to this
+ * page's own origin covers a build that serves the game from the room worker itself.
+ */
+export const ROOM_HOST = (import.meta.env.VITE_ROOM_HOST as string) || location.host;

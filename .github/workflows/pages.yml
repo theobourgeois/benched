@@ -1,0 +1,61 @@
+# Builds the game and publishes it to GitHub Pages.
+#
+# Pages hosts the game; the rooms are a Cloudflare Worker deployed separately with
+# `npm run rooms:deploy`. They are split because the skater model is 53 MB, which is over the
+# 25 MiB per-file limit on Cloudflare's static hosting but well under the 100 MB GitHub allows.
+name: Deploy to Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time; a queued run replaces an older one rather than racing it.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  # Reported, but deliberately not a gate on the deploy: tests/skating.test.ts has a failure that
+  # predates this workflow, and blocking every deploy on it would help nobody. Make this a
+  # dependency of `deploy` once it is green.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # A project page is served from a subdirectory, so asset URLs need that prefix.
+      - run: npm run build -- --base=/${{ github.event.repository.name }}/
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4
