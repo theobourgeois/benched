@@ -1,0 +1,108 @@
+/**
+ * The small amount of machinery both wire formats share: a declarative table of fields and a
+ * cursor that walks a buffer by it, so no byte offset is ever written down by hand and the two
+ * ends cannot drift apart.
+ */
+
+export type Field =
+  /** Full precision, for anything that accumulates without a bound. */
+  | { key: string; kind: 'f32' }
+  /** Fixed point. `scale` is the steps per unit, so 256 puts a metre in ~4 mm. */
+  | { key: string; kind: 'i16'; scale: number }
+  | { key: string; kind: 'u16'; scale: number }
+  | { key: string; kind: 'u8'; scale: number }
+  /** Radians wrapped into (−π, π]. Facing accumulates past a turn, and only the direction shows. */
+  | { key: string; kind: 'angle' }
+  | { key: string; kind: 'enum'; values: readonly (string | null)[] }
+  | { key: string; kind: 'bool' };
+
+export const WIDTH: Record<Field['kind'], number> = {
+  f32: 4,
+  i16: 2,
+  u16: 2,
+  u8: 1,
+  angle: 2,
+  enum: 1,
+  bool: 1,
+};
+/** Radians to a ten-thousandth, which is finer than a pixel at any camera distance. */
+const ANGLE_SCALE = 10000;
+const wrapAngle = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
+export const sizeOf = (fields: readonly Field[]) => fields.reduce((n, f) => n + WIDTH[f.kind], 0);
+
+export /** A cursor that walks the buffer, so no offset is ever written down by hand. */
+class Cursor {
+  offset = 0;
+  constructor(readonly view: DataView) {}
+  write(field: Field, value: unknown) {
+    const { view } = this;
+    switch (field.kind) {
+      case 'f32':
+        view.setFloat32(this.offset, Number(value) || 0, true);
+        break;
+      case 'i16':
+        view.setInt16(this.offset, clampInt(Number(value) || 0, field.scale, 32767), true);
+        break;
+      case 'u16':
+        view.setUint16(
+          this.offset,
+          clampInt(Math.max(0, Number(value) || 0), field.scale, 65535),
+          true,
+        );
+        break;
+      case 'u8':
+        view.setUint8(this.offset, clampInt(Math.max(0, Number(value) || 0), field.scale, 255));
+        break;
+      case 'enum': {
+        const at = field.values.indexOf((value ?? null) as string | null);
+        view.setUint8(this.offset, at < 0 ? 0 : at);
+        break;
+      }
+      case 'angle':
+        view.setInt16(this.offset, Math.round(wrapAngle(Number(value) || 0) * ANGLE_SCALE), true);
+        break;
+      case 'bool':
+        view.setUint8(this.offset, value ? 1 : 0);
+        break;
+    }
+    this.offset += WIDTH[field.kind];
+  }
+  read(field: Field): number | string | boolean | null {
+    const { view } = this;
+    let out: number | string | boolean | null;
+    switch (field.kind) {
+      case 'f32':
+        out = view.getFloat32(this.offset, true);
+        break;
+      case 'i16':
+        out = view.getInt16(this.offset, true) / field.scale;
+        break;
+      case 'u16':
+        out = view.getUint16(this.offset, true) / field.scale;
+        break;
+      case 'u8':
+        out = view.getUint8(this.offset) / field.scale;
+        break;
+      case 'enum':
+        out = field.values[view.getUint8(this.offset)] ?? null;
+        break;
+      case 'angle':
+        out = view.getInt16(this.offset, true) / ANGLE_SCALE;
+        break;
+      case 'bool':
+        out = view.getUint8(this.offset) === 1;
+        break;
+    }
+    this.offset += WIDTH[field.kind];
+    return out;
+  }
+}
+const clampInt = (value: number, scale: number, limit: number) =>
+  Math.max(-limit - 1, Math.min(limit, Math.round(value * scale)));
+
+/** A second of game time in thousandths, which covers every timer the simulation keeps. */
+export const timer = (key: string): Field => ({ key, kind: 'u16', scale: 1000 });
+/** Metres, to about four millimetres. */
+export const metres = (key: string): Field => ({ key, kind: 'i16', scale: 256 });
+/** A small signed quantity - leans, offsets, aim - to a thousandth. */
+export const unit = (key: string): Field => ({ key, kind: 'i16', scale: 1000 });

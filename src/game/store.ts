@@ -2,7 +2,9 @@ import { useSyncExternalStore } from 'react';
 import { createMatch, nextPeriod, startMatch, togglePause } from './engine';
 import { ArenaAudio } from '../audio/sound';
 import { Controller, type ReplayInput } from '../input/controller';
-import type { Club } from './clubs';
+import { clubByKey, DEFAULT_MATCHUP, type Club } from './clubs';
+import type { MatchSetup } from '../net/protocol';
+import type { NetSession } from '../net/session';
 import { DEFAULT_DIFFICULTY } from './difficulty';
 import { modeInfo } from './modes';
 import {
@@ -29,6 +31,8 @@ export const runtime = {
   controller: new Controller(),
   /** Second seat for local two-player. Pad only; it claims a controller seat one is not using. */
   controllerTwo: new Controller(false),
+  /** The room this client is in, while it is online. */
+  net: null as NetSession | null,
   audio: new ArenaAudio(),
   /** Recent play, recorded by the simulation loop. */
   recorder: new ReplayBuffer(),
@@ -104,6 +108,28 @@ export function pauseGame() {
 export function continueGame() {
   nextPeriod(runtime.match);
   publish();
+}
+/**
+ * A match agreed with somebody else. Both ends build the same one from the same setup, and both
+ * benches are human, so neither side gets the easier opponent.
+ */
+export function beginOnlineMatch(setup: MatchSetup, myTeam: Team) {
+  runtime.audio.unlock();
+  runtime.replay = null;
+  runtime.myTeam = myTeam;
+  const clubs: [Club, Club] = [
+    clubByKey(setup.clubs[0]) ?? DEFAULT_MATCHUP[0],
+    clubByKey(setup.clubs[1]) ?? DEFAULT_MATCHUP[1],
+  ];
+  runtime.match = createMatch([0, 1], setup.mode, clubs, setup.jerseys);
+  startMatch(runtime.match);
+  publish();
+}
+/** Hang up, and put the menu back. */
+export function leaveOnline() {
+  runtime.net?.close();
+  runtime.net = null;
+  returnToMenu();
 }
 export function returnToMenu() {
   runtime.replay = null;

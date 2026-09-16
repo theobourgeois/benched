@@ -7,11 +7,24 @@ import { ControlsScreen } from './Controls';
 import { Brand, MenuItem, Prompts } from './kit';
 import { SettingsScreen } from './Settings';
 import { TeamSelect } from './TeamSelect';
+import { OnlineScreen } from './Online';
+import { normaliseCode } from '../net/protocol';
 
-type Entry = GameMode | 'twoPlayer' | 'settings' | 'controls' | 'lab';
+/**
+ * Invites are a query string rather than a path, because the game is a static build with no
+ * server to rewrite deep links: `/play/7K2M` would simply be a missing file.
+ */
+function inviteCode() {
+  const raw = new URLSearchParams(location.search).get('join');
+  const code = raw ? normaliseCode(raw) : '';
+  return code.length === 4 ? code : '';
+}
+
+type Entry = GameMode | 'twoPlayer' | 'online' | 'settings' | 'controls' | 'lab';
 const ENTRIES: { id: Entry; label: string }[] = [
   { id: 'exhibition', label: 'Play Now' },
   { id: 'twoPlayer', label: '2 Players' },
+  { id: 'online', label: 'Online' },
   { id: 'threeOnThree', label: '3 on 3' },
   { id: 'oneOnOne', label: '1 on 1' },
   { id: 'shootout', label: 'Shootout' },
@@ -20,11 +33,13 @@ const ENTRIES: { id: Entry; label: string }[] = [
   { id: 'controls', label: 'Controls' },
   ...(import.meta.env.DEV ? [{ id: 'lab' as const, label: 'Animation Lab' }] : []),
 ];
-type Screen = 'main' | 'teams' | 'settings' | 'controls';
+type Screen = 'main' | 'teams' | 'online' | 'settings' | 'controls';
 
 export function Menu() {
   const { match } = useGame();
-  const [screen, setScreen] = useState<Screen>('main');
+  // An invite link lands straight in the room rather than on the main menu.
+  const [invite] = useState(() => inviteCode());
+  const [screen, setScreen] = useState<Screen>(invite ? 'online' : 'main');
   const [index, setIndex] = useState(0);
   const [mode, setMode] = useState<GameMode>('exhibition');
   /** A second person on the other bench, sharing the screen. */
@@ -34,7 +49,7 @@ export function Menu() {
   const [side, setSide] = useState<Team>(runtime.myTeam);
   const [jersey, setJersey] = useState<Jersey>(match.jerseys[runtime.myTeam]);
   const pick = (id: Entry) => {
-    if (id === 'settings' || id === 'controls') return setScreen(id);
+    if (id === 'settings' || id === 'controls' || id === 'online') return setScreen(id);
     if (id === 'lab') return void import('../dev/lab').then((m) => m.openLab());
     setGuests(id === 'twoPlayer');
     setMode(id === 'twoPlayer' ? 'exhibition' : id);
@@ -57,6 +72,7 @@ export function Menu() {
           onBack={home}
         />
       )}
+      {screen === 'online' && <OnlineScreen join={invite} onBack={home} />}
       {screen === 'settings' && <SettingsScreen crumb="Main Menu" onClose={home} />}
       {screen === 'controls' && <ControlsScreen crumb="Main Menu" onClose={home} />}
     </div>

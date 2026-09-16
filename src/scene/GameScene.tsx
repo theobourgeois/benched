@@ -31,9 +31,10 @@ import { navigateWithController } from '../input/menuNavigation';
 import { screenInputToRink } from '../input/coordinates';
 import { cameraFraming } from './camera';
 import { playerLocator } from './locator';
-import { PUCK, RULES } from '../game/config';
+import { EMPTY_INPUT, PUCK, RULES } from '../game/config';
 import { hasActiveCelly } from '../game/cellys';
-import type { InputFrame, Phase, SideInputs, Team } from '../game/types';
+import type { InputFrame, MatchState, Phase, SideInputs, Team } from '../game/types';
+import { mergeEdges, noEdges } from '../input/frames';
 import type { Controller } from '../input/controller';
 import { labHooks } from './animationReview';
 /** Dev-only animation lab: drives the subject, the close-up camera, overlays and captures. */
@@ -48,52 +49,6 @@ const RECORD_EVERY = Math.max(1, Math.round(1 / RULES.fixedStep / REPLAY_HZ));
 const RECORDED: Phase[] = ['faceoff', 'playing', 'goal'];
 /** Impact feedback shared between the simulation loop and the camera: a big hit shakes the frame. */
 const impact = { shake: 0 };
-const noEdges = (input: InputFrame) => ({
-  ...input,
-  shoot: false,
-  pass: false,
-  passRelease: false,
-  poke: false,
-  saucer: false,
-  chip: false,
-  deke: false,
-  dekeSpecial: null,
-  dive: false,
-  check: false,
-  reach: false,
-  switchPlayer: false,
-  pause: false,
-  celly: null,
-});
-/**
- * Keep button edges until a simulation step consumes them, even on 240 Hz displays, along with
- * the analog values latched at the moment of the press.
- */
-function mergeEdges(old: InputFrame | null, frame: InputFrame): InputFrame {
-  if (!old) return frame;
-  return {
-    ...frame,
-    shoot: frame.shoot || old.shoot,
-    shotPower: frame.shoot ? frame.shotPower : old.shotPower,
-    shotHeight: frame.shoot ? frame.shotHeight : old.shoot ? old.shotHeight : frame.shotHeight,
-    aimZ: frame.shoot ? frame.aimZ : old.shoot ? old.aimZ : frame.aimZ,
-    pass: frame.pass || old.pass,
-    passRelease: frame.passRelease || old.passRelease,
-    poke: frame.poke || old.poke,
-    saucer: frame.saucer || old.saucer,
-    chip: frame.chip || old.chip,
-    deke: frame.deke || old.deke,
-    dekeSpecial: frame.dekeSpecial ?? old.dekeSpecial,
-    dive: frame.dive || old.dive,
-    check: frame.check || old.check,
-    checkPower: frame.check ? frame.checkPower : old.checkPower,
-    reach: frame.reach || old.reach,
-    stickIceX: frame.reach || !old.reach ? frame.stickIceX : old.stickIceX,
-    stickIceZ: frame.reach || !old.reach ? frame.stickIceZ : old.stickIceZ,
-    switchPlayer: frame.switchPlayer || old.switchPlayer,
-    pause: frame.pause || old.pause,
-  };
-}
 function Simulation() {
   const accumulator = useRef(0),
     lastEvent = useRef(-1),
@@ -133,6 +88,43 @@ function Simulation() {
       document.removeEventListener('visibilitychange', visibility);
     };
   }, []);
+  /**
+   * Whistles, hits and horns: sound, rumble and camera shake. The watching side runs this on the
+   * calls the host sent rather than on any of its own, which is why they cross with the snapshot.
+   */
+  const drainEvents = (s: MatchState) => {
+    for (const event of s.events)
+      if (event.id > lastEvent.current) {
+        runtime.audio.play(event, s.mode);
+        if (event.type === 'goal') goalReplay.current = goalReplayWanted(s);
+        if (['shot', 'hit', 'goal', 'post', 'crossbar', 'save'].includes(event.type)) {
+          const bigHit = event.type === 'hit' && event.power >= 0.5;
+          if (bigHit) impact.shake = Math.max(impact.shake, event.power >= 0.75 ? 1 : 0.45);
+          if (event.barDown && event.type === 'crossbar')
+            impact.shake = Math.max(impact.shake, 0.3);
+          const iron = event.type === 'crossbar';
+          runtime.controller.rumble(
+            event.type === 'goal'
+              ? 1
+              : bigHit
+                ? Math.max(0.7, event.power)
+                : iron
+                  ? Math.max(0.55, event.power)
+                  : event.power * 0.7,
+            event.type === 'goal'
+              ? 650
+              : bigHit
+                ? 280
+                : event.type === 'hit'
+                  ? 160
+                  : iron
+                    ? 130
+                    : 100,
+          );
+        }
+        lastEvent.current = event.id;
+      }
+  };
   useFrame((_, delta) => {
     const s = runtime.match;
     if (s !== lastMatch.current) {
@@ -177,6 +169,7 @@ function Simulation() {
         runtime.settings.camera,
         runtime.myTeam,
       );
+    const net = runtime.net;
     const guest = (1 - runtime.myTeam) as Team;
     // Seat one picks first and seat two takes what is left, so one pad always belongs to P1.
     runtime.controller.claimed = [];
@@ -198,13 +191,29 @@ function Simulation() {
       return frame;
     };
     pending.current[runtime.myTeam] = mergeEdges(pending.current[runtime.myTeam], gate(mine));
-    pending.current[guest] = s.sides[guest].human
-      ? mergeEdges(pending.current[guest], gate(guestFrame))
-      : null;
+    // Online, the other bench is a person somewhere else; the second seat belongs to the couch.
+    pending.current[guest] = net
+      ? null
+      : s.sides[guest].human
+        ? mergeEdges(pending.current[guest], gate(guestFrame))
+        : null;
+    if (net && !net.isHost) {
+      // A guest runs no simulation. It says what it is trying to do and draws what it is told,
+      // so there is no second version of the match to disagree with the host's.
+      net.sendInput(pending.current[runtime.myTeam] ?? EMPTY_INPUT, s.tick);
+      pending.current[runtime.myTeam] = noEdges(pending.current[runtime.myTeam] ?? EMPTY_INPUT);
+      if (net.applyLatest(s) && RECORDED.includes(s.phase))
+        recordRagdollPoses(runtime.recorder.record(s));
+      drainEvents(s);
+      runtime.audio.updateSkating(s, 1, runtime.myTeam);
+      tickPublish();
+      return;
+    }
     // Pausing is a request from a person, not something the physics can decide: with two sticks
     // on the ice the engine cannot know whose pause it is, so it is resolved out here. Either
     // seat can call it.
-    if (pending.current.some((frame) => frame?.pause)) {
+    // Nobody gets to freeze somebody else's game, so online play has no local pause.
+    if (!net && pending.current.some((frame) => frame?.pause)) {
       togglePause(s);
       pending.current = pending.current.map((frame) => frame && noEdges(frame)) as SideInputs;
       runtime.audio.updateSkating(s, 1, runtime.myTeam);
@@ -215,43 +224,17 @@ function Simulation() {
     accumulator.current +=
       Math.min(delta, 0.05) * (import.meta.env.DEV && labHooks.active ? labHooks.simScale : 1);
     while (accumulator.current >= RULES.fixedStep) {
+      // As host, the other bench is whatever the last packet said. A missing one repeats rather
+      // than handing the skater back to the AI.
+      if (net) pending.current[guest] = net.takeGuestInput();
       stepMatch(s, pending.current, RULES.fixedStep);
       pending.current = pending.current.map((frame) => frame && noEdges(frame)) as SideInputs;
       accumulator.current -= RULES.fixedStep;
       if (RECORDED.includes(s.phase) && ++steps.current % RECORD_EVERY === 0)
         recordRagdollPoses(runtime.recorder.record(s));
     }
-    for (const event of s.events)
-      if (event.id > lastEvent.current) {
-        runtime.audio.play(event, s.mode);
-        if (event.type === 'goal') goalReplay.current = goalReplayWanted(s);
-        if (['shot', 'hit', 'goal', 'post', 'crossbar', 'save'].includes(event.type)) {
-          const bigHit = event.type === 'hit' && event.power >= 0.5;
-          if (bigHit) impact.shake = Math.max(impact.shake, event.power >= 0.75 ? 1 : 0.45);
-          if (event.barDown && event.type === 'crossbar')
-            impact.shake = Math.max(impact.shake, 0.3);
-          const iron = event.type === 'crossbar';
-          runtime.controller.rumble(
-            event.type === 'goal'
-              ? 1
-              : bigHit
-                ? Math.max(0.7, event.power)
-                : iron
-                  ? Math.max(0.55, event.power)
-                  : event.power * 0.7,
-            event.type === 'goal'
-              ? 650
-              : bigHit
-                ? 280
-                : event.type === 'hit'
-                  ? 160
-                  : iron
-                    ? 130
-                    : 100,
-          );
-        }
-        lastEvent.current = event.id;
-      }
+    net?.publish(s, Math.min(delta, 0.05));
+    drainEvents(s);
     // Let the goal land live for a moment, then roll the replay.
     if (s.phase !== 'goal' && s.phase !== 'paused') goalReplay.current = false;
     else if (

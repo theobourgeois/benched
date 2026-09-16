@@ -151,3 +151,7 @@ export function cycleClub(league: LeagueOption, current: Club, opponent: Club, s
   const i = clubs.findIndex((c) => c.key === current.key);
   return clubs[(i + step + clubs.length) % clubs.length];
 }
+
+/** Find a club by its key, for a matchup that arrived from the other player rather than a menu. */
+export const clubByKey = (key: string) =>
+  LEAGUES.flatMap((league) => league.clubs).find((club) => club.key === key);

@@ -1,0 +1,140 @@
+import { test, expect, type Page } from '@playwright/test';
+
+/**
+ * Two browsers, one match. The host runs the simulation and the guest draws what it is told, so
+ * what is being checked here is that intent gets from one machine to the other and that the
+ * result comes back looking like the same game.
+ */
+
+const state = (page: Page) =>
+  page.evaluate(
+    'JSON.parse(JSON.stringify({ ...window.__BENCHED__.runtime.match, myTeam: window.__BENCHED__.runtime.myTeam }))',
+  );
+const net = (page: Page) =>
+  page.evaluate(`(() => { const n = window.__BENCHED__.runtime.net;
+    return n ? { status: n.status, room: n.room, host: n.isHost, team: n.team, players: n.players.length } : null; })()`);
+const live = (page: Page) => page.locator('.hud[data-phase="playing"]');
+
+/** A pad each, so both ends are driven the way a person would. */
+async function withPad(page: Page) {
+  await page.addInitScript(() => {
+    const w = window as unknown as { pad: { axes: number[] } };
+    w.pad = {
+      connected: true,
+      index: 0,
+      id: 'Xbox Wireless Controller (test)',
+      mapping: 'standard',
+      axes: [0, 0, 0, 0],
+      buttons: Array.from({ length: 17 }, () => ({ pressed: false, value: 0 })),
+    };
+    Object.defineProperty(navigator, 'getGamepads', { value: () => [w.pad] });
+  });
+}
+
+test('two browsers meet in a room, drop the puck, and play one match', async ({ browser }) => {
+  test.setTimeout(90_000);
+  const hostPage = await (await browser.newContext()).newPage();
+  const guestPage = await (await browser.newContext()).newPage();
+  await withPad(hostPage);
+  await withPad(guestPage);
+
+  // The host opens a room and gets a code to hand out.
+  await hostPage.goto('/');
+  await hostPage.getByRole('button', { name: 'Online', exact: true }).click();
+  await hostPage.getByRole('button', { name: /Create game/ }).click();
+  await expect(hostPage.getByRole('heading', { name: 'Game Lobby' })).toBeVisible({
+    timeout: 20000,
+  });
+  const room = (await net(hostPage))!.room;
+  expect(room).toMatch(/^[A-Z0-9]{4}$/);
+
+  // The guest follows the invite link rather than retyping anything.
+  await guestPage.goto(`/?join=${room}`);
+  await expect(guestPage.getByRole('heading', { name: 'Game Lobby' })).toBeVisible({
+    timeout: 20000,
+  });
+  await expect.poll(async () => (await net(hostPage))?.players).toBe(2);
+
+  const hostNet = (await net(hostPage))!,
+    guestNet = (await net(guestPage))!;
+  // Exactly one host, one bench each.
+  expect([hostNet.host, guestNet.host]).toEqual([true, false]);
+  expect(hostNet.team).not.toBe(guestNet.team);
+
+  // Neither side can start alone.
+  await hostPage.getByRole('button', { name: /^Ready/ }).click();
+  await expect.poll(async () => (await net(hostPage))?.status).toBe('lobby');
+  await guestPage.getByRole('button', { name: /^Ready/ }).click();
+  await hostPage.getByRole('button', { name: /Drop the puck/ }).click();
+
+  // Both ends land in the same match.
+  await expect(live(hostPage)).toBeVisible({ timeout: 30000 });
+  await expect(live(guestPage)).toBeVisible({ timeout: 30000 });
+  const started = await state(hostPage);
+  const guestStarted = await state(guestPage);
+  expect(started.sides.map((s: { human: boolean }) => s.human)).toEqual([true, true]);
+  expect(guestStarted.mode).toBe(started.mode);
+  expect(guestStarted.myTeam).not.toBe(started.myTeam);
+
+  // The guest's clock advances, which it can only do off the host's snapshots.
+  const firstTick = (await state(guestPage)).tick;
+  await expect
+    .poll(async () => (await state(guestPage)).tick, { timeout: 15000 })
+    .toBeGreaterThan(firstTick + 30);
+
+  // The guest's stick moves the guest's skater, on the host's simulation.
+  await hostPage.evaluate(
+    `(() => { const s = window.__BENCHED__.runtime.match;
+      s.phase='playing'; s.countdown=0; s.puck.owner=null;
+      s.skaters.forEach(p=>{p.cooldown=0;p.vx=0;p.vz=0});
+      window.__BENCHED__.publish(); })()`,
+  );
+  const guestTeam = guestStarted.myTeam;
+  await guestPage.evaluate('window.pad.axes[1]=-1');
+  await guestPage.waitForTimeout(1200);
+  await guestPage.evaluate('window.pad.axes[1]=0');
+
+  const onHost = await state(hostPage);
+  const skater = onHost.skaters[onHost.sides[guestTeam].controlled];
+  expect(Math.hypot(skater.vx, skater.vz)).toBeGreaterThan(1);
+
+  // And the guest sees its own skater where the host put it.
+  await expect
+    .poll(
+      async () => {
+        const seen = await state(guestPage);
+        const mine = seen.skaters[seen.sides[guestTeam].controlled];
+        const truth = (await state(hostPage)).skaters[onHost.sides[guestTeam].controlled];
+        return Math.hypot(mine.x - truth.x, mine.z - truth.z);
+      },
+      { timeout: 10000 },
+    )
+    .toBeLessThan(2);
+
+  // Leaving tells the other person rather than freezing them.
+  await guestPage.close();
+  await expect.poll(async () => (await net(hostPage))?.players, { timeout: 10000 }).toBe(1);
+  await hostPage.close();
+});
+
+test('a room only seats two', async ({ browser }) => {
+  test.setTimeout(60_000);
+  const pages = await Promise.all(
+    [0, 1, 2].map(async () => (await browser.newContext()).newPage()),
+  );
+  await pages[0].goto('/');
+  await pages[0].getByRole('button', { name: 'Online', exact: true }).click();
+  await pages[0].getByRole('button', { name: /Create game/ }).click();
+  await expect(pages[0].getByRole('heading', { name: 'Game Lobby' })).toBeVisible({
+    timeout: 20000,
+  });
+  const room = (await net(pages[0]))!.room;
+
+  await pages[1].goto(`/?join=${room}`);
+  await expect.poll(async () => (await net(pages[1]))?.players, { timeout: 15000 }).toBe(2);
+
+  // A third is told the game is full rather than quietly watching.
+  await pages[2].goto(`/?join=${room}`);
+  await expect(pages[2].getByText(/already full/)).toBeVisible({ timeout: 15000 });
+  for (const page of pages) await page.close();
+});
