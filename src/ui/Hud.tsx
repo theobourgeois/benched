@@ -6,12 +6,26 @@ import {
   beginGame,
   canInstantReplay,
   continueGame,
+  mySide,
   openInstantReplay,
   pauseGame,
   returnToMenu,
+  runtime,
   useGame,
 } from '../game/store';
-import { cameraUsesAttackUp, type MatchState } from '../game/types';
+import { cameraUsesAttackUp, type MatchState, type Team } from '../game/types';
+
+/**
+ * The simulation leaves point-of-view calls neutral and marks who they happened to, so each
+ * client phrases them for the side it is watching.
+ */
+function noticeText(s: MatchState, you: Team) {
+  if (s.noticeTeam === null) return s.notice;
+  const mine = s.noticeTeam === you;
+  if (s.notice === 'DRAW') return mine ? 'DRAW WON' : 'DRAW LOST';
+  if (s.notice === 'SHOT') return mine ? 'YOUR SHOT' : 'THEIR SHOT';
+  return s.notice;
+}
 import { step, useNav } from '../input/menuNavigation';
 import { ControlsScreen } from './Controls';
 import { FeelHud } from './FeelHud';
@@ -49,7 +63,7 @@ export function Hud() {
       <ScoreBug s={s} />
       {s.phase === 'playing' && s.noticeTimer > 0 && (
         <div className="notice" key={s.notice}>
-          {s.notice}
+          {noticeText(s, runtime.myTeam)}
         </div>
       )}
       {s.phase === 'playing' && !cameraUsesAttackUp(settings.camera) && <AttackArrow s={s} />}
@@ -104,7 +118,7 @@ function ScoreBug({ s }: { s: MatchState }) {
 
 /** The wide camera runs sideways, so it needs to say which way you are going. */
 function AttackArrow({ s }: { s: MatchState }) {
-  const dir = attackDirection(s.homeTeam, s.period);
+  const dir = attackDirection(runtime.myTeam, s.period);
   return (
     <div className="attack" aria-label="Attacking direction">
       {dir < 0 && <ArrowRight className="flip" size={16} />}
@@ -115,15 +129,16 @@ function AttackArrow({ s }: { s: MatchState }) {
 }
 
 function PlayerCard({ s }: { s: MatchState }) {
-  const p = s.skaters[s.controlled];
+  const side = mySide(s);
+  const p = s.skaters[side.controlled];
   const status = p.downTimer > 0 ? 'Down' : p.stumbleTimer > 0 ? 'Off balance' : null;
   return (
-    <div className="player-card" style={club(s.teams[s.homeTeam].accent)}>
+    <div className="player-card" style={club(s.teams[runtime.myTeam].accent)}>
       <span className="pc-number">{p.number}</span>
       <div className="pc-body">
-        {s.shotCharge > 0.05 && (
+        {side.shotCharge > 0.05 && (
           <div className="meter power" aria-label="Shot power">
-            <i style={{ width: `${s.shotCharge * 100}%` }} />
+            <i style={{ width: `${side.shotCharge * 100}%` }} />
           </div>
         )}
         <strong>{p.name}</strong>
@@ -232,7 +247,7 @@ function PauseMenu({
 function Results({ s }: { s: MatchState }) {
   const [index, setIndex] = useState(0);
   const final = s.phase === 'final';
-  const you = s.homeTeam;
+  const you = runtime.myTeam;
   const headline = !final
     ? 'Intermission'
     : s.score[0] === s.score[1]
@@ -242,7 +257,7 @@ function Results({ s }: { s: MatchState }) {
         : 'You lose';
   const items = [
     final
-      ? { label: 'Rematch', run: () => beginGame(s.homeTeam, s.mode) }
+      ? { label: 'Rematch', run: () => beginGame(runtime.myTeam, s.mode) }
       : { label: `Start period ${s.period + 1}`, run: continueGame },
     { label: 'Quit to Menu', run: returnToMenu },
   ];

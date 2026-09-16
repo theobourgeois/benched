@@ -1,7 +1,7 @@
 import { PerspectiveCamera, Vector3 } from 'three';
 import { isOnIce } from '../game/modes';
 import { clamp } from '../game/math';
-import type { MatchState } from '../game/types';
+import type { MatchState, Team } from '../game/types';
 
 const _world = new Vector3();
 const _view = new Vector3();
@@ -23,9 +23,10 @@ export function playerLocator(
   camera: PerspectiveCamera,
   width: number,
   wasVisible = false,
+  anchor: Team = 0,
 ): PlayerLocator | null {
   if (match.phase !== 'playing') return null;
-  const player = match.skaters[match.controlled];
+  const player = match.skaters[match.sides[anchor].controlled];
   if (!player || !isOnIce(match, player)) return null;
   _world.set(player.x, 0.95, player.z);
   _view.copy(_world).applyMatrix4(camera.matrixWorldInverse);

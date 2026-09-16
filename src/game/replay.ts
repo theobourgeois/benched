@@ -1,5 +1,6 @@
 import { clamp } from './math';
-import type { GameEvent, MatchState, Phase, Puck, Skater, Team } from './types';
+import type { GameEvent, MatchState, Phase, Puck, SideState, Skater, Team } from './types';
+import { TEAMS } from './types';
 
 /** Snapshots per second; playback blends between neighbours, so slow motion stays smooth. */
 export const REPLAY_HZ = 60;
@@ -21,9 +22,8 @@ export const GOAL_REPLAY = {
 
 export interface ReplayFrame {
   phase: Phase;
-  controlled: number;
-  shotCharge: number;
-  shotLift: number;
+  /** Both sides, so a replay of a two-human match poses each one's carrier and windup. */
+  sides: [SideState, SideState];
   scoringTeam: Team | null;
   shootoutShooter: Team;
   skaters: Skater[];
@@ -59,9 +59,10 @@ export class ReplayBuffer {
     this.lastEvent = s.events.at(-1)?.id ?? this.lastEvent;
     const frame: ReplayFrame = {
       phase: s.phase,
-      controlled: s.controlled,
-      shotCharge: s.shotCharge,
-      shotLift: s.shotLift,
+      sides: [
+        { ...s.sides[0], passAim: { ...s.sides[0].passAim } },
+        { ...s.sides[1], passAim: { ...s.sides[1].passAim } },
+      ],
       scoringTeam: s.scoringTeam,
       shootoutShooter: s.shootoutShooter,
       skaters: s.skaters.map((p) => ({
@@ -157,7 +158,10 @@ export function createView(match: MatchState): MatchState {
     skaters: match.skaters.map((p) => ({ ...p })),
     puck: { ...match.puck },
     events: [],
-    passHeld: false,
+    sides: [
+      { ...match.sides[0], passHeld: false, passAim: { ...match.sides[0].passAim } },
+      { ...match.sides[1], passHeld: false, passAim: { ...match.sides[1].passAim } },
+    ],
   };
 }
 
@@ -170,11 +174,16 @@ export function sampleReplay(view: MatchState, frames: ReplayFrame[], time: numb
     b = frames[Math.min(i + 1, frames.length - 1)],
     near = t < 0.5 ? a : b;
   view.phase = near.phase;
-  view.controlled = near.controlled;
   view.scoringTeam = near.scoringTeam;
   view.shootoutShooter = near.shootoutShooter;
-  view.shotCharge = a.shotCharge + (b.shotCharge - a.shotCharge) * t;
-  view.shotLift = a.shotLift + (b.shotLift - a.shotLift) * t;
+  for (const team of TEAMS) {
+    const side = view.sides[team];
+    side.human = near.sides[team].human;
+    side.controlled = near.sides[team].controlled;
+    side.shotCharge =
+      a.sides[team].shotCharge + (b.sides[team].shotCharge - a.sides[team].shotCharge) * t;
+    side.shotLift = a.sides[team].shotLift + (b.sides[team].shotLift - a.sides[team].shotLift) * t;
+  }
   view.skaters.forEach((p, k) => {
     const from = a.skaters[k],
       to = b.skaters[k];
@@ -195,8 +204,10 @@ export function sampleReplay(view: MatchState, frames: ReplayFrame[], time: numb
       p.saveSide = from.saveSide;
       p.saveHeight = from.saveHeight;
     }
-    if (k === view.controlled && !from.pendingShot && to.pendingShot && t < 1)
-      view.shotCharge = a.shotCharge;
+    // A windup that released between snapshots keeps the charge it was holding at the release.
+    const side = view.sides[b.skaters[k].team];
+    if (k === side.controlled && !from.pendingShot && to.pendingShot && t < 1)
+      side.shotCharge = a.sides[b.skaters[k].team].shotCharge;
     if (from.pendingShot && to.pendingShot && from.pendingShot.tick === to.pendingShot.tick) {
       p.pendingShot = {
         ...from.pendingShot,

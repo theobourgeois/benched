@@ -21,6 +21,11 @@ import type { GameMode, Jersey, MatchState, Settings, Team } from './types';
 const SETTINGS_KEY = 'benched.settings';
 export const runtime = {
   match: createMatch(),
+  /**
+   * The side this client is watching: camera, HUD and stick mapping all take its point of view.
+   * The match itself has no "you" — both sides are just sides — so this lives here, not in state.
+   */
+  myTeam: 0 as Team,
   controller: new Controller(),
   audio: new ArenaAudio(),
   /** Recent play, recorded by the simulation loop. */
@@ -65,6 +70,10 @@ export function useGame() {
 }
 /** The state the scene draws: the replay while one is rolling, otherwise the live match. */
 export const viewMatch = () => runtime.replay?.view ?? runtime.match;
+/** The watching side of a match, for everything drawn from this client's point of view. */
+export const mySide = (s: MatchState = viewMatch()) => s.sides[runtime.myTeam];
+/** The skater this client's camera and HUD follow. */
+export const mySkater = (s: MatchState = viewMatch()) => s.skaters[mySide(s).controlled];
 /** How fast the drawn state moves against real time: replays run slow, held or reversed. */
 export const viewTimeScale = () => (runtime.replay ? Math.abs(runtime.replay.rate) : 1);
 export function beginGame(
@@ -75,6 +84,7 @@ export function beginGame(
 ) {
   runtime.audio.unlock();
   runtime.replay = null;
+  runtime.myTeam = team;
   runtime.match = createMatch(team, mode, teams, jerseys);
   runtime.match.difficulty = runtime.settings.difficulty;
   startMatch(runtime.match);
@@ -90,8 +100,8 @@ export function continueGame() {
 }
 export function returnToMenu() {
   runtime.replay = null;
-  const { homeTeam, teams, jerseys } = runtime.match;
-  runtime.match = createMatch(homeTeam, 'exhibition', teams, jerseys);
+  const { teams, jerseys } = runtime.match;
+  runtime.match = createMatch(runtime.myTeam, 'exhibition', teams, jerseys);
   publish();
 }
 export function updateSettings(settings: Partial<Settings>) {

@@ -171,7 +171,10 @@ export function tuneFor(difficulty: Difficulty): CpuTune {
   }
 }
 
-/** Opposing CPUs use the match difficulty. The player's teammates stay All-Star. */
+/**
+ * A human's own bench skates All-Star; a side with nobody on it uses the match difficulty. With
+ * two people playing, both benches are All-Star and neither side is handed an easier opponent.
+ */
 export function cpuTune(s: MatchState, p: Skater): CpuTune {
-  return p.team === s.homeTeam ? ALL_STAR : tuneFor(s.difficulty);
+  return s.sides[p.team].human ? ALL_STAR : tuneFor(s.difficulty);
 }

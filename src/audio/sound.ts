@@ -1,4 +1,4 @@
-import type { GameEvent, GameMode, MatchState } from '../game/types';
+import type { GameEvent, GameMode, MatchState, Team } from '../game/types';
 
 const SAMPLE_NAMES = [
   'shot',
@@ -75,7 +75,7 @@ export class ArenaAudio {
     return this.sample(ready[Math.floor(Math.random() * ready.length)], volume, rate);
   }
   /** `scale` quiets the skates in a slowed or held replay. */
-  updateSkating(match: MatchState, scale = 1) {
+  updateSkating(match: MatchState, scale = 1, team: Team = 0) {
     const ctx = this.context,
       buffer = this.samples.get('skating');
     if (!ctx || !this.master || !buffer) return;
@@ -89,7 +89,7 @@ export class ArenaAudio {
       this.skateGain.connect(this.master);
       this.skateSource.start();
     }
-    const p = match.skaters[match.controlled];
+    const p = match.skaters[match.sides[team].controlled];
     const speed =
       (match.phase === 'playing' || match.phase === 'goal') &&
       p.downTimer <= 0 &&

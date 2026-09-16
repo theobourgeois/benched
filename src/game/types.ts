@@ -1,5 +1,7 @@
 import type { Club } from './clubs';
 export type Team = 0 | 1;
+/** Both sides, for the many loops that have to treat them alike. */
+export const TEAMS = [0, 1] as const satisfies readonly Team[];
 export type Jersey = 'home' | 'away';
 export type GameMode = 'exhibition' | 'threeOnThree' | 'oneOnOne' | 'shootout' | 'freeSkate';
 export type Phase = 'menu' | 'faceoff' | 'playing' | 'goal' | 'intermission' | 'paused' | 'final';
@@ -152,6 +154,35 @@ export interface InputFrame {
   /** Face-button celly after a goal: A chopper, X leap, Y dance, B limp. */
   celly: CellyKind | null;
 }
+/**
+ * One side's half of the match: who they are driving and everything that skater is part-way
+ * through. Both sides carry this whether a human or `decideAI` is holding the stick, so nothing
+ * in the simulation has to ask which team the player is on.
+ */
+export interface SideState {
+  /** A human is driving `controlled`. AI-only sides still track the rest, so a side can be handed over mid-match. */
+  human: boolean;
+  controlled: number;
+  /** After a defensive switch, keep skating at the play while the left stick is quiet. */
+  autoSkate: boolean;
+  shotCharge: number;
+  /** Left-stick shot aim across the net, −1 (right post from behind) to 1. */
+  shotAim: number;
+  /** Shot height on the net, 0 (ice) to 1 (top shelf). */
+  shotLift: number;
+  /** Holding the pass button with the puck, ready to aim. */
+  passHeld: boolean;
+  /** Aimed pass direction on the ice. */
+  passAim: Vec2;
+  /** Intended receiver while aiming, or null for a dump into space. */
+  passTarget: number | null;
+  /** Ice-arrow length while aiming a pass. */
+  passRange: number;
+  /** Faceoff countdown remaining when this side struck; -1 if they have not. */
+  drawInput: number;
+}
+/** One frame of intent per side. `null` leaves that side entirely to `decideAI`. */
+export type SideInputs = [InputFrame | null, InputFrame | null];
 export interface GameEvent {
   id: number;
   type: 'shot' | 'pass' | 'hit' | 'goal' | 'post' | 'crossbar' | 'save' | 'faceoff' | 'horn';
@@ -174,10 +205,8 @@ export interface MatchState {
   hits: [number, number];
   skaters: Skater[];
   puck: Puck;
-  controlled: number;
-  /** After a defensive switch, keep skating at the play while the left stick is quiet. */
-  autoSkate: boolean;
-  homeTeam: Team;
+  /** Per-team control and aim, indexed by `Team`. Which side *you* are watching is a client concern. */
+  sides: [SideState, SideState];
   /** Club on each side. Side 0 has home ice. */
   teams: [Club, Club];
   /** Which uniform each side wears. */
@@ -185,19 +214,6 @@ export interface MatchState {
   /** How hard opposing CPUs play. The player's teammates stay All-Star. */
   difficulty: Difficulty;
   scoringTeam: Team | null;
-  shotCharge: number;
-  /** Left-stick shot aim across the net, −1 (right post from behind) to 1. */
-  shotAim: number;
-  /** Shot height on the net, 0 (ice) to 1 (top shelf). */
-  shotLift: number;
-  /** Holding the pass button with the puck, ready to aim. */
-  passHeld: boolean;
-  /** Aimed pass direction on the ice. */
-  passAim: Vec2;
-  /** Intended receiver while aiming, or null for a dump into space. */
-  passTarget: number | null;
-  /** Ice-arrow length while aiming a pass. */
-  passRange: number;
   tick: number;
   /** Seconds the simulation holds still after a knockdown, for impact. */
   hitstop: number;
@@ -206,9 +222,9 @@ export interface MatchState {
   events: GameEvent[];
   notice: string;
   noticeTimer: number;
+  /** Side the notice is about, so each client can phrase it from its own point of view. */
+  noticeTeam: Team | null;
   possession: [number, number];
-  /** Faceoff countdown remaining when the player struck; -1 if they have not. */
-  drawInput: number;
   /** Team currently taking a shootout attempt. */
   shootoutShooter: Team;
   /** 1-based shootout round, including sudden death. */

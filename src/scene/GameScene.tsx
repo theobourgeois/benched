@@ -15,6 +15,7 @@ import { IceSpray } from './Effects';
 import {
   driveReplay,
   goalReplayWanted,
+  mySide,
   publish,
   runtime,
   startGoalReplay,
@@ -32,7 +33,7 @@ import { cameraFraming } from './camera';
 import { playerLocator } from './locator';
 import { PUCK, RULES } from '../game/config';
 import { hasActiveCelly } from '../game/cellys';
-import type { InputFrame, Phase } from '../game/types';
+import type { InputFrame, Phase, SideInputs } from '../game/types';
 import { labHooks } from './animationReview';
 /** Dev-only animation lab: drives the subject, the close-up camera, overlays and captures. */
 const LabScene = import.meta.env.DEV
@@ -80,7 +81,7 @@ function Simulation() {
       }
       if (['playing', 'faceoff', 'goal'].includes(runtime.match.phase)) {
         togglePause(runtime.match);
-        runtime.audio.updateSkating(runtime.match);
+        runtime.audio.updateSkating(runtime.match, 1, runtime.myTeam);
         publish();
       }
     };
@@ -122,14 +123,16 @@ function Simulation() {
       pending.current = null;
       accumulator.current = 0;
       driveReplay(replay, replayInput, dt);
-      runtime.audio.updateSkating(viewMatch(), Math.min(1, viewTimeScale()));
+      runtime.audio.updateSkating(viewMatch(), Math.min(1, viewTimeScale()), runtime.myTeam);
       tickPublish();
       return;
     }
+    const you = mySide(s);
     const frame = screenInputToRink(
-      runtime.controller.read(Math.min(delta, 0.05), s.puck.owner === s.controlled),
+      runtime.controller.read(Math.min(delta, 0.05), s.puck.owner === you.controlled),
       s,
       runtime.settings.camera,
+      runtime.myTeam,
     );
     if (navigateWithController()) {
       frame.pause = false;
@@ -166,10 +169,22 @@ function Simulation() {
           pause: frame.pause || old.pause,
         }
       : frame;
+    // Pausing is a request from a person, not something the physics can decide: with two sticks
+    // on the ice the engine cannot know whose pause it is, so it is resolved out here.
+    if (pending.current.pause) {
+      togglePause(s);
+      pending.current = noEdges(pending.current);
+      runtime.audio.updateSkating(s, 1, runtime.myTeam);
+      publish();
+      accumulator.current = 0;
+      return;
+    }
     accumulator.current +=
       Math.min(delta, 0.05) * (import.meta.env.DEV && labHooks.active ? labHooks.simScale : 1);
+    const sides: SideInputs = [null, null];
     while (accumulator.current >= RULES.fixedStep) {
-      stepMatch(s, pending.current, RULES.fixedStep);
+      sides[runtime.myTeam] = pending.current;
+      stepMatch(s, sides, RULES.fixedStep);
       pending.current = noEdges(pending.current);
       accumulator.current -= RULES.fixedStep;
       if (RECORDED.includes(s.phase) && ++steps.current % RECORD_EVERY === 0)
@@ -217,7 +232,7 @@ function Simulation() {
       goalReplay.current = false;
       startGoalReplay();
     }
-    runtime.audio.updateSkating(s);
+    runtime.audio.updateSkating(s, 1, runtime.myTeam);
     tickPublish();
   });
   return null;
@@ -236,7 +251,7 @@ function CameraRig() {
           target: look.current.toArray(),
         })
       : {
-          ...cameraFraming(runtime.match, runtime.settings.camera, aspect),
+          ...cameraFraming(runtime.match, runtime.settings.camera, aspect, runtime.myTeam),
           // Coming out of a replay cuts back to the game rather than flying across the rink.
           cut: inReplay.current,
           smoothing: 5,
@@ -315,21 +330,22 @@ function PassAim() {
     catchRing = useRef<THREE.Mesh>(null);
   useFrame(() => {
     const s = runtime.match,
-      p = s.skaters[s.controlled],
+      side = mySide(s),
+      p = s.skaters[side.controlled],
       root = group.current;
     if (!root) return;
     const live =
       !runtime.replay &&
       runtime.settings.beginner &&
-      s.passHeld &&
+      side.passHeld &&
       s.phase === 'playing' &&
-      s.puck.owner === s.controlled &&
+      s.puck.owner === side.controlled &&
       p.role !== 'G';
     root.visible = live;
     if (!live) return;
-    const range = Math.max(2.2, s.passRange);
+    const range = Math.max(2.2, side.passRange);
     root.position.set(p.x, 0.05, p.z);
-    root.rotation.y = Math.atan2(s.passAim.x, s.passAim.z);
+    root.rotation.y = Math.atan2(side.passAim.x, side.passAim.z);
     if (shaft.current) {
       shaft.current.scale.set(1, 1, Math.max(0.4, range - 0.85));
       shaft.current.position.z = 0.55 + shaft.current.scale.z / 2;
@@ -361,7 +377,13 @@ function PlayerLocatorHud({ marker }: { marker: RefObject<HTMLDivElement | null>
     if (!el) return;
     const loc = runtime.replay
       ? null
-      : playerLocator(runtime.match, camera as THREE.PerspectiveCamera, size.width, shown.current);
+      : playerLocator(
+          runtime.match,
+          camera as THREE.PerspectiveCamera,
+          size.width,
+          shown.current,
+          runtime.myTeam,
+        );
     shown.current = Boolean(loc);
     if (!loc) {
       el.hidden = true;
@@ -380,20 +402,21 @@ function ShotAimHud({ marker }: { marker: RefObject<HTMLDivElement | null> }) {
     const el = marker.current;
     if (!el) return;
     const s = runtime.match,
-      p = s.skaters[s.controlled];
+      side = mySide(s),
+      p = s.skaters[side.controlled];
     const live =
       !runtime.replay &&
       runtime.settings.beginner &&
       s.phase === 'playing' &&
-      s.puck.owner === s.controlled &&
+      s.puck.owner === side.controlled &&
       p.role !== 'G' &&
       !s.puck.shot &&
-      !s.passHeld;
+      !side.passHeld;
     if (!live) {
       el.hidden = true;
       return;
     }
-    const target = netShotTarget(s, p, s.shotAim, s.shotLift);
+    const target = netShotTarget(s, p, side.shotAim, side.shotLift);
     _aimNdc.set(target.x, target.y, target.z).project(camera);
     if (_aimNdc.z > 1) {
       el.hidden = true;
@@ -403,7 +426,7 @@ function ShotAimHud({ marker }: { marker: RefObject<HTMLDivElement | null> }) {
     const x = (_aimNdc.x * 0.5 + 0.5) * size.width;
     const y = (-_aimNdc.y * 0.5 + 0.5) * size.height;
     el.style.transform = `translate(${x}px, ${y}px)`;
-    const spread = shotSpread(s, p, s.shotCharge, target);
+    const spread = shotSpread(s, p, side.shotCharge, target);
     _aimEdge.set(target.x, target.y + spread, target.z).project(camera);
     const ring = Math.hypot(
       (_aimEdge.x - _aimNdc.x) * 0.5 * size.width,

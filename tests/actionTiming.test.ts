@@ -10,13 +10,14 @@ import {
   sampleHockeyAction,
   shotWindup,
 } from '../src/scene/hockeyMotion';
+import { drive, played, seat } from './support';
 
 function chargedShot() {
   const s = createMatch(),
     p = s.skaters[0];
-  s.controlled = p.id;
+  drive(s, p.id);
   s.puck.owner = p.id;
-  s.shotCharge = 0.85;
+  s.sides[played(s)].shotCharge = 0.85;
   requestShot(s, p, 0.9, 0.3, 0.6);
   return { s, p };
 }
@@ -53,16 +54,16 @@ describe('charged-shot contact timing', () => {
     const s = createMatch(0, 'freeSkate'),
       p = s.skaters[0];
     s.phase = 'playing';
-    s.controlled = 0;
+    drive(s, 0);
     s.puck.owner = 0;
-    s.shotCharge = 0.9;
+    s.sides[played(s)].shotCharge = 0.9;
     Object.assign(p, { x: 0, z: 0, angle: Math.PI / 2, cooldown: 0 });
-    stepMatch(s, { ...EMPTY_INPUT, shoot: true, shotPower: 0.9 });
+    stepMatch(s, seat(s, { ...EMPTY_INPUT, shoot: true, shotPower: 0.9 }));
     expect(p.pendingShot).not.toBeNull();
     expect(s.shots[0]).toBe(0);
-    for (let i = 0; i < 8; i++) stepMatch(s, EMPTY_INPUT);
+    for (let i = 0; i < 8; i++) stepMatch(s, seat(s, EMPTY_INPUT));
     expect(s.shots[0]).toBe(0);
-    stepMatch(s, EMPTY_INPUT);
+    stepMatch(s, seat(s, EMPTY_INPUT));
     expect(s.shots[0]).toBe(1);
     expect(p.pendingShot).toBeNull();
     expect(s.puck.owner).toBeNull();
@@ -73,8 +74,8 @@ describe('charged-shot contact timing', () => {
       const s = createMatch(),
         p = s.skaters[0];
       s.puck.owner = p.id;
-      s.controlled = p.id;
-      s.shotCharge = kind === 'tap' ? 0 : 0.9;
+      drive(s, p.id);
+      s.sides[played(s)].shotCharge = kind === 'tap' ? 0 : 0.9;
       if (kind === 'backhand') p.stickSide = -0.6;
       if (kind === 'one-timer') p.passTimer = 0.2;
       requestShot(s, p, 0.9);

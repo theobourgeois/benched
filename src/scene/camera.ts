@@ -1,6 +1,6 @@
 import { attackDirection, RINK } from '../game/config';
 import { clamp } from '../game/math';
-import type { CameraMode, MatchState, Settings } from '../game/types';
+import type { CameraMode, MatchState, Settings, Team } from '../game/types';
 
 export const CAMERA_OPTIONS: { value: CameraMode; label: string }[] = [
   { value: 'broadcast', label: 'Broadcast · net angle' },
@@ -85,7 +85,13 @@ function debugFraming(): Framing | null {
   return (window as unknown as { __CAMERA__?: Framing }).__CAMERA__ ?? null;
 }
 
-export function cameraFraming(match: MatchState, camera: Settings['camera'], aspect: number) {
+/** `anchor` is the side being watched: which way the ice runs and whose skater the camera holds. */
+export function cameraFraming(
+  match: MatchState,
+  camera: Settings['camera'],
+  aspect: number,
+  anchor: Team = 0,
+) {
   const debug = debugFraming();
   if (debug) return debug;
   if (match.phase === 'menu')
@@ -96,7 +102,7 @@ export function cameraFraming(match: MatchState, camera: Settings['camera'], asp
     case 'broadcast':
     case 'tight':
     case 'high':
-      return trackingFraming(match, aspect, ANGLES[camera]);
+      return trackingFraming(match, aspect, ANGLES[camera], anchor);
     default: {
       const _exhaustive: never = camera;
       return _exhaustive;
@@ -104,11 +110,11 @@ export function cameraFraming(match: MatchState, camera: Settings['camera'], asp
   }
 }
 
-function isShootoutGoalie(match: MatchState) {
-  return match.mode === 'shootout' && match.skaters[match.controlled]?.role === 'G';
+function isShootoutGoalie(match: MatchState, anchor: Team) {
+  return match.mode === 'shootout' && match.skaters[match.sides[anchor].controlled]?.role === 'G';
 }
-function goalieFraming(match: MatchState, aspect: number, angle: TrackingAngle) {
-  const goalie = match.skaters[match.controlled],
+function goalieFraming(match: MatchState, aspect: number, angle: TrackingAngle, anchor: Team) {
+  const goalie = match.skaters[match.sides[anchor].controlled],
     look = attackDirection(goalie.team, match.period),
     puck = match.puck,
     scale = clamp(1.45 / aspect, 1, 2.6);
@@ -122,14 +128,15 @@ function goalieFraming(match: MatchState, aspect: number, angle: TrackingAngle) 
     fov: angle.fov + 8,
   };
 }
-function trackingFraming(match: MatchState, aspect: number, angle: TrackingAngle) {
-  if (isShootoutGoalie(match)) return goalieFraming(match, aspect, angle);
-  const direction = attackDirection(match.homeTeam, match.period),
-    player = match.skaters[match.controlled];
+function trackingFraming(match: MatchState, aspect: number, angle: TrackingAngle, anchor: Team) {
+  if (isShootoutGoalie(match, anchor)) return goalieFraming(match, aspect, angle, anchor);
+  const side = match.sides[anchor];
+  const direction = attackDirection(anchor, match.period),
+    player = match.skaters[side.controlled];
   const attackX = player.x * direction;
   const netView = clamp((attackX - 8) / 14, 0, 1);
   const attackLook = clamp((match.puck.x * direction + 16) / 24, 0, 1);
-  const lift = match.puck.owner === match.controlled ? match.shotLift : 0;
+  const lift = match.puck.owner === side.controlled ? side.shotLift : 0;
   const x = clamp(
     match.puck.x * (1 - angle.follow - netView * 0.22) +
       player.x * angle.follow +
@@ -137,7 +144,7 @@ function trackingFraming(match: MatchState, aspect: number, angle: TrackingAngle
     -23,
     23,
   );
-  const z = clamp(match.puck.z * 0.22 + match.shotAim * netView * 0.55, -3.4, 3.4);
+  const z = clamp(match.puck.z * 0.22 + side.shotAim * netView * 0.55, -3.4, 3.4);
   const scale = clamp(1.45 / aspect, 1, 2.6);
   const height = (angle.height - netView * angle.heightDrop - lift * 1.8) * scale;
   const back = (angle.back + netView * angle.backIn) * scale;

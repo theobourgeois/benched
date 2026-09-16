@@ -3,13 +3,13 @@ import { useFrame, useLoader } from '@react-three/fiber';
 import * as THREE from 'three';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { runtime, viewMatch, viewTimeScale } from '../game/store';
+import { mySide, runtime, viewMatch, viewTimeScale } from '../game/store';
 import { uniformFor } from '../game/clubs';
 import { STICK } from '../game/config';
 import { isOnIce } from '../game/engine';
 import { activeDeke } from '../game/dekes';
 import { activeCelly, cellyRagdoll } from '../game/cellys';
-import type { MatchState, Skater } from '../game/types';
+import type { MatchState, Skater, Team } from '../game/types';
 import {
   HELMET_GOALIE_URL,
   HELMET_PLAYER_URL,
@@ -279,7 +279,8 @@ export const Player = memo(function Player({ id }: { id: number }) {
     tilt.position.y = THREE.MathUtils.lerp(tilt.position.y, fallen * (diving ? 0.1 : 0.22), ease);
     root.updateMatrixWorld(true);
     const { bones } = rig;
-    const charge = shotWindup(skater, s.controlled === id ? s.shotCharge : 0);
+    const own = s.sides[skater.team];
+    const charge = shotWindup(skater, own.controlled === id ? own.shotCharge : 0);
     if (goalie) sampleGoalieAction(skater, s.puck, goalieAction, dt * viewTimeScale());
     // The ragdoll runs on replay time, so a knockdown tumbles slowly in slow motion.
     const posture = poseSkater(
@@ -610,13 +611,19 @@ export const Player = memo(function Player({ id }: { id: number }) {
       labPose.ragdoll = ragdoll;
       labHooks.afterPose(rig, parts, labPose);
     }
+    // Red under the skater this client is holding, blue under the other person's, green on the
+    // player being passed to. A CPU side marks nobody.
+    const watching = mySide(s),
+      opposite = s.sides[(1 - runtime.myTeam) as Team];
+    const yours = watching.controlled === id,
+      theirs = opposite.human && opposite.controlled === id;
     ring.current!.visible =
       !runtime.replay &&
       !(import.meta.env.DEV && labHooks.active) &&
-      (s.controlled === id || (s.passHeld && s.passTarget === id));
+      (yours || theirs || (watching.passHeld && watching.passTarget === id));
     const marker = ring.current!.material;
     if (marker instanceof THREE.MeshBasicMaterial)
-      marker.color.set(s.controlled === id ? '#e84a4a' : '#d5fa64');
+      marker.color.set(yours ? '#e84a4a' : theirs ? '#4aa8e8' : '#d5fa64');
   });
   return (
     <group ref={group}>

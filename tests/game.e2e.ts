@@ -1,6 +1,8 @@
 import { test, expect, type Page } from '@playwright/test';
 async function state(page: Page) {
-  return page.evaluate('JSON.parse(JSON.stringify(window.__BENCHED__.runtime.match))');
+  return page.evaluate(
+    'JSON.parse(JSON.stringify({ ...window.__BENCHED__.runtime.match, myTeam: window.__BENCHED__.runtime.myTeam }))',
+  );
 }
 async function settings(page: Page) {
   return page.evaluate('JSON.parse(JSON.stringify(window.__BENCHED__.runtime.settings))');
@@ -52,7 +54,7 @@ test('menu renders, selects teams, opens accessible controls and settings', asyn
   await page.getByRole('button', { name: 'Ready', exact: true }).click();
   await page.getByRole('button', { name: 'Play game', exact: true }).click();
   const s = await state(page);
-  expect(s.homeTeam).toBe(1);
+  expect(s.myTeam).toBe(1);
   expect(s.difficulty).toBe('rookie');
   expect(s.jerseys).toEqual(['home', 'away']);
   await expect(page.locator('canvas')).toHaveCount(1);
@@ -104,7 +106,7 @@ test('keyboard skates, skill stick shoots, pause freezes play and help stays pau
   await start(page);
   await changeState(
     page,
-    'const s=runtime.match; s.controlled=0; s.puck.owner=0; s.skaters[0].x=0; s.skaters[0].z=-8; s.skaters[0].cooldown=0;Object.assign(s.skaters[0],{vx:0,vz:0,angle:Math.PI/2,downTimer:0,stumbleTimer:0,checkTimer:0}); s.skaters.slice(6).forEach(p=>{p.x=20;p.z=10})',
+    'const s=runtime.match; s.sides[0].controlled=0; s.puck.owner=0; s.skaters[0].x=0; s.skaters[0].z=-8; s.skaters[0].cooldown=0;Object.assign(s.skaters[0],{vx:0,vz:0,angle:Math.PI/2,downTimer:0,stumbleTimer:0,checkTimer:0}); s.skaters.slice(6).forEach(p=>{p.x=20;p.z=10})',
   );
   await page.keyboard.down('KeyD');
   await expect.poll(async () => (await state(page)).skaters[0].z).toBeGreaterThan(-7.7);
@@ -203,7 +205,7 @@ test('virtual Xbox drives the menus, picks a jersey, skates, shoots, and safely 
   expect(started.mode).toBe('exhibition');
   await changeState(
     page,
-    'const s=runtime.match; s.controlled=0; s.puck.owner=0; s.skaters[0].x=0;s.skaters[0].z=-8;s.skaters[0].cooldown=0;Object.assign(s.skaters[0],{vx:0,vz:0,angle:Math.PI/2,downTimer:0,stumbleTimer:0,checkTimer:0});s.skaters.slice(6).forEach(p=>{p.x=20;p.z=10})',
+    'const s=runtime.match; s.sides[0].controlled=0; s.puck.owner=0; s.skaters[0].x=0;s.skaters[0].z=-8;s.skaters[0].cooldown=0;Object.assign(s.skaters[0],{vx:0,vz:0,angle:Math.PI/2,downTimer:0,stumbleTimer:0,checkTimer:0});s.skaters.slice(6).forEach(p=>{p.x=20;p.z=10})',
   );
   await page.evaluate('window.testPad.axes[0]=1');
   await expect.poll(async () => (await state(page)).skaters[0].z).toBeGreaterThan(-7.7);
@@ -374,7 +376,7 @@ test('3-on-3 and shootout can be selected from the menu', async ({ page }) => {
   const shootout = await state(page);
   expect(shootout.mode).toBe('shootout');
   expect(shootout.phase).toBe('playing');
-  expect(shootout.puck.owner).toBe(shootout.controlled);
+  expect(shootout.puck.owner).toBe(shootout.sides[shootout.myTeam].controlled);
 });
 
 test('free skate starts on open ice, keeps saves live, and resets after a goal', async ({
@@ -390,10 +392,10 @@ test('free skate starts on open ice, keeps saves live, and resets after a goal',
   const opened = await state(page);
   expect(opened.mode).toBe('freeSkate');
   expect(opened.phase).toBe('playing');
-  expect(opened.puck.owner).toBe(opened.controlled);
+  expect(opened.puck.owner).toBe(opened.sides[opened.myTeam].controlled);
   await changeState(
     page,
-    'const s=runtime.match; const g=s.skaters.find(p=>p.role==="G"&&p.team!==s.homeTeam); Object.assign(g,{x:25,z:0}); Object.assign(s.puck,{owner:null,x:24.1,z:0.1,y:0.4,vx:30,vz:0,shot:true,lockout:0})',
+    'const s=runtime.match; const g=s.skaters.find(p=>p.role==="G"&&p.team!==runtime.myTeam); Object.assign(g,{x:25,z:0}); Object.assign(s.puck,{owner:null,x:24.1,z:0.1,y:0.4,vx:30,vz:0,shot:true,lockout:0})',
   );
   await expect
     .poll(async () => (await state(page)).events.some((e: { type: string }) => e.type === 'save'))
@@ -446,7 +448,7 @@ test('a keyboard flick drives a backcheck toward your own end and dislodges the 
     page,
     `
     const s=runtime.match;
-    s.mode='oneOnOne'; s.controlled=0; s.hitstop=0; s.hits=[0,0]; s.phase='playing';
+    s.mode='oneOnOne'; s.sides[0].controlled=0; s.hitstop=0; s.hits=[0,0]; s.phase='playing';
     Object.assign(s.skaters[0], {x:2,z:5,vx:-8,vz:0,angle:-Math.PI/2,cooldown:0,downTimer:0,stumbleTimer:0,checkTimer:0,checkLanded:false});
     Object.assign(s.skaters[6], {x:-0.5,z:5,vx:-5,vz:0,angle:-Math.PI/2,cooldown:10,stumbleTimer:1,downTimer:0,hitImmunity:0});
     Object.assign(s.puck, {owner:6,x:-1.5,z:5,vx:-5,vz:0,shot:false});
@@ -485,7 +487,7 @@ test('shows a bottom locator when you trail the play off-camera', async ({ page 
   await expect(page.locator('.player-locator')).toBeHidden();
   await changeState(
     page,
-    'const s=runtime.match,p=s.skaters[s.controlled]; s.puck.x=24; s.puck.z=0; s.puck.owner=6; s.skaters.forEach(q=>{if(q.id!==s.controlled){q.x=22;q.z=(q.id-6)*1.4}}); p.x=-18; p.z=0; p.vx=0; p.vz=0',
+    'const s=runtime.match,c=s.sides[runtime.myTeam].controlled,p=s.skaters[c]; s.puck.x=24; s.puck.z=0; s.puck.owner=6; s.skaters.forEach(q=>{if(q.id!==c){q.x=22;q.z=(q.id-6)*1.4}}); p.x=-18; p.z=0; p.vx=0; p.vz=0',
   );
   await expect(page.locator('.player-locator')).toBeVisible({ timeout: 4000 });
   await expect(page.locator('.player-locator small')).toHaveText('YOU');

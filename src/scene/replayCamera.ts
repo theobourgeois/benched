@@ -1,7 +1,7 @@
 import { attackDirection, RINK } from '../game/config';
 import { clamp } from '../game/math';
 import { GOAL_REPLAY, type ReplayCamera, type ReplaySession } from '../game/replay';
-import type { Settings } from '../game/types';
+import type { Settings, Team } from '../game/types';
 import { cameraFraming } from './camera';
 
 type Vec3 = readonly [number, number, number];
@@ -140,6 +140,7 @@ export function replayFraming(
   aspect: number,
   setting: Settings['camera'],
   current: { position: Vec3; target: Vec3 },
+  anchor: Team = 0,
 ): ReplayFraming {
   const cam = r.camera;
   const { input, drag } = cam;
@@ -169,7 +170,7 @@ export function replayFraming(
       break;
     }
     case 'broadcast': {
-      const f = cameraFraming(r.view, setting, aspect);
+      const f = cameraFraming(r.view, setting, aspect, anchor);
       framing = { ...f, cut: false, smoothing: 5 };
       break;
     }

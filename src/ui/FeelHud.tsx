@@ -18,7 +18,7 @@ import {
   type FeelParam,
 } from '../game/feel';
 import { distance } from '../game/math';
-import { useGame } from '../game/store';
+import { mySide, useGame } from '../game/store';
 
 function band(speed: number) {
   if (speed < 1.2) return 'still';
@@ -104,7 +104,8 @@ export function FeelHud({
   const [onlyChanged, setOnlyChanged] = useState(false);
   const [copied, setCopied] = useState(false);
   const meta = FEEL_GROUPS.find((item) => item.id === group) ?? FEEL_GROUPS[0];
-  const you = match.skaters[match.controlled];
+  const side = mySide(match);
+  const you = match.skaters[side.controlled];
   const speed = you ? Math.hypot(you.vx, you.vz) : 0;
   const puckDist = you ? distance(you, match.puck) : 0;
 
@@ -180,7 +181,7 @@ export function FeelHud({
               ? `celly · ${you.cellyKind}`
               : you.dekeKind
                 ? `deke · ${you.dekeKind}`
-                : match.puck.owner === match.controlled
+                : match.puck.owner === side.controlled
                   ? 'puck'
                   : 'open ice';
   const dirty = changed;
@@ -227,9 +228,7 @@ export function FeelHud({
           </div>
           <div>
             <dt>Puck</dt>
-            <dd>
-              {match.puck.owner === match.controlled ? 'on tape' : `${puckDist.toFixed(1)} m`}
-            </dd>
+            <dd>{match.puck.owner === side.controlled ? 'on tape' : `${puckDist.toFixed(1)} m`}</dd>
           </div>
           <div>
             <dt>Closest</dt>

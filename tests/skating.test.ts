@@ -5,6 +5,7 @@ import { decideAI } from '../src/game/ai';
 import { startDeke, stepDeke } from '../src/game/dekes';
 import { EMPTY_INPUT, PHYSICS, RULES } from '../src/game/config';
 import type { Difficulty, Skater } from '../src/game/types';
+import { drive, played, seat } from './support';
 
 const dt = RULES.fixedStep;
 const speed = (p: Skater) => Math.hypot(p.vx, p.vz);
@@ -144,9 +145,9 @@ describe('readable committed contact', () => {
     const s = contactRink(),
       a = s.skaters[0],
       b = s.skaters[6];
-    stepMatch(s, { ...EMPTY_INPUT, check: true, stickIceX: 1 });
+    stepMatch(s, seat(s, { ...EMPTY_INPUT, check: true, stickIceX: 1 }));
     Object.assign(b, { vz: 10, vx: 0 });
-    for (let i = 0; i < 60; i++) stepMatch(s, { ...EMPTY_INPUT, moveX: 1 });
+    for (let i = 0; i < 60; i++) stepMatch(s, seat(s, { ...EMPTY_INPUT, moveX: 1 }));
     expect(s.hits[0]).toBe(0);
     expect(a.checkLanded).toBe(false);
     expect(Math.abs(a.z)).toBeLessThan(0.1);
@@ -157,7 +158,7 @@ describe('readable committed contact', () => {
       a = s.skaters[0],
       b = s.skaters[6];
     Object.assign(b, { x: -1.2, z: 0.5, vx: 8 });
-    stepMatch(s, { ...EMPTY_INPUT, check: true, stickIceX: 1 });
+    stepMatch(s, seat(s, { ...EMPTY_INPUT, check: true, stickIceX: 1 }));
     expect(a.checkLanded).toBe(false);
     expect(s.hits[0]).toBe(0);
   });
@@ -176,8 +177,9 @@ describe('readable committed contact', () => {
       stumbleTimer: 0,
     });
     Object.assign(s.puck, { owner: 6, x: b.x, z: b.z });
-    stepMatch(s, { ...EMPTY_INPUT, check: true, moveX: 1, checkPower: 1 });
-    for (let i = 0; i < 8 && s.hits[0] === 0; i++) stepMatch(s, { ...EMPTY_INPUT, moveX: 1 });
+    stepMatch(s, seat(s, { ...EMPTY_INPUT, check: true, moveX: 1, checkPower: 1 }));
+    for (let i = 0; i < 8 && s.hits[0] === 0; i++)
+      stepMatch(s, seat(s, { ...EMPTY_INPUT, moveX: 1 }));
     expect(a.checkLanded).toBe(true);
     expect(s.hits[0]).toBe(1);
     expect(b.downTimer).toBeGreaterThan(0);
@@ -202,7 +204,7 @@ describe('readable committed contact', () => {
   it('leaves the loose puck carrying its own momentum, not the knockdown impulse', () => {
     const s = contactRink();
     s.skaters[6].x = 1.2;
-    stepMatch(s, { ...EMPTY_INPUT, check: true, stickIceX: 1, checkPower: 1 });
+    stepMatch(s, seat(s, { ...EMPTY_INPUT, check: true, stickIceX: 1, checkPower: 1 }));
     expect(s.hits[0]).toBe(1);
     expect(s.puck.owner).toBeNull();
     expect(Math.hypot(s.puck.vx, s.puck.vz)).toBeLessThan(0.5);
@@ -425,7 +427,7 @@ describe('breakaway backcheck', () => {
   it('does not let a Legend CPU run down a rushing carrier', () => {
     const { s, carrier, chaser } = rush('legend');
     const start = carrier.x - chaser.x;
-    for (let i = 0; i < 240; i++) stepMatch(s, { ...EMPTY_INPUT, moveX: 1, hustle: true });
+    for (let i = 0; i < 240; i++) stepMatch(s, seat(s, { ...EMPTY_INPUT, moveX: 1, hustle: true }));
     expect(carrier.x - chaser.x).toBeGreaterThan(start - 0.45);
     expect(speed(chaser)).toBeLessThanOrEqual(PHYSICS.hustleSpeed + 0.12);
   });
@@ -436,7 +438,7 @@ describe('breakaway backcheck', () => {
     Object.assign(chaser, { vx: 1, vz: 0 });
     expect(isBackcheckingRush(s, chaser)).toBe(false);
     const start = carrier.x - chaser.x;
-    for (let i = 0; i < 180; i++) stepMatch(s, EMPTY_INPUT);
+    for (let i = 0; i < 180; i++) stepMatch(s, seat(s, EMPTY_INPUT));
     expect(carrier.x - chaser.x).toBeLessThan(start - 0.6);
   });
 });

@@ -6,6 +6,7 @@ import { netAimFromStick, screenInputToRink } from '../src/input/coordinates';
 import { cameraFraming } from '../src/scene/camera';
 import { playerLocator } from '../src/scene/locator';
 import type { Team } from '../src/game/types';
+import { drive, played } from './support';
 describe('end-to-end arena camera', () => {
   for (const team of [0, 1] as Team[])
     for (const period of [1, 2, 3]) {
@@ -13,15 +14,15 @@ describe('end-to-end arena camera', () => {
         const match = createMatch(team);
         match.phase = 'playing';
         match.period = period;
-        const framing = cameraFraming(match, 'broadcast', 1.5);
+        const framing = cameraFraming(match, 'broadcast', 1.5, team);
         const camera = new PerspectiveCamera(framing.fov, 1.5, 0.1, 250);
         camera.position.set(...framing.position);
         camera.lookAt(new Vector3(...framing.target));
         camera.updateMatrixWorld();
         const origin = new Vector3(...framing.target),
           center = origin.clone().project(camera);
-        const up = screenInputToRink({ ...EMPTY_INPUT, moveZ: -1 }, match, 'broadcast');
-        const right = screenInputToRink({ ...EMPTY_INPUT, moveX: 1 }, match, 'broadcast');
+        const up = screenInputToRink({ ...EMPTY_INPUT, moveZ: -1 }, match, 'broadcast', team);
+        const right = screenInputToRink({ ...EMPTY_INPUT, moveX: 1 }, match, 'broadcast', team);
         expect(
           origin
             .clone()
@@ -41,6 +42,7 @@ describe('end-to-end arena camera', () => {
           { ...EMPTY_INPUT, moveX: 1, shoot: true },
           match,
           'broadcast',
+          team,
         );
         expect(shot.aimZ).toBe(attackDirection(team, period));
         expect(shot.shoot).toBe(true);
@@ -48,6 +50,7 @@ describe('end-to-end arena camera', () => {
           { ...EMPTY_INPUT, stickX: 1, stickY: -1, shoot: true },
           match,
           'broadcast',
+          team,
         );
         expect(deke.aimZ).toBeCloseTo(0);
         expect(deke.stickY).toBe(-1);
@@ -55,18 +58,20 @@ describe('end-to-end arena camera', () => {
           { ...EMPTY_INPUT, moveX: 1, moveZ: -1, shoot: true },
           match,
           'broadcast',
+          team,
         );
         expect(corner.aimZ).toBe(attackDirection(team, period));
         expect(corner.shotHeight).toBe(1);
-        const ice = screenInputToRink({ ...EMPTY_INPUT, moveZ: 1 }, match, 'broadcast');
+        const ice = screenInputToRink({ ...EMPTY_INPUT, moveZ: 1 }, match, 'broadcast', team);
         expect(ice.shotHeight).toBe(0);
         const locked = screenInputToRink(
           { ...EMPTY_INPUT, moveZ: 1, shotHeight: 1 },
           match,
           'broadcast',
+          team,
         );
         expect(locked.shotHeight).toBe(1);
-        const rest = screenInputToRink(EMPTY_INPUT, match, 'broadcast');
+        const rest = screenInputToRink(EMPTY_INPUT, match, 'broadcast', team);
         expect(rest.aimZ).toBeCloseTo(0);
         expect(rest.shotHeight).toBeCloseTo(0.5);
       });
@@ -102,11 +107,11 @@ describe('end-to-end arena camera', () => {
     camera.position.set(...framing.position);
     camera.lookAt(new Vector3(...framing.target));
     camera.updateMatrixWorld();
-    const player = match.skaters[match.controlled];
+    const player = match.skaters[match.sides[played(match)].controlled];
     const skater = new Vector3(player.x, 0.95, player.z).project(camera);
     expect(skater.y).toBeGreaterThan(-0.72);
     expect(skater.y).toBeLessThan(0.15);
-    const dir = attackDirection(match.homeTeam, match.period);
+    const dir = attackDirection(played(match), match.period);
     const ice = new Vector3(dir * 26, 0.12, 0).project(camera);
     const shelf = new Vector3(dir * 26, 1.35, 0).project(camera);
     const left = new Vector3(dir * 26, 0.7, -1.8).project(camera);
@@ -132,7 +137,7 @@ describe('end-to-end arena camera', () => {
     const broadcast = cameraFraming(match, 'broadcast', 1.5);
     const tight = cameraFraming(match, 'tight', 1.5);
     const high = cameraFraming(match, 'high', 1.5);
-    const player = match.skaters[match.controlled];
+    const player = match.skaters[match.sides[played(match)].controlled];
     const pitch = (f: typeof tight) =>
       Math.atan2(f.position[1] - f.target[1], Math.abs(f.position[0] - f.target[0]));
     expect(Math.abs(tight.position[0] - player.x)).toBeLessThan(
@@ -146,15 +151,15 @@ describe('end-to-end arena camera', () => {
     const match = createMatch();
     match.phase = 'playing';
     const open = cameraFraming(match, 'broadcast', 1.5);
-    match.skaters[match.controlled].x = 22;
+    match.skaters[match.sides[played(match)].controlled].x = 22;
     match.puck.x = 22;
-    match.puck.owner = match.controlled;
-    match.shotLift = 1;
+    match.puck.owner = match.sides[played(match)].controlled;
+    match.sides[played(match)].shotLift = 1;
     const crease = cameraFraming(match, 'broadcast', 1.5);
     expect(crease.target[1]).toBeGreaterThan(0.6);
     expect(crease.position[1]).toBeLessThan(open.position[1] - 3);
-    expect(crease.target[0] * attackDirection(match.homeTeam, match.period)).toBeGreaterThan(
-      open.target[0] * attackDirection(match.homeTeam, match.period),
+    expect(crease.target[0] * attackDirection(played(match), match.period)).toBeGreaterThan(
+      open.target[0] * attackDirection(played(match), match.period),
     );
   });
   it('stays with the goalie when the other team is shooting in a shootout', () => {
@@ -163,7 +168,7 @@ describe('end-to-end arena camera', () => {
     match.shootoutShooter = 1;
     resetFormation(match);
     startMatch(match);
-    const goalie = match.skaters[match.controlled];
+    const goalie = match.skaters[match.sides[played(match)].controlled];
     const shooter = match.skaters.find((p) => p.team === 1 && p.role === 'C')!;
     expect(goalie.role).toBe('G');
     const framing = cameraFraming(match, 'broadcast', 1.5);
@@ -190,7 +195,7 @@ describe('end-to-end arena camera', () => {
     const match = createMatch(0, 'freeSkate');
     startMatch(match);
     match.phase = 'playing';
-    const player = match.skaters[match.controlled];
+    const player = match.skaters[match.sides[played(match)].controlled];
     const target = netShotTarget(match, player, 0, 0.35);
     const framing = cameraFraming(match, 'broadcast', 1.5);
     const camera = new PerspectiveCamera(framing.fov, 1.5, 0.1, 250);
@@ -224,7 +229,7 @@ describe('off-screen player locator', () => {
   it('pins a trailing skater to the bottom and keeps left wing left of right wing', () => {
     const match = createMatch();
     match.phase = 'playing';
-    const player = match.skaters[match.controlled];
+    const player = match.skaters[match.sides[played(match)].controlled];
     match.puck.x = 25;
     match.puck.z = 0;
     player.x = -18;
@@ -247,7 +252,7 @@ describe('off-screen player locator', () => {
     const match = createMatch();
     match.phase = 'playing';
     match.puck.x = 25;
-    match.skaters[match.controlled].x = -18;
+    match.skaters[match.sides[played(match)].controlled].x = -18;
     expect(playerLocator(match, framedCamera(match, 'wide'), 1600)).toBeNull();
   });
 });

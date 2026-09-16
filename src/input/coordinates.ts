@@ -1,6 +1,12 @@
 import { attackDirection } from '../game/config';
 import { clamp } from '../game/math';
-import { cameraUsesAttackUp, type InputFrame, type MatchState, type Settings } from '../game/types';
+import {
+  cameraUsesAttackUp,
+  type InputFrame,
+  type MatchState,
+  type Settings,
+  type Team,
+} from '../game/types';
 
 /**
  * Map a screen-space stick onto the net: lateral is posts, up is shelf. The round stick gate is
@@ -26,13 +32,20 @@ export function screenStickToIce(
   return { stickIceX: -stickY * direction, stickIceZ: stickX * direction };
 }
 
-/** Convert screen directions to rink coordinates. Shot aim follows the left stick. */
+/**
+ * Convert screen directions to rink coordinates. Shot aim follows the left stick.
+ *
+ * `anchor` is the side the camera is framing, not necessarily the side holding the stick: two
+ * people on one screen share an orientation, so both map through the same anchor or one of them
+ * would find up-screen sending them backwards.
+ */
 export function screenInputToRink(
   input: InputFrame,
   match: MatchState,
   camera: Settings['camera'],
+  anchor: Team = 0,
 ): InputFrame {
-  const direction = attackDirection(match.homeTeam, match.period);
+  const direction = attackDirection(anchor, match.period);
   const forcedHigh = (input.shotHeight ?? 0) >= 1;
   const attackUp = cameraUsesAttackUp(camera);
   const ice = screenStickToIce(input.stickX, input.stickY, direction, attackUp);

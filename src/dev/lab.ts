@@ -3,7 +3,7 @@
 // Docs: docs/anim-lab.md.
 import { useSyncExternalStore } from 'react';
 import * as THREE from 'three';
-import { beginGame, publish, returnToMenu, runtime } from '../game/store';
+import { beginGame, mySide, publish, returnToMenu, runtime } from '../game/store';
 import { stickTip } from '../game/engine';
 import { PUCK } from '../game/config';
 import type { MatchState } from '../game/types';
@@ -167,8 +167,18 @@ export function orbitFromPreset() {
 }
 
 const goalieIndex = (s: MatchState) =>
-  s.skaters.findIndex((p) => p.role === 'G' && p.team === s.skaters[s.controlled].team);
+  s.skaters.findIndex((p) => p.role === 'G' && p.team === s.skaters[skaterIndex].team);
 let skaterIndex = 0;
+/**
+ * The lab puppets one skater directly. Whichever side that skater is on is the one holding the
+ * stick, so poses and windups are read off that side rather than off a fixed "you".
+ */
+function labSide(s: MatchState, subject = lab.subject) {
+  const side = s.sides[s.skaters[subject]?.team ?? 0];
+  side.human = true;
+  side.controlled = subject;
+  return side;
+}
 
 function applyClip(s: MatchState, clip: LabClip, t: number) {
   const f = clip.frame(t);
@@ -177,8 +187,7 @@ function applyClip(s: MatchState, clip: LabClip, t: number) {
   const at = lab.travel ? travelAt(clip, t) : { x: 0, z: 0 };
   p.x = at.x;
   p.z = at.z;
-  s.controlled = lab.subject;
-  s.shotCharge = f.charge;
+  labSide(s).shotCharge = f.charge;
   s.hitstop = 1e9;
   s.phase = 'playing';
   const puck = s.puck;
@@ -212,7 +221,7 @@ function writeUrl() {
 function onPose(rig: SkaterRig, stick: StickParts, pose: PoseDebug) {
   const s = runtime.match;
   const t = lab.mode === 'live' ? (lab.recording?.t ?? 0) : lab.time;
-  const sample = measure(rig, stick, pose, s.skaters[lab.subject], s.shotCharge, t);
+  const sample = measure(rig, stick, pose, s.skaters[lab.subject], labSide(s).shotCharge, t);
   lab.current = sample;
   const recording = lab.pass ? lab.pass.warm <= 0 : lab.mode === 'clip' && lab.playing;
   if (recording) lab.track.set(sample.frame, sample);
@@ -224,9 +233,9 @@ export function openLab(
 ) {
   if (!import.meta.env.DEV) return;
   if (!labHooks.active) {
-    beginGame(runtime.match.homeTeam, 'freeSkate');
+    beginGame(runtime.myTeam, 'freeSkate');
     runtime.match.phase = 'playing';
-    skaterIndex = runtime.match.controlled;
+    skaterIndex = mySide(runtime.match).controlled;
     muted = runtime.audio.enabled;
     runtime.audio.enabled = false;
     labHooks.active = true;
@@ -339,7 +348,7 @@ export function setMode(mode: 'clip' | 'live') {
     lab.subject = skaterIndex;
     labHooks.subject = skaterIndex;
     Object.assign(s.skaters[skaterIndex], REST_SKATER);
-    s.controlled = skaterIndex;
+    labSide(s, skaterIndex);
     s.puck.owner = skaterIndex;
     s.hitstop = 0;
     lab.camera = lab.camera === 'game' ? 'game' : 'orbit';
@@ -371,7 +380,7 @@ export function driveLab(dt: number) {
   if (lab.mode === 'live') {
     labHooks.simScale = lab.rate;
     labHooks.delta = Math.min(dt, 0.05) * lab.rate;
-    s.controlled = lab.subject;
+    const side = labSide(s);
     if (s.phase === 'paused') s.phase = 'playing';
     const rec = lab.recording;
     if (rec) {
@@ -385,7 +394,7 @@ export function driveLab(dt: number) {
           queuedCheck: null,
         },
         puck: { x: s.puck.x, y: s.puck.y, z: s.puck.z, owned: s.puck.owner === lab.subject },
-        charge: s.shotCharge,
+        charge: side.shotCharge,
       });
     }
   } else {

@@ -1,3 +1,4 @@
+import type { InputFrame } from './types';
 export const RINK = {
   halfLength: 30,
   halfWidth: 13,
@@ -244,7 +245,7 @@ export const GOALIE_STICK = { side: -0.1, reach: 0.72 };
 export const DEFAULT_PHYSICS = Object.freeze({ ...PHYSICS });
 export const DEFAULT_GOALIE = Object.freeze({ ...GOALIE });
 export const DEFAULT_STICK = Object.freeze({ ...STICK });
-export const EMPTY_INPUT = {
+export const EMPTY_INPUT: InputFrame = {
   moveX: 0,
   moveZ: 0,
   stickX: 0,

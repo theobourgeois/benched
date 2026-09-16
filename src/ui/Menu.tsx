@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { Club } from '../game/clubs';
-import { useGame } from '../game/store';
+import { runtime, useGame } from '../game/store';
 import type { GameMode, Jersey, Team } from '../game/types';
 import { step, useNav } from '../input/menuNavigation';
 import { ControlsScreen } from './Controls';
@@ -28,8 +28,8 @@ export function Menu() {
   const [mode, setMode] = useState<GameMode>('exhibition');
   // The matchup outlives the screens, so backing out to change modes keeps your picks.
   const [teams, setTeams] = useState<[Club, Club]>(match.teams);
-  const [side, setSide] = useState<Team>(match.homeTeam);
-  const [jersey, setJersey] = useState<Jersey>(match.jerseys[match.homeTeam]);
+  const [side, setSide] = useState<Team>(runtime.myTeam);
+  const [jersey, setJersey] = useState<Jersey>(match.jerseys[runtime.myTeam]);
   const pick = (id: Entry) => {
     if (id === 'settings' || id === 'controls') return setScreen(id);
     if (id === 'lab') return void import('../dev/lab').then((m) => m.openLab());
