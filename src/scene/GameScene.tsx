@@ -57,7 +57,35 @@ function Simulation() {
     lastMatch = useRef(runtime.match),
     pending = useRef<SideInputs>([null, null]),
     steps = useRef(0),
-    goalReplay = useRef(false);
+    goalReplay = useRef(false),
+    frameRef = useRef<(delta: number) => void>(() => {});
+  // Online, the host runs the match for both people, so it has to keep stepping even while
+  // nobody is looking at this tab. A worker's clock is not throttled the way the render loop is.
+  useEffect(() => {
+    const beat = new Worker(new URL('../net/heartbeat.worker.ts', import.meta.url), {
+      type: 'module',
+    });
+    let last = performance.now();
+    beat.onmessage = () => {
+      const now = performance.now();
+      const delta = (now - last) / 1000;
+      last = now;
+      if (document.hidden && runtime.net) frameRef.current(Math.min(delta, 0.05));
+    };
+    // It only runs while it is needed: hidden, and with somebody on the other end.
+    const sync = () => {
+      const wanted = document.hidden && !!runtime.net;
+      last = performance.now();
+      beat.postMessage(wanted ? 'start' : 'stop');
+    };
+    document.addEventListener('visibilitychange', sync);
+    sync();
+    return () => {
+      document.removeEventListener('visibilitychange', sync);
+      beat.postMessage('stop');
+      beat.terminate();
+    };
+  }, []);
   useEffect(() => {
     const detach = runtime.controller.attach(),
       detachTwo = runtime.controllerTwo.attach();
@@ -66,6 +94,9 @@ function Simulation() {
         if (runtime.replay.kind === 'instant') runtime.replay.playing = false;
         return;
       }
+      // Online there is nothing to pause. The host pausing would stop the match for the guest
+      // too, and a dropped pad or a hidden tab is no reason to freeze somebody else's game.
+      if (runtime.net) return;
       if (['playing', 'faceoff', 'goal'].includes(runtime.match.phase)) {
         togglePause(runtime.match);
         runtime.audio.updateSkating(runtime.match, 1, runtime.myTeam);
@@ -126,7 +157,8 @@ function Simulation() {
         lastEvent.current = event.id;
       }
   };
-  useFrame((_, delta) => {
+  /** One pass of the game loop: read the sticks, advance the match, play what happened. */
+  const advance = (delta: number) => {
     const s = runtime.match;
     if (s !== lastMatch.current) {
       lastMatch.current = s;
@@ -253,6 +285,11 @@ function Simulation() {
     }
     runtime.audio.updateSkating(s, 1, runtime.myTeam);
     tickPublish();
+  };
+  frameRef.current = advance;
+  // A hidden tab throttles this to about once a second, so the heartbeat takes over there.
+  useFrame((_, delta) => {
+    if (!document.hidden) advance(delta);
   });
   return null;
 }

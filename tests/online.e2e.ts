@@ -143,3 +143,43 @@ test('a room only seats two', async ({ browser }) => {
   await expect(pages[2].getByText(/already full/)).toBeVisible({ timeout: 15000 });
   for (const page of pages) await page.close();
 });
+
+test('a hidden host keeps the match running for the other player', async ({ browser }) => {
+  test.setTimeout(90_000);
+  const hostPage = await (await browser.newContext()).newPage();
+  const guestPage = await (await browser.newContext()).newPage();
+
+  await hostPage.goto('/');
+  await hostPage.getByRole('button', { name: 'Online', exact: true }).click();
+  await hostPage.getByRole('button', { name: /Create game/ }).click();
+  await expect(hostPage.getByRole('heading', { name: 'Game Lobby' })).toBeVisible({
+    timeout: 20000,
+  });
+  const room = (await net(hostPage))!.room;
+  await guestPage.goto(`/?join=${room}`);
+  await expect.poll(async () => (await net(hostPage))?.players, { timeout: 20000 }).toBe(2);
+  await hostPage.getByRole('button', { name: /^Ready/ }).click();
+  await guestPage.getByRole('button', { name: /^Ready/ }).click();
+  await hostPage.getByRole('button', { name: /Drop the puck/ }).click();
+  await expect(live(guestPage)).toBeVisible({ timeout: 30000 });
+
+  // Put the host's tab in the background. Its render loop is now throttled to about 1 Hz.
+  await guestPage.bringToFront();
+  await hostPage.evaluate(`(() => {
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+    document.dispatchEvent(new Event('visibilitychange'));
+  })()`);
+
+  // The match must keep moving for the person who is still watching it.
+  const before = (await state(guestPage)).tick;
+  await guestPage.waitForTimeout(3000);
+  const after = (await state(guestPage)).tick;
+  // Three seconds of 120 Hz is 360 steps; anything near that beats the ~1 Hz a throttled
+  // render loop would manage, and proves the host never paused itself either.
+  expect(after - before).toBeGreaterThan(120);
+  expect((await state(hostPage)).phase).not.toBe('paused');
+
+  await guestPage.close();
+  await hostPage.close();
+});
