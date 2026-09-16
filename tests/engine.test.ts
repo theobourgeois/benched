@@ -17,6 +17,7 @@ import {
 import {
   attackDirection,
   EMPTY_INPUT,
+  GET_UP,
   IRON,
   PHYSICS,
   PUCK,
@@ -459,6 +460,7 @@ describe('skating and defense', () => {
     });
     stepMatch(block, { ...EMPTY_INPUT, dive: true, stickIceX: 1 });
     expect(diver.diveTimer).toBeGreaterThan(0.5);
+    expect(diver.downTimer).toBe(0);
     for (let i = 0; i < 24 && block.puck.shot; i++) stepMatch(block);
     expect(block.puck.shot).toBe(false);
     expect(block.puck.vx).toBeGreaterThan(-10);
@@ -472,6 +474,29 @@ describe('skating and defense', () => {
     stepMatch(lift, { ...EMPTY_INPUT, switchPlayer: true });
     expect(lift.puck.owner).toBe(0);
     expect(lift.notice).toBe('STICK LIFT');
+  });
+  it('a dive hits the ice then ragdolls, and the body still blocks shots', () => {
+    const s = openIce();
+    const diver = s.skaters[0];
+    Object.assign(diver, { x: 0, z: 0, angle: Math.PI / 2, cooldown: 0, vx: 3, vz: 0 });
+    stepMatch(s, { ...EMPTY_INPUT, dive: true, stickIceX: 1 });
+    expect(diver.downTimer).toBe(0);
+    tick(s, PHYSICS.diveLand + 0.04);
+    expect(diver.diveTimer).toBeGreaterThan(0);
+    expect(diver.downTimer).toBeGreaterThan(GET_UP);
+    Object.assign(s.puck, {
+      owner: null,
+      x: diver.x + 0.35,
+      z: diver.z,
+      y: 0.32,
+      vx: -20,
+      vz: 0,
+      shot: true,
+      lockout: 0,
+    });
+    for (let i = 0; i < 24 && s.puck.shot; i++) stepMatch(s);
+    expect(s.puck.shot).toBe(false);
+    expect(s.notice).toBe('DIVE BLOCK');
   });
   it('a skill-stick check and a loose-puck chop both move the play', () => {
     const hit = openIce();

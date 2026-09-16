@@ -11,7 +11,7 @@ export const REPLAY_SPEEDS = [0.25, 0.5, 1] as const;
 /** Goal replay: the build-up at full speed, then the finish in slow motion. */
 export const GOAL_REPLAY = {
   /** Live celebration before the replay rolls. Long enough to watch a celly. */
-  celebrate: 5,
+  celebrate: 3,
   before: 4,
   after: 0.9,
   /** Slow motion starts this long before the puck crosses the line. */

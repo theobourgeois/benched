@@ -1,7 +1,7 @@
 // Animation lab clips: every movement the skater pose can make, driven as a pure function of time
 // so the lab can scrub, loop, slow down and capture any frame. Takes recorded live in the lab
 // become clips too.
-import { PHYSICS, PUCK, STICK } from '../game/config';
+import { GET_UP, PHYSICS, PUCK, STICK } from '../game/config';
 import { dekeDuration, sampleDeke } from '../game/dekes';
 import { cellyDuration } from '../game/cellys';
 import { GOALIE_SAVE_TIME, SHOT_DOWNSWING } from '../game/actionTiming';
@@ -534,10 +534,19 @@ export const CLIPS: LabClip[] = [
     id: 'dive',
     label: 'Dive block',
     group: 'Contact',
-    duration: 1.6,
+    duration: 0.2 + PHYSICS.diveTime + GET_UP + 0.35,
     loop: false,
-    look: 'Belly-flop slide, arms and stick out front, legs trailing on the ice rather than folding under.',
-    frame: (t) => hold({ ...skate(t, 4, 0), diveTimer: countdown(t, 0.2, 1.1) }, 'none'),
+    look: 'Full dive onto the ice, then the body goes limp and stays a shot block until they get up.',
+    frame: (t) => {
+      const start = 0.2;
+      const diveTimer = countdown(t, start, PHYSICS.diveTime);
+      const downTimer = countdown(
+        t,
+        start + PHYSICS.diveLand,
+        PHYSICS.diveTime - PHYSICS.diveLand + GET_UP,
+      );
+      return hold({ ...skate(t, 4, 0), diveTimer, downTimer, fallAngle: 0 }, 'none');
+    },
   }),
   clip({
     id: 'block',

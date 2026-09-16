@@ -48,7 +48,7 @@ test('menu renders, selects teams, opens accessible controls and settings', asyn
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: 'Play Now', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Select Teams' })).toBeVisible();
-  await page.getByRole('button', { name: 'Montréal Canadiens' }).click();
+  await page.getByRole('button', { name: 'Toronto Maple Leafs' }).click();
   await page.getByRole('button', { name: 'Ready', exact: true }).click();
   await page.getByRole('button', { name: 'Play game', exact: true }).click();
   const s = await state(page);
@@ -75,15 +75,15 @@ test('an NHL matchup puts real clubs, logos and starters on the ice', async ({ p
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto('/');
   await page.getByRole('button', { name: 'Play Now', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Toronto Maple Leafs' })).toBeVisible();
-  await page.getByRole('button', { name: 'Montréal Canadiens' }).click();
+  await expect(page.getByRole('button', { name: 'Montréal Canadiens' })).toBeVisible();
+  await page.getByRole('button', { name: 'Toronto Maple Leafs' }).click();
   await page.getByRole('button', { name: 'Next away team' }).click();
-  await expect(page.getByRole('button', { name: 'Nashville Predators' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Utah Mammoth' })).toBeVisible();
   await page.getByRole('button', { name: 'Ready', exact: true }).click();
   await page.getByRole('button', { name: 'Play game', exact: true }).click();
   await expect(live(page)).toBeVisible({ timeout: 30000 });
   const s = await state(page);
-  expect(s.teams.map((t: { key: string }) => t.key)).toEqual(['nhl:TOR', 'nhl:NSH']);
+  expect(s.teams.map((t: { key: string }) => t.key)).toEqual(['nhl:MTL', 'nhl:UTA']);
   expect(s.skaters[0].name).toBe(s.teams[0].lineup[0].name);
   const logos = page.locator('.bug-team img');
   await expect(logos).toHaveCount(2);
@@ -95,7 +95,7 @@ test('an NHL matchup puts real clubs, logos and starters on the ice', async ({ p
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: 'Quit to Menu' }).click();
   await page.getByRole('button', { name: 'Play Now', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Nashville Predators' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Utah Mammoth' })).toBeVisible();
   expect(errors).toEqual([]);
 });
 test('keyboard skates, skill stick shoots, pause freezes play and help stays paused', async ({
@@ -173,13 +173,13 @@ test('virtual Xbox drives the menus, picks a jersey, skates, shoots, and safely 
   await expect(page.locator('.prompts .glyph.pad').first()).toBeVisible();
   // Left takes the away side, right comes back home; down changes your club.
   await pressPad(14);
-  await expect(page.getByRole('button', { name: 'Montréal Canadiens' })).toHaveAttribute(
+  await expect(page.getByRole('button', { name: 'Toronto Maple Leafs' })).toHaveAttribute(
     'aria-pressed',
     'true',
   );
   await pressPad(15);
   await pressPad(13);
-  await expect(page.getByRole('button', { name: 'Utah Mammoth' })).toHaveAttribute(
+  await expect(page.getByRole('button', { name: 'Nashville Predators' })).toHaveAttribute(
     'aria-pressed',
     'true',
   );

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { GET_UP } from '../game/config';
 import type { Skater } from '../game/types';
 import { activeDeke } from '../game/dekes';
 import { activeCelly, cellyRagdoll } from '../game/cellys';
@@ -22,8 +23,8 @@ import {
   type SkaterRig,
 } from './skaterModel';
 
-/** Seconds at the end of a knockdown spent getting back up. */
-export const GET_UP = 0.8;
+export { GET_UP };
+
 const TAU = Math.PI * 2;
 /** The rig root sits a hair above the ice; ankles aim just below zero so the skates bite. */
 const ICE_Y = -0.02;

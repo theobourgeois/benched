@@ -16,12 +16,12 @@ describe('leagues', () => {
 
   it('opens on a real matchup with the away side in white', () => {
     const [home, away] = openingMatchup(nhl);
-    expect([home.key, away.key]).toEqual(['nhl:TOR', 'nhl:MTL']);
+    expect([home.key, away.key]).toEqual(['nhl:MTL', 'nhl:TOR']);
     expect(uniformFor(home, 'home').jersey).toBe(home.home.jersey);
     expect(uniformFor(away, 'away').jersey).not.toBe(uniformFor(home, 'home').jersey);
-    expect(home.logoLight).toMatch(/logos\/nhl\/TOR_light\.svg$/);
-    expect(uniformFor(home, 'home').crest).toMatch(/logos\/nhl\/TOR_dark\.svg$/);
-    expect(uniformFor(away, 'away').crest).toMatch(/logos\/nhl\/MTL_light\.svg$/);
+    expect(home.logoLight).toMatch(/logos\/nhl\/MTL_light\.svg$/);
+    expect(uniformFor(home, 'home').crest).toMatch(/logos\/nhl\/MTL_dark\.svg$/);
+    expect(uniformFor(away, 'away').crest).toMatch(/logos\/nhl\/TOR_light\.svg$/);
     expect(jerseysFor(0, 'away')).toEqual(['away', 'home']);
     expect(jerseysFor(1, 'home')).toEqual(['away', 'home']);
   });

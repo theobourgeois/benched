@@ -127,7 +127,7 @@ function leagueOption(league: League, featured: [string, string]): LeagueOption 
 }
 
 /** Leagues with a snapshot in src/data/leagues; add one here to make it selectable. */
-export const LEAGUES: LeagueOption[] = [leagueOption(nhlData as unknown as League, ['TOR', 'MTL'])];
+export const LEAGUES: LeagueOption[] = [leagueOption(nhlData as unknown as League, ['MTL', 'TOR'])];
 
 export const leagueOf = (club: Club) => LEAGUES.find((l) => l.id === club.league) ?? LEAGUES[0];
 export const uniformFor = (club: Club, jersey: Jersey) =>

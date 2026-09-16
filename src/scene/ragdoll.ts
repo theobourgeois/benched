@@ -301,7 +301,7 @@ export function createRagdoll(
   stick: StickParts,
   spec: BladeSpec,
   skater: Skater,
-  opts?: { limp?: boolean },
+  opts?: { limp?: boolean; dive?: boolean },
 ): Ragdoll | null {
   if (!R || !world) return null;
   const slot = claimSlot();
@@ -314,20 +314,27 @@ export function createRagdoll(
   const at = (b: BoneName) => rig.bones[b].getWorldPosition(new THREE.Vector3());
 
   const limp = opts?.limp === true;
+  const dive = opts?.dive === true;
   const base = new THREE.Vector3(skater.vx, 0, skater.vz);
   const dir = new THREE.Vector3(Math.sin(skater.fallAngle), 0, Math.cos(skater.fallAngle));
-  const drive = limp ? Math.max(0.4, base.length() * 0.25) : Math.max(3, base.dot(dir));
+  const drive = limp
+    ? Math.max(0.4, base.length() * 0.25)
+    : dive
+      ? Math.max(2, base.length() * 0.85)
+      : Math.max(3, base.dot(dir));
   const velocityAt = (height: number) =>
-    base
-      .clone()
-      .addScaledVector(dir, drive * (limp ? 0.15 : 0.75 * (height / 1.3) - 0.4))
-      .add(
-        _v2.set(
-          jitter(limp ? 1.2 : 0.5),
-          jitter(limp ? 0.8 : 0.2) + (limp ? 1.4 : 0),
-          jitter(limp ? 1.2 : 0.5),
-        ),
-      );
+    dive
+      ? base.clone().add(_v2.set(jitter(0.35), -1.1 + jitter(0.2), jitter(0.35)))
+      : base
+          .clone()
+          .addScaledVector(dir, drive * (limp ? 0.15 : 0.75 * (height / 1.3) - 0.4))
+          .add(
+            _v2.set(
+              jitter(limp ? 1.2 : 0.5),
+              jitter(limp ? 0.8 : 0.2) + (limp ? 1.4 : 0),
+              jitter(limp ? 1.2 : 0.5),
+            ),
+          );
 
   const bodies = new Map<BoneName, { body: RigidBody; p: THREE.Vector3; q: THREE.Quaternion }>();
   const parts: Part[] = [];
@@ -351,9 +358,9 @@ export function createRagdoll(
     if (partSpec.bone === 'pelvis')
       body.setAngvel(
         {
-          x: jitter(limp ? 5 : 1.5),
-          y: jitter(limp ? 6 : 2.5),
-          z: jitter(limp ? 5 : 1.5),
+          x: (dive ? dir.z * 2.4 : 0) + jitter(limp ? 5 : dive ? 0.6 : 1.5),
+          y: jitter(limp ? 6 : dive ? 1 : 2.5),
+          z: (dive ? -dir.x * 2.4 : 0) + jitter(limp ? 5 : dive ? 0.6 : 1.5),
         },
         true,
       );

@@ -168,10 +168,10 @@ export function FeelHud({
   if (!open) return null;
   const state = !you
     ? '—'
-    : you.downTimer > 0
-      ? 'recovering'
-      : you.diveTimer > 0
-        ? 'diving'
+    : you.diveTimer > 0
+      ? 'diving'
+      : you.downTimer > 0
+        ? 'recovering'
         : you.stumbleTimer > 0
           ? 'off balance'
           : you.checkTimer > 0

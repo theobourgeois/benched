@@ -1,6 +1,7 @@
 import {
   attackDirection,
   EMPTY_INPUT,
+  GET_UP,
   IRON,
   PHYSICS,
   PUCK,
@@ -874,11 +875,21 @@ function startDive(s: MatchState, p: Skater, input: InputFrame) {
   p.vx = aim.x * speed;
   p.vz = aim.z * speed;
   p.angle = Math.atan2(aim.x, aim.z);
+  p.fallAngle = p.angle;
   p.diveTimer = PHYSICS.diveTime;
-  p.cooldown = PHYSICS.diveTime;
+  p.cooldown = PHYSICS.diveTime + GET_UP;
   p.stickReach += 0.5;
   p.stamina = clamp(p.stamina - 0.14, 0, 1);
   notice(s, 'DIVE');
+}
+/** After the flop hits the ice, go limp so the body stays a shot block until they get up. */
+function landDive(p: Skater) {
+  if (p.diveTimer <= 0 || p.downTimer > 0) return;
+  const landAfter = Math.min(PHYSICS.diveLand, PHYSICS.diveTime * 0.55);
+  if (PHYSICS.diveTime - p.diveTimer < landAfter) return;
+  p.downTimer = p.diveTimer + GET_UP;
+  p.fallAngle = p.angle;
+  p.cooldown = Math.max(p.cooldown, p.downTimer);
 }
 /**
  * A committed body check: a short lunge in the aim direction with a live window in which contact
@@ -1636,13 +1647,13 @@ function advancePuck(s: MatchState, dt: number) {
     if (
       !isOnIce(s, player) ||
       player.role === 'G' ||
-      player.downTimer > 0 ||
       (player.diveTimer <= 0 && player.blockTimer <= 0)
     )
       continue;
     const diving = player.diveTimer > 0;
-    if (p.y > (diving ? 1.15 : 0.85)) continue;
-    const reach = diving ? 1.48 : 1.12;
+    const ragdolled = diving && player.downTimer > 0;
+    if (p.y > (diving ? (ragdolled ? 0.78 : 1.15) : 0.85)) continue;
+    const reach = diving ? (ragdolled ? 1.62 : 1.48) : 1.12;
     if (distance(player, p) > reach && puckReach(player, p) > reach) continue;
     const away = normalized(p.x - player.x, p.z - player.z),
       incoming = Math.hypot(p.vx, p.vz);
@@ -1804,6 +1815,7 @@ export function stepMatch(s: MatchState, input: InputFrame = EMPTY_INPUT, dt = R
     p.saveTimer = Math.max(0, (p.saveTimer ?? 0) - dt);
     p.passTimer = Math.max(0, p.passTimer - dt);
     p.diveTimer = Math.max(0, p.diveTimer - dt);
+    landDive(p);
     p.blockTimer = Math.max(0, p.blockTimer - dt);
     p.liftTimer = Math.max(0, p.liftTimer - dt);
     stepDeke(p, dt);

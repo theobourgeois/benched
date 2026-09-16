@@ -261,7 +261,7 @@ export const Player = memo(function Player({ id }: { id: number }) {
       (dekeMove?.hop ?? 0) * (skater.dekeKind === 'jump' ? 1 : DEKE_HOP) + (cellyMove?.hop ?? 0);
     root.position.set(skater.x, 0.03 + hop, skater.z);
     root.rotation.y = fallen > 0.4 ? skater.fallAngle : skater.angle;
-    // A knockdown lies at a bit over 70°; a belly-flop block slides nearly flat on the ice.
+    // A knockdown lies at a bit over 70°; the dive flop is nearly flat before the ragdoll takes over.
     const diving = skater.diveTimer > 0 && skater.downTimer <= 0;
     tilt.rotation.x = THREE.MathUtils.lerp(
       tilt.rotation.x,
@@ -552,6 +552,7 @@ export const Player = memo(function Player({ id }: { id: number }) {
         root.updateMatrixWorld(true);
         physics.doll = createRagdoll(rig, parts, blade, skater, {
           limp: cellyRagdoll(skater),
+          dive: skater.diveTimer > 0,
         });
       }
       ragdoll = physics.doll !== null;

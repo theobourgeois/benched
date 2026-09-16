@@ -71,7 +71,7 @@ export interface Skater extends Vec2 {
   shotLoad?: number;
   /** Window after a tape-to-tape catch where a one-timer is live. */
   passTimer: number;
-  /** Belly-flop block; player is sliding, not ragdolled. */
+  /** Dive-block window: flop onto the ice, then ragdoll; still a shot block. */
   diveTimer: number;
   /** Stick held in a passing lane. */
   blockTimer: number;

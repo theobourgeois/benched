@@ -79,7 +79,7 @@ export function skateVelocity(
   let drive = 0,
     lean = 0;
   if (disabled || committed) {
-    const drag = p.downTimer > 0 ? 2.4 : p.diveTimer > 0 ? 0.82 : committed ? 0.65 : 1.1;
+    const drag = p.diveTimer > 0 ? 0.82 : p.downTimer > 0 ? 2.4 : committed ? 0.65 : 1.1;
     const decay = Math.exp(-drag * dt);
     p.vx *= decay;
     p.vz *= decay;

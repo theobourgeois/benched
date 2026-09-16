@@ -10,9 +10,11 @@ export const RULES = {
   periodSeconds: 300,
   periods: 3,
   faceoffSeconds: 3,
-  goalSeconds: 8,
+  goalSeconds: 6,
   fixedStep: 1 / 120,
 };
+/** Seconds at the end of a knockdown spent getting back up. */
+export const GET_UP = 0.8;
 /** Visual puck size. A real puck is 3.8 cm radius × 2.5 cm thick; this is a bit larger so it still reads from the broadcast camera. */
 export const PUCK = {
   radius: 0.085,
@@ -127,7 +129,10 @@ export const PHYSICS = {
   saucerLift: 4.4,
   chopSpeed: 13,
   diveSpeed: 10.2,
-  diveTime: 0.78,
+  /** Seconds on the ice as a shot block: dive onto the ice, then limp. */
+  diveTime: 1.15,
+  /** Committed flop onto the ice before the body goes limp. */
+  diveLand: 0.32,
   liftRange: 1.38,
 };
 /**
