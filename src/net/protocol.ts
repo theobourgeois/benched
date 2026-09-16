@@ -27,6 +27,19 @@ export const normaliseCode = (raw: string) =>
 /** Two people to a room. A third connection is turned away rather than silently watching. */
 export const ROOM_CAPACITY = 2;
 
+/**
+ * How long the room keeps somebody's seat after their socket drops. A socket that reconnects
+ * keeps its id, so a brief drop (a proxy timing out an idle line, a laptop changing networks)
+ * is invisible to the other person; only staying gone this long counts as leaving.
+ */
+export const RECONNECT_GRACE_MS = 10_000;
+/**
+ * How often a client says something on the room socket when it has nothing to say. During a
+ * match on a direct line the socket would otherwise carry nothing at all, and an idle line is
+ * what proxies close.
+ */
+export const KEEPALIVE_MS = 20_000;
+
 export interface Player {
   id: string;
   name: string;
@@ -38,6 +51,9 @@ export interface Player {
   /** The host runs the simulation; the room names the first person in as host. */
   host: boolean;
 }
+
+/** Modes two people can play against each other. Free skate is practice, so it stays local. */
+export const ONLINE_MODES: GameMode[] = ['exhibition', 'threeOnThree', 'oneOnOne', 'shootout'];
 
 /** What the host settled on before dropping the puck. Both ends build the same match from it. */
 export interface MatchSetup {
@@ -72,16 +88,20 @@ export type ClientMessage =
   | { t: 'name'; name: string }
   | { t: 'team'; team: Team }
   | { t: 'club'; club: string }
+  /** Host only: what will be played, so the other person's lobby says the same thing. */
+  | { t: 'mode'; mode: GameMode }
   | { t: 'ready'; ready: boolean }
   | { t: 'start'; setup: MatchSetup }
   | { t: 'signal'; data: Signal }
+  | { t: 'ping' }
   | { t: 'leave' };
 
 export type ServerMessage =
-  | { t: 'room'; you: string; players: Player[] }
+  | { t: 'room'; you: string; players: Player[]; mode: GameMode }
   | { t: 'full' }
   | { t: 'start'; setup: MatchSetup }
   | { t: 'signal'; from: string; data: Signal }
+  | { t: 'pong' }
   | { t: 'gone'; id: string };
 
 /** The first byte of every binary message says what the rest of it is. */

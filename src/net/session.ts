@@ -1,6 +1,6 @@
 import PartySocket from 'partysocket';
 import { EMPTY_INPUT } from '../game/config';
-import type { InputFrame, MatchState, Team } from '../game/types';
+import type { GameMode, InputFrame, MatchState, Team } from '../game/types';
 import { mergeEdges, noEdges } from '../input/frames';
 import { decodeInput, encodeInput } from './input';
 import {
@@ -16,6 +16,8 @@ import { SnapshotView, SNAPSHOT_HZ } from './view';
 import { DirectLink } from './peer';
 import {
   bodyOf,
+  KEEPALIVE_MS,
+  ONLINE_MODES,
   tagOf,
   tagged,
   WIRE_INPUT,
@@ -39,6 +41,11 @@ import {
  * is `DirectLink`. This is the room, and the choice between the two.
  */
 
+/**
+ * `connecting` covers the first connection and any reconnection after it: the socket
+ * reconnects on its own and keeps its id, so the room hands the same seat back. `closed` is
+ * final: we hung up, or the room turned us away.
+ */
 export type NetStatus = 'connecting' | 'lobby' | 'playing' | 'closed';
 
 /**
@@ -69,6 +76,8 @@ export class NetSession {
   status: NetStatus = 'connecting';
   you = '';
   players: Player[] = [];
+  /** What the host has picked to play. */
+  mode: GameMode = ONLINE_MODES[0];
   setup: MatchSetup | null = null;
   /** Something the player needs to be told: the room was full, or the other person left. */
   notice: string | null = null;
@@ -79,6 +88,8 @@ export class NetSession {
   readonly stats: NetStats = { rtt: 0, rate: 0, delay: 0, starved: 0, direct: false };
 
   private socket: PartySocket;
+  /** Says something on the room socket now and then, so it never looks idle to a proxy. */
+  private keepalive: ReturnType<typeof setInterval>;
   /** The line straight to the other browser, when there is one. */
   private readonly link = new DirectLink((data) => this.send({ t: 'signal', data }));
   /** Host: who the line was last offered to, so a returning guest is offered a new one. */
@@ -111,17 +122,28 @@ export class NetSession {
     host: string,
     name: string,
   ) {
-    this.socket = new PartySocket({ host, party: 'room', room });
+    // Back quickly after a drop: the room only holds a seat for so long.
+    this.socket = new PartySocket({
+      host,
+      party: 'room',
+      room,
+      minReconnectionDelay: 500,
+      maxReconnectionDelay: 3000,
+    });
     this.socket.binaryType = 'arraybuffer';
     this.socket.addEventListener('open', () => {
+      if (this.status === 'closed') return;
       this.status = this.setup ? 'playing' : 'lobby';
       this.send({ t: 'hello', name });
       this.changed();
     });
+    // The socket reconnects by itself, and the room keeps the seat for a while, so a drop is a
+    // wait rather than the end: nothing here is forgotten, and a direct line stays up through it.
     this.socket.addEventListener('close', () => {
-      if (this.status !== 'closed') this.status = 'closed';
+      if (this.status !== 'closed') this.status = 'connecting';
       this.changed();
     });
+    this.keepalive = setInterval(() => this.send({ t: 'ping' }), KEEPALIVE_MS);
     this.socket.addEventListener('message', (event: MessageEvent) => this.receive(event.data));
     this.link.onMessage = (data) => this.receive(data);
     this.link.onChange = () => {
@@ -167,7 +189,10 @@ export class NetSession {
       case 'room': {
         this.you = message.you;
         this.players = message.players;
-        if (this.status === 'connecting') this.status = 'lobby';
+        this.mode = message.mode;
+        if (this.status === 'connecting') this.status = this.setup ? 'playing' : 'lobby';
+        // Somebody new across the table means the last one's leaving is old news.
+        if (this.status === 'lobby' && this.opponent) this.notice = null;
         // The host offers the other person a line as soon as they are in, and a fresh one if
         // they drop and come back as somebody new.
         const other = this.opponent;
@@ -182,11 +207,17 @@ export class NetSession {
       case 'signal':
         void this.link.handle(message.data);
         return;
+      case 'pong':
+        return;
       case 'full':
         this.notice = 'That game is already full.';
-        this.status = 'closed';
+        // Final. Left to itself the socket would keep knocking every few seconds.
+        this.close();
         break;
       case 'start':
+        // The room says it again to a socket that reconnected mid-match. That match is the one
+        // already on the ice; building it again would put the score back to nothing.
+        if (this.setup && this.status === 'playing') return;
         this.setup = message.setup;
         this.status = 'playing';
         this.resetView();
@@ -331,6 +362,9 @@ export class NetSession {
   setClub(club: string) {
     this.send({ t: 'club', club });
   }
+  setMode(mode: GameMode) {
+    this.send({ t: 'mode', mode });
+  }
   setReady(ready: boolean) {
     this.send({ t: 'ready', ready });
   }
@@ -338,7 +372,11 @@ export class NetSession {
     this.send({ t: 'start', setup });
   }
   close() {
+    if (this.status === 'closed') return;
     this.status = 'closed';
+    clearInterval(this.keepalive);
+    // Said out loud, so the room lets the seat go now rather than waiting to see if we return.
+    this.send({ t: 'leave' });
     this.link.close();
     this.socket.close();
   }

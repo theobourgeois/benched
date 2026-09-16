@@ -1,16 +1,26 @@
 import { Check, Copy, Gamepad2, Loader2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { clubByKey, cycleClub, LEAGUES, jerseysFor, openingMatchup } from '../game/clubs';
+import {
+  clubByKey,
+  cycleClub,
+  LEAGUES,
+  jerseysFor,
+  openingMatchup,
+  type Club,
+} from '../game/clubs';
 import { modeInfo } from '../game/modes';
 import { beginOnlineMatch, runtime, useGame } from '../game/store';
 import type { GameMode, Team } from '../game/types';
 import { useNav } from '../input/menuNavigation';
-import { normaliseCode, roomCode, type MatchSetup, type Player } from '../net/protocol';
+import {
+  normaliseCode,
+  ONLINE_MODES,
+  roomCode,
+  type MatchSetup,
+  type Player,
+} from '../net/protocol';
 import { NetSession, ROOM_HOST } from '../net/session';
 import { Glyph, Prompts, TeamLogo, TitleBar } from './kit';
-
-/** Modes two people can play against each other. Free skate is practice, so it stays local. */
-const ONLINE_MODES: GameMode[] = ['exhibition', 'threeOnThree', 'oneOnOne', 'shootout'];
 
 /** Re-render whenever the room says anything. */
 function useRoom(session: NetSession | null) {
@@ -27,8 +37,6 @@ function useRoom(session: NetSession | null) {
 export function OnlineScreen({ onBack, join }: { onBack: () => void; join?: string }) {
   const { net } = useGame();
   const [code, setCode] = useState(join ?? '');
-  const [mode, setMode] = useState<GameMode>('exhibition');
-  const [club, setClub] = useState(openingMatchup(LEAGUES[0])[0]);
   const [copied, setCopied] = useState(false);
   useRoom(net);
 
@@ -55,18 +63,7 @@ export function OnlineScreen({ onBack, join }: { onBack: () => void; join?: stri
   };
 
   if (!net) return <Landing code={code} setCode={setCode} onJoin={connect} onBack={onBack} />;
-  return (
-    <Lobby
-      net={net}
-      mode={mode}
-      setMode={setMode}
-      club={club}
-      setClub={setClub}
-      copied={copied}
-      setCopied={setCopied}
-      onLeave={leave}
-    />
-  );
+  return <Lobby net={net} copied={copied} setCopied={setCopied} onLeave={leave} />;
 }
 
 /** Before a room: start one, or type the four letters somebody read out to you. */
@@ -137,22 +134,22 @@ function Landing({
   );
 }
 
+/**
+ * The club a seat skates for. The room holds everyone's pick, so both screens read the same
+ * thing; until somebody has picked, a seat shows the featured club for its side.
+ */
+const clubOf = (player: Player | undefined): Club =>
+  (player?.club ? clubByKey(player.club) : undefined) ??
+  openingMatchup(LEAGUES[0])[player?.team ?? 0];
+
 /** In a room: who is here, which side they are on, and whether they are ready. */
 function Lobby({
   net,
-  mode,
-  setMode,
-  club,
-  setClub,
   copied,
   setCopied,
   onLeave,
 }: {
   net: NetSession;
-  mode: GameMode;
-  setMode: (mode: GameMode) => void;
-  club: ReturnType<typeof openingMatchup>[0];
-  setClub: (club: ReturnType<typeof openingMatchup>[0]) => void;
   copied: boolean;
   setCopied: (copied: boolean) => void;
   onLeave: () => void;
@@ -160,24 +157,34 @@ function Lobby({
   const me = net.me;
   const them = net.opponent;
   const waiting = !them;
+  // The room holds the mode, so both lobbies say the same thing before the puck drops.
+  const mode = net.mode;
+  const club = clubOf(me);
+  const theirs = clubOf(them);
+  const canStart = net.isHost && net.everyoneReady;
   const link = `${location.origin}${location.pathname}?join=${net.room}`;
 
+  // A seat arrives with no club. Pick the featured one for its side, or the other featured one
+  // if the person across the table already has it, and tell the room, so what the other person
+  // sees on their screen is the same as what is on this one.
+  const defaulted = useRef('');
+  useEffect(() => {
+    if (!me || me.club || defaulted.current === me.id) return;
+    defaulted.current = me.id;
+    const featured = openingMatchup(LEAGUES[0]);
+    const pick = featured[me.team].key === them?.club ? featured[1 - me.team] : featured[me.team];
+    net.setClub(pick.key);
+  }, [me, them?.club, net]);
+
   const pickSide = (team: Team) => net.pickTeam(team);
-  const cycle = (step: 1 | -1) => {
-    const league = LEAGUES[0];
-    const theirs = them?.club ? (clubByKey(them.club) ?? league.clubs[1]) : league.clubs[1];
-    const next = cycleClub(league, club, theirs, step);
-    setClub(next);
-    net.setClub(next.key);
-  };
-  const toggleReady = () => net.setReady(!me?.ready);
+  const cycle = (step: 1 | -1) => net.setClub(cycleClub(LEAGUES[0], club, theirs, step).key);
+  const ready = () => net.setReady(true);
+  const unready = () => net.setReady(false);
   const cycleMode = () =>
-    setMode(ONLINE_MODES[(ONLINE_MODES.indexOf(mode) + 1) % ONLINE_MODES.length]);
+    net.setMode(ONLINE_MODES[(ONLINE_MODES.indexOf(mode) + 1) % ONLINE_MODES.length]);
   const start = () => {
-    if (!net.isHost || !net.everyoneReady || !me) return;
-    const mine = club.key;
-    const theirs = them?.club || LEAGUES[0].clubs.find((c) => c.key !== mine)!.key;
-    const clubs: [string, string] = me.team === 0 ? [mine, theirs] : [theirs, mine];
+    if (!canStart || !me) return;
+    const clubs: [string, string] = me.team === 0 ? [club.key, theirs.key] : [theirs.key, club.key];
     const setup: MatchSetup = {
       mode,
       clubs,
@@ -186,6 +193,10 @@ function Lobby({
     };
     net.start(setup);
   };
+  // Confirm takes you forward: ready, then the puck. Back takes you out: not ready, then gone.
+  // Being ready and waiting on the other person, confirm does nothing rather than undoing it.
+  const forward = () => (canStart ? start() : me?.ready ? undefined : ready());
+  const back = () => (me?.ready ? unready() : onLeave());
   const copy = () => {
     void navigator.clipboard?.writeText(link).then(
       () => setCopied(true),
@@ -194,8 +205,8 @@ function Lobby({
   };
 
   useNav((a) => {
-    if (a === 'back') return onLeave();
-    if (a === 'confirm') return net.isHost && net.everyoneReady ? start() : toggleReady();
+    if (a === 'back') return back();
+    if (a === 'confirm') return forward();
     if (a === 'start') return start();
     if (a === 'y') return copy();
     if (a === 'x') return net.isHost ? cycleMode() : undefined;
@@ -209,7 +220,12 @@ function Lobby({
   return (
     <div className="screen online-screen">
       <div className="stage-frame">
-        <TitleBar crumb="Online" title={net.status === 'connecting' ? 'Connecting' : 'Game Lobby'}>
+        <TitleBar
+          crumb="Online"
+          title={
+            net.status !== 'connecting' ? 'Game Lobby' : net.you ? 'Reconnecting' : 'Connecting'
+          }
+        >
           <button
             className="cpu-chip"
             onClick={() => net.isHost && cycleMode()}
@@ -230,12 +246,12 @@ function Lobby({
             </button>
           </div>
           <div className="room-seats">
-            <Seat player={me} club={club.key} you mode={mode} />
+            <Seat player={me} club={club} you mode={mode} />
             <span className="versus" aria-hidden="true">
               VS
             </span>
             {them ? (
-              <Seat player={them} club={them.club} mode={mode} />
+              <Seat player={them} club={theirs} mode={mode} />
             ) : (
               <div className="seat empty" role="status">
                 <Loader2 className="spin" size={22} aria-hidden="true" />
@@ -252,21 +268,21 @@ function Lobby({
           )}
           <button
             className="cta"
-            onClick={net.isHost && net.everyoneReady ? start : toggleReady}
+            onClick={canStart ? start : me?.ready ? unready : ready}
             disabled={waiting && !me?.ready}
           >
-            {net.isHost && net.everyoneReady ? 'Drop the puck' : me?.ready ? 'Not ready' : 'Ready'}
+            {canStart ? 'Drop the puck' : me?.ready ? 'Not ready' : 'Ready'}
             <i className="caret" aria-hidden="true" />
           </button>
         </div>
       </div>
       <Prompts
         items={[
-          { k: 'confirm', label: net.isHost && net.everyoneReady ? 'Start' : 'Ready' },
+          { k: 'confirm', label: canStart ? 'Start' : 'Ready', onClick: forward },
           { k: 'updown', label: 'Team' },
           { k: 'leftright', label: 'Side' },
           { k: 'y', label: 'Copy link', onClick: copy },
-          { k: 'back', label: 'Leave', onClick: onLeave },
+          { k: 'back', label: me?.ready ? 'Not ready' : 'Leave', onClick: back },
         ]}
       />
     </div>
@@ -275,17 +291,16 @@ function Lobby({
 
 function Seat({
   player,
-  club,
+  club: side,
   you,
   mode,
 }: {
   player: Player | undefined;
-  club: string;
+  club: Club;
   you?: boolean;
   mode: GameMode;
 }) {
   if (!player) return null;
-  const side = clubByKey(club) ?? openingMatchup(LEAGUES[0])[player.team];
   return (
     <div className="seat" data-ready={player.ready || undefined} data-mine={you || undefined}>
       <TeamLogo club={side} className="seat-logo" />

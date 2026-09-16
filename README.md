@@ -36,8 +36,9 @@ pads the browser can actually see.
 
 **Online** opens a room for two. Create a game and you get a four-character code and an invite
 link; whoever opens the link lands straight in the lobby. Both players ready up and the host
-drops the puck. Exhibition, 3-on-3, 1-on-1 and shootout are playable online; free skate is
-practice and stays local.
+drops the puck: confirm readies you and, for the host, starts once both are ready; back takes
+you back to not ready, and out of the room after that. Exhibition, 3-on-3, 1-on-1 and shootout
+are playable online; free skate is practice and stays local.
 
 One browser runs the simulation and the other draws what it is told, so there is no second
 simulation to disagree with the first. The host has a small latency advantage, which is the
@@ -52,7 +53,10 @@ cannot reach each other directly fall back to the room relaying. The FPS counter
 trip and which of the two roads is in use.
 
 Rooms are a Cloudflare Worker (`workers/room.ts`) backed by a Durable Object. It holds who is in
-the room and relays bytes between them; it never simulates hockey.
+the room and relays bytes between them; it never simulates hockey. The room socket is kept
+warm with a ping every twenty seconds, and a socket that drops reconnects to the same seat: the
+room holds it for ten seconds before telling the other person you left, so a match survives a
+proxy closing an idle line.
 
 ```sh
 npm run rooms          # rooms on localhost:8787, for development

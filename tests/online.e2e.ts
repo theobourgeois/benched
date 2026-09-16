@@ -61,10 +61,26 @@ test('two browsers meet in a room, drop the puck, and play one match', async ({ 
   expect([hostNet.host, guestNet.host]).toEqual([true, false]);
   expect(hostNet.team).not.toBe(guestNet.team);
 
+  // Both screens show the same two clubs, one each, before anybody has picked.
+  for (const page of [hostPage, guestPage]) {
+    await expect(page.locator('.seat').filter({ hasText: 'Montréal' })).toHaveCount(1);
+    await expect(page.locator('.seat').filter({ hasText: 'Toronto' })).toHaveCount(1);
+  }
+
   // Neither side can start alone.
   await hostPage.getByRole('button', { name: /^Ready/ }).click();
   await expect.poll(async () => (await net(hostPage))?.status).toBe('lobby');
   await guestPage.getByRole('button', { name: /^Ready/ }).click();
+  // Back takes a ready player back to not ready; it does not throw them out of the room.
+  await expect(guestPage.getByRole('button', { name: /^Not ready/ })).toBeVisible();
+  await guestPage.keyboard.press('Escape');
+  await expect(guestPage.getByRole('button', { name: /^Ready/ })).toBeVisible();
+  expect((await net(guestPage))?.status).toBe('lobby');
+  // Confirm while ready and waiting does not undo it.
+  await guestPage.keyboard.press('Enter');
+  await expect(guestPage.getByRole('button', { name: /^Not ready/ })).toBeVisible();
+  await guestPage.keyboard.press('Enter');
+  await expect(guestPage.getByRole('button', { name: /^Not ready/ })).toBeVisible();
   await hostPage.getByRole('button', { name: /Drop the puck/ }).click();
 
   // Both ends land in the same match.
@@ -119,7 +135,7 @@ test('two browsers meet in a room, drop the puck, and play one match', async ({ 
 
   // Leaving tells the other person rather than freezing them, and offers a way out.
   await guestPage.close();
-  await expect.poll(async () => (await net(hostPage))?.players, { timeout: 10000 }).toBe(1);
+  await expect.poll(async () => (await net(hostPage))?.players, { timeout: 20000 }).toBe(1);
   await expect(hostPage.getByRole('heading', { name: 'Opponent left' })).toBeVisible({
     timeout: 10000,
   });
@@ -188,4 +204,50 @@ test('a hidden host keeps the match running for the other player', async ({ brow
 
   await guestPage.close();
   await hostPage.close();
+});
+
+test('a socket that drops mid-match comes back to the same seat', async ({ browser }) => {
+  test.setTimeout(90_000);
+  const hostPage = await (await browser.newContext()).newPage();
+  const guestPage = await (await browser.newContext()).newPage();
+
+  await hostPage.goto('/');
+  await hostPage.getByRole('button', { name: 'Online', exact: true }).click();
+  await hostPage.getByRole('button', { name: /Create game/ }).click();
+  await expect(hostPage.getByRole('heading', { name: 'Game Lobby' })).toBeVisible({
+    timeout: 20000,
+  });
+  const room = (await net(hostPage))!.room;
+  await guestPage.goto(`/?join=${room}`);
+  await expect.poll(async () => (await net(hostPage))?.players, { timeout: 20000 }).toBe(2);
+  await hostPage.getByRole('button', { name: /^Ready/ }).click();
+  await guestPage.getByRole('button', { name: /^Ready/ }).click();
+  await hostPage.getByRole('button', { name: /Drop the puck/ }).click();
+  await expect(live(hostPage)).toBeVisible({ timeout: 30000 });
+  await expect(live(guestPage)).toBeVisible({ timeout: 30000 });
+  const before = { host: (await net(hostPage))!, guest: (await net(guestPage))! };
+
+  // Each socket drops in turn, the way an idle line closed by a proxy would, and reconnects
+  // on its own. The room hands the same seat back; nobody is told anybody left.
+  for (const page of [guestPage, hostPage]) {
+    await page.evaluate('window.__BENCHED__.runtime.net.socket.reconnect()');
+    await expect.poll(async () => (await net(page))?.status, { timeout: 15000 }).toBe('playing');
+  }
+  await hostPage.waitForTimeout(1500);
+  const after = { host: (await net(hostPage))!, guest: (await net(guestPage))! };
+  expect([after.host.host, after.guest.host]).toEqual([before.host.host, before.guest.host]);
+  expect([after.host.team, after.guest.team]).toEqual([before.host.team, before.guest.team]);
+  expect([after.host.players, after.guest.players]).toEqual([2, 2]);
+  await expect(hostPage.getByRole('heading', { name: 'Opponent left' })).toHaveCount(0);
+  await expect(guestPage.getByRole('heading', { name: 'Opponent left' })).toHaveCount(0);
+  await expect(live(hostPage)).toBeVisible();
+  await expect(live(guestPage)).toBeVisible();
+
+  // The match carried on through it: the guest's clock is still moving off the host's snapshots.
+  const tick = (await state(guestPage)).tick;
+  await expect
+    .poll(async () => (await state(guestPage)).tick, { timeout: 15000 })
+    .toBeGreaterThan(tick + 30);
+  await hostPage.close();
+  await guestPage.close();
 });
