@@ -37,7 +37,7 @@ const PAD: Group[] = [
     title: 'Dekes',
     rows: [
       ['RS ← →', 'Forehand / backhand'],
-      ['hold RB + LS', 'One-touch deke'],
+      ['hold LB + LS', 'One-touch deke'],
       ['hold RB + RS ↑', 'Jump deke'],
       ['hold RB + RS ↓', 'Between the legs'],
       ['tap RB + RS ← →', 'Windmill'],
@@ -114,7 +114,7 @@ const KEYBOARD: Group[] = [
     title: 'Dekes',
     rows: [
       ['← →', 'Forehand / backhand'],
-      ['hold E + W A S D', 'One-touch deke'],
+      ['hold R + W A S D', 'One-touch deke'],
       ['hold E + ↑', 'Jump deke'],
       ['hold E + ↓', 'Between the legs'],
       ['tap E + ← →', 'Windmill'],

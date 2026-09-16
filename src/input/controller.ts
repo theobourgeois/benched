@@ -58,6 +58,7 @@ export class Controller {
     pass: false,
     poke: false,
     both: false,
+    lb: false,
     rb: false,
     switchPlayer: false,
     pause: false,
@@ -178,6 +179,7 @@ export class Controller {
     else if (stickY > 0.3) this.windup = clamp(this.windup + dt * 1.9, 0, 1);
     else if (stickY > -0.55) this.windup = Math.max(0, this.windup - dt * 1.1);
     const moveMag = Math.hypot(moveX, moveZ);
+    const lbPress = lb && !this.previous.lb && !both;
     const rbPress = rb && !this.previous.rb && !both;
     const passHeld = button(7) || tapped('Space');
     const lt = button(6) || key('ControlLeft');
@@ -197,19 +199,20 @@ export class Controller {
       this.triggerTime = 0;
     }
     if (hasPuck) {
+      // NHL-style one-touch: hold LB and cut with the left stick.
+      if (lb && !both && !passHeld) {
+        if ((lbPress && moveMag > 0.55) || (moveMag > 0.55 && this.moveMag <= 0.55)) deke = true;
+      }
       if (rb && !both && !passHeld) {
         const sideStick = Math.abs(stickX) > 0.62 && Math.abs(stickY) < 0.38;
         if (rbPress && sideStick) dekeSpecial = 'windmill';
-        else if ((rbPress && moveMag > 0.55) || (moveMag > 0.55 && this.moveMag <= 0.55))
-          deke = true;
         if (stickFlick) {
           if (stickY < -0.45 && Math.abs(stickY) >= Math.abs(stickX) * 0.85) dekeSpecial = 'jump';
           else if (stickY > 0.45 && Math.abs(stickY) >= Math.abs(stickX) * 0.85)
             dekeSpecial = 'throughLegs';
           else if (!dekeSpecial) chip = true;
         }
-        if (dekeSpecial) deke = false;
-        if (deke || dekeSpecial || chip) this.bumperChipped = true;
+        if (dekeSpecial || chip) this.bumperChipped = true;
       }
       if (rb) this.bumperTime += dt;
       else {
@@ -243,6 +246,7 @@ export class Controller {
       pass: passHeld,
       poke,
       both,
+      lb,
       rb,
       switchPlayer: button(0) || tapped('KeyQ'),
       pause: button(9) || tapped('Escape'),
@@ -319,7 +323,7 @@ export class Controller {
                 ? ('dance' as const)
                 : null,
     };
-    if (shoot || check) this.windup = 0;
+    if (shoot || check || deke || dekeSpecial) this.windup = 0;
     this.previous = { ...held, faceA, faceB, faceX, faceY };
     this.stickMag = stickMag;
     this.moveMag = moveMag;

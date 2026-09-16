@@ -1,7 +1,13 @@
 import { clamp } from '../game/math';
 import type { GameEvent, GameMode, MatchState, Settings, Team } from '../game/types';
 import { GOAL_BEAT, playGoalImpact, playGoalTrack, type GoalTrack } from './goalTrack';
-import { pickGoalSong, type GoalSong } from './goalSongs';
+import {
+  celebrationLevel,
+  GOAL_LEAD_IN,
+  pickGoalSong,
+  songCueTime,
+  type GoalSong,
+} from './goalSongs';
 
 const SAMPLE_NAMES = [
   'shot',
@@ -59,7 +65,7 @@ export class ArenaAudio {
   private skateGain: GainNode | null = null;
   /** The synthesized beat, only when the soundtrack could not be cued. */
   private celebration: GoalTrack | null = null;
-  /** The soundtrack song cued at its drop for the next goal, and the one playing now. */
+  /** The soundtrack song parked on the lead-in for the next goal, and the one playing now. */
   private goalSong: HTMLAudioElement | null = null;
   private goalGain: GainNode | null = null;
   private cued: GoalSong | null = null;
@@ -170,7 +176,7 @@ export class ArenaAudio {
       0.12,
     );
   }
-  /** Loads a song and parks the playhead on its drop, so a goal can start it without a seek. */
+  /** Loads a song and parks the playhead on the lead-in, so a goal can start it without a seek. */
   private cueGoalSong() {
     const ctx = this.context;
     if (!ctx || !this.musicBus) return;
@@ -190,38 +196,39 @@ export class ArenaAudio {
     song.addEventListener(
       'loadedmetadata',
       () => {
-        if (this.cued === pick) song.currentTime = pick.drop;
+        if (this.cued === pick) song.currentTime = songCueTime(pick.drop);
       },
       { once: true },
     );
     song.load();
   }
-  /** The song at its drop, or the synthesized beat if the song is not ready. */
-  private startCelebration(delay = 0) {
+  /** The song swelling into its drop, or the synthesized beat if the song is not ready. */
+  private startCelebration() {
     const ctx = this.context;
     if (!ctx || !this.musicBus || !this.goalOn || !this.active) return;
     this.stopCelebration();
     const song = this.goalSong,
       cued = this.cued;
-    const ready =
-      song && cued && song.readyState >= 2 && Math.abs(song.currentTime - cued.drop) < 1;
+    const parked = cued ? songCueTime(cued.drop) : 0;
+    const ready = song && cued && song.readyState >= 2 && Math.abs(song.currentTime - parked) < 1;
     if (ready) {
       this.playing = cued;
       this.lastSong = cued.name;
       this.cued = null;
       this.goalGain!.gain.cancelScheduledValues(ctx.currentTime);
-      this.goalGain!.gain.setValueAtTime(1, ctx.currentTime);
-      const go = () => void song.play().catch(() => this.fallbackCelebration());
-      if (delay > 0) window.setTimeout(go, delay * 1000);
-      else go();
-    } else this.fallbackCelebration(delay);
+      this.goalGain!.gain.setValueAtTime(
+        celebrationLevel(song.currentTime, cued.drop, false),
+        ctx.currentTime,
+      );
+      void song.play().catch(() => this.fallbackCelebration());
+    } else this.fallbackCelebration();
   }
-  private fallbackCelebration(delay = 0) {
+  private fallbackCelebration() {
     const ctx = this.context;
     if (!ctx || !this.musicBus) return;
     this.playing = null;
     this.celebration?.stop(0.02);
-    this.celebration = playGoalTrack(ctx, this.musicBus, ctx.currentTime + delay);
+    this.celebration = playGoalTrack(ctx, this.musicBus, ctx.currentTime + GOAL_LEAD_IN);
   }
   private stopCelebration(fade = 0.15) {
     this.celebration?.stop(fade);
@@ -254,7 +261,7 @@ export class ArenaAudio {
     if (this.playing && this.goalSong) {
       const beat = 60 / this.playing.bpm,
         since = this.goalSong.currentTime - this.playing.drop,
-        first = Math.ceil(since / beat) * beat - since,
+        first = since < 0 ? -since : Math.ceil(since / beat) * beat - since,
         pulses: number[] = [];
       for (let t = first; t < span; t += beat) pulses.push(Math.max(0, t * 1000));
       return pulses;
@@ -274,8 +281,12 @@ export class ArenaAudio {
       return;
     }
     this.celebration?.duck(paused ? 0.22 : 1);
-    if (this.playing && this.goalGain && this.context)
-      this.goalGain.gain.setTargetAtTime(paused ? 0.22 : 1, this.context.currentTime, 0.06);
+    if (this.playing && this.goalGain && this.context && this.goalSong)
+      this.goalGain.gain.setTargetAtTime(
+        celebrationLevel(this.goalSong.currentTime, this.playing.drop, paused),
+        this.context.currentTime,
+        0.06,
+      );
   }
   unlock() {
     if (!this.context) {
@@ -321,7 +332,7 @@ export class ArenaAudio {
         if (replay) {
           if (this.context && this.musicBus && this.goalOn && this.active)
             playGoalImpact(this.context, this.musicBus, this.context.currentTime);
-        } else this.startCelebration(event.barDown ? 0.35 : 0);
+        } else this.startCelebration();
         break;
       case 'horn':
         this.sample('horn', 0.85);

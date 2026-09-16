@@ -65,16 +65,22 @@ describe('Xbox skill stick', () => {
     const dump = input.read(1 / 60, true);
     expect(dump).toMatchObject({ chip: true, shoot: false, poke: false, deke: false });
   });
-  it('one-touch dekes on RB plus left stick, with jump and through-the-legs on RB plus RS', () => {
+  it('one-touch dekes on LB plus left stick, with jump and through-the-legs on RB plus RS', () => {
     const pad = setupPad(),
       stride = new Controller();
     pad.axes[0] = 1;
-    pad.buttons[5].pressed = true;
+    pad.buttons[4].pressed = true;
     expect(stride.read(1 / 60, true)).toMatchObject({ deke: true, chip: false, saucer: false });
     expect(stride.read(1 / 60, true).deke).toBe(false);
 
+    const rbStride = new Controller();
+    pad.buttons[4].pressed = false;
+    pad.buttons[5].pressed = true;
+    expect(rbStride.read(1 / 60, true)).toMatchObject({ deke: false, chip: false, saucer: false });
+
     const jump = new Controller();
     pad.axes[0] = 0;
+    pad.buttons[4].pressed = false;
     pad.buttons[5].pressed = true;
     jump.read(1 / 60, true);
     pad.axes[3] = -1;

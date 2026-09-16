@@ -247,7 +247,13 @@ export function Brand() {
         <i />
         <i />
       </span>
-      BENCHED
+      BENCHED{' '}
+      <span
+        style={{ fontSize: '25px', alignSelf: 'end', marginBottom: '10px' }}
+        className="brand-version"
+      >
+        v0.0.0.0.0.0.0.1
+      </span>
     </div>
   );
 }

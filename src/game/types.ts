@@ -130,7 +130,7 @@ export interface InputFrame {
   saucer: boolean;
   /** RB + skill-stick flick: dump, chip-in, or chop a loose puck. */
   chip: boolean;
-  /** RB + left stick: one-touch deke in the skate direction. */
+  /** LB + left stick: one-touch deke in the skate direction. */
   deke: boolean;
   /** RB + skill-stick or LT specials. */
   dekeSpecial: DekeSpecial | null;

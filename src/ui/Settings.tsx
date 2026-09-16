@@ -152,7 +152,7 @@ export function SettingsScreen({ crumb, onClose }: { crumb: string; onClose: () 
     volume('masterVolume', 'Master volume', 'Scales music and effects together.'),
     volume('sfxVolume', 'Sound effects', 'Hits, skating, horn and whistle.'),
     volume('musicVolume', 'Music', 'The soundtrack that drops when a goal goes in.'),
-    toggle('goalMusic', 'Goal music', 'Drops a beat when a goal goes in.'),
+    toggle('goalMusic', 'Goal music', 'Swells into the drop when a goal goes in.'),
     {
       id: 'credits',
       label: 'Sound credits',
