@@ -1,5 +1,6 @@
 import { Gamepad2, X } from 'lucide-react';
 import { Fragment, useEffect, useState } from 'react';
+import { formatVolume, stepVolume } from '../audio/sound';
 import { DIFFICULTIES, difficultyInfo } from '../game/difficulty';
 import { publish, updateSettings, useGame } from '../game/store';
 import type { Settings } from '../game/types';
@@ -7,6 +8,7 @@ import { step, useNav } from '../input/menuNavigation';
 import { CAMERA_OPTIONS } from '../scene/camera';
 import { OptionRow, Prompts, TitleBar, type OptionKind } from './kit';
 
+type VolumeKey = 'masterVolume' | 'sfxVolume' | 'musicVolume';
 interface Row {
   id: string;
   section?: string;
@@ -14,10 +16,12 @@ interface Row {
   kind: OptionKind;
   value: string;
   checked?: boolean;
+  slider?: number;
   /** Shown under the list while the row is focused. */
   hint: string;
   select: () => void;
   step?: (dir: 1 | -1) => void;
+  slide?: (value: number) => void;
 }
 type Toggle = { [K in keyof Settings]: Settings[K] extends boolean ? K : never }[keyof Settings];
 
@@ -78,6 +82,17 @@ export function SettingsScreen({ crumb, onClose }: { crumb: string; onClose: () 
     }
     publish();
   };
+  const volume = (key: VolumeKey, label: string, hint: string): Row => ({
+    id: key,
+    label,
+    kind: 'slider',
+    value: formatVolume(settings[key]),
+    slider: Math.round(settings[key] * 100),
+    hint,
+    select: () => updateSettings({ [key]: stepVolume(settings[key], 1) }),
+    step: (dir) => updateSettings({ [key]: stepVolume(settings[key], dir) }),
+    slide: (n) => updateSettings({ [key]: n }),
+  });
 
   const rows: Row[] = [
     {
@@ -133,7 +148,11 @@ export function SettingsScreen({ crumb, onClose }: { crumb: string; onClose: () 
       select: toggleFullscreen,
       step: toggleFullscreen,
     },
-    toggle('sound', 'Sound', 'Arena, puck and crowd sound.', 'Audio'),
+    toggle('sound', 'Sound', 'Mute music and effects. Volume sliders keep their values.', 'Audio'),
+    volume('masterVolume', 'Master volume', 'Scales music and effects together.'),
+    volume('sfxVolume', 'Sound effects', 'Hits, skating, horn and whistle.'),
+    volume('musicVolume', 'Music', 'The soundtrack that drops when a goal goes in.'),
+    toggle('goalMusic', 'Goal music', 'Drops a beat when a goal goes in.'),
     {
       id: 'credits',
       label: 'Sound credits',
@@ -173,7 +192,7 @@ export function SettingsScreen({ crumb, onClose }: { crumb: string; onClose: () 
     }
     if (a === 'up' || a === 'down') setIndex(step(index, a === 'up' ? -1 : 1, rows.length));
     else if (a === 'left' || a === 'right') row.step?.(a === 'left' ? -1 : 1);
-    else if (a === 'confirm') row.select();
+    else if (a === 'confirm' && row.kind !== 'slider') row.select();
     else if (a === 'back' || a === 'start') onClose();
   });
 
@@ -194,10 +213,12 @@ export function SettingsScreen({ crumb, onClose }: { crumb: string; onClose: () 
                     value={r.value}
                     kind={r.kind}
                     checked={r.checked}
+                    slider={r.slider}
                     focused={i === index}
                     onFocus={() => setIndex(i)}
                     onSelect={r.select}
                     onStep={r.step}
+                    onSlide={r.slide}
                   />
                 </Fragment>
               ))}
@@ -211,7 +232,9 @@ export function SettingsScreen({ crumb, onClose }: { crumb: string; onClose: () 
           testing
             ? [{ k: 'back', label: 'Back', onClick: () => setTesting(false) }]
             : [
-                { k: 'confirm', label: 'Select', onClick: row.select },
+                ...(row.kind === 'slider'
+                  ? []
+                  : [{ k: 'confirm' as const, label: 'Select', onClick: row.select }]),
                 { k: 'leftright', label: 'Change' },
                 { k: 'back', label: 'Back', onClick: onClose },
               ]

@@ -11,7 +11,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { Arena } from './Arena';
 import { Player } from './Player';
-import { IceSpray } from './Effects';
+import { GoalLamp, IceSpray } from './Effects';
 import {
   driveReplay,
   askToLeave,
@@ -27,6 +27,7 @@ import {
 import { stepMatch, togglePause, netShotTarget, shotSpread } from '../game/engine';
 import { recordRagdollPoses } from './ragdoll';
 import { GOAL_REPLAY, REPLAY_HZ } from '../game/replay';
+import { GOAL_BEAT } from '../audio/goalTrack';
 import { replayFraming } from './replayCamera';
 import { navigateWithController } from '../input/menuNavigation';
 import { screenInputToRink } from '../input/coordinates';
@@ -48,6 +49,8 @@ const _framing = new THREE.Vector3();
 /** Simulation steps per replay snapshot. */
 const RECORD_EVERY = Math.max(1, Math.round(1 / RULES.fixedStep / REPLAY_HZ));
 const RECORDED: Phase[] = ['faceoff', 'playing', 'goal'];
+/** The world holds for two sixteenths as the puck crosses, so the drop lands on a still frame. */
+const GOAL_FREEZE = GOAL_BEAT / 2;
 /** Impact feedback shared between the simulation loop and the camera: a big hit shakes the frame. */
 const impact = { shake: 0 };
 function Simulation() {
@@ -58,6 +61,8 @@ function Simulation() {
     pending = useRef<SideInputs>([null, null]),
     steps = useRef(0),
     goalReplay = useRef(false),
+    freeze = useRef(0),
+    pulses = useRef<number[]>([]),
     frameRef = useRef<(delta: number) => void>(() => {});
   // Online, the host runs the match for both people, so it has to keep stepping even while
   // nobody is looking at this tab. A worker's clock is not throttled the way the render loop is.
@@ -118,8 +123,16 @@ function Simulation() {
       runtime.controller.onDisconnect = undefined;
       runtime.controllerTwo.onDisconnect = undefined;
       document.removeEventListener('visibilitychange', visibility);
+      pulses.current.forEach(clearTimeout);
     };
   }, []);
+  /** The pad thumps with every 808 for the first bars of the celebration. */
+  const rumbleToTheBeat = () => {
+    pulses.current.forEach(clearTimeout);
+    pulses.current = runtime.audio
+      .celebrationPulses()
+      .map((ms) => window.setTimeout(() => runtime.controller.rumble(0.85, 90), ms));
+  };
   /**
    * Whistles, hits and horns: sound, rumble and camera shake. The watching side runs this on the
    * calls the host sent rather than on any of its own, which is why they cross with the snapshot.
@@ -128,7 +141,14 @@ function Simulation() {
     for (const event of s.events)
       if (event.id > lastEvent.current) {
         runtime.audio.play(event, s.mode);
-        if (event.type === 'goal') goalReplay.current = goalReplayWanted(s);
+        if (event.type === 'goal') {
+          goalReplay.current = goalReplayWanted(s);
+          if (s.mode !== 'freeSkate') {
+            freeze.current = GOAL_FREEZE;
+            impact.shake = Math.max(impact.shake, 0.6);
+            rumbleToTheBeat();
+          }
+        }
         if (['shot', 'hit', 'goal', 'post', 'crossbar', 'save'].includes(event.type)) {
           const bigHit = event.type === 'hit' && event.power >= 0.5;
           if (bigHit) impact.shake = Math.max(impact.shake, event.power >= 0.75 ? 1 : 0.45);
@@ -144,7 +164,7 @@ function Simulation() {
                   ? Math.max(0.55, event.power)
                   : event.power * 0.7,
             event.type === 'goal'
-              ? 650
+              ? 380
               : bigHit
                 ? 280
                 : event.type === 'hit'
@@ -166,7 +186,13 @@ function Simulation() {
       accumulator.current = 0;
       pending.current = [null, null];
       goalReplay.current = false;
+      freeze.current = 0;
+      pulses.current.forEach(clearTimeout);
     }
+    runtime.audio.updateCelebration(
+      s.phase === 'goal' || (s.phase === 'paused' && s.previousPhase === 'goal'),
+      s.phase === 'paused',
+    );
     const tickPublish = () => {
       publishTime.current += delta;
       if (publishTime.current > 0.08) {
@@ -259,8 +285,12 @@ function Simulation() {
       accumulator.current = 0;
       return;
     }
-    accumulator.current +=
-      Math.min(delta, 0.05) * (import.meta.env.DEV && labHooks.active ? labHooks.simScale : 1);
+    if (freeze.current > 0) {
+      freeze.current -= delta;
+      accumulator.current = 0;
+    } else
+      accumulator.current +=
+        Math.min(delta, 0.05) * (import.meta.env.DEV && labHooks.active ? labHooks.simScale : 1);
     while (accumulator.current >= RULES.fixedStep) {
       // As host, the other bench is whatever the last packet said. A missing one repeats rather
       // than handing the skater back to the AI.
@@ -559,6 +589,7 @@ export function GameScene() {
               <ShotAimHud marker={shotAim} />
               <PassAim />
               <IceSpray />
+              <GoalLamp />
             </Suspense>
             <Suspense fallback={null}>
               {/* Keyed by matchup so jerseys are rebuilt when the clubs or uniforms change. */}

@@ -225,8 +225,13 @@ function Faceoff({ s }: { s: MatchState }) {
 function GoalCall({ s }: { s: MatchState }) {
   const practice = modeInfo(s.mode).practice;
   const scorer = s.scoringTeam === null ? null : s.teams[s.scoringTeam];
+  const style = {
+    ...club(scorer?.accent ?? '#5d7894'),
+    '--beat': `${runtime.audio.celebrationBeat()}s`,
+  } as CSSProperties;
   return (
-    <div className="goal-call" style={club(scorer?.accent ?? '#5d7894')}>
+    <div className="goal-call" style={style} data-scored={scorer ? 'yes' : 'no'}>
+      {scorer && <div className="goal-flash" />}
       <div className="goal-band" />
       {scorer && !practice && (
         <span className="goal-team">
@@ -239,9 +244,9 @@ function GoalCall({ s }: { s: MatchState }) {
       {scorer && !practice && (
         <div className="goal-score">
           <TeamLogo club={s.teams[1]} />
-          <b>{s.score[1]}</b>
+          <b className={s.scoringTeam === 1 ? 'scored' : ''}>{s.score[1]}</b>
           <i>–</i>
-          <b>{s.score[0]}</b>
+          <b className={s.scoringTeam === 0 ? 'scored' : ''}>{s.score[0]}</b>
           <TeamLogo club={s.teams[0]} />
         </div>
       )}

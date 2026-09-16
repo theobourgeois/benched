@@ -1,5 +1,5 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { useEffect, useId, useRef, type ReactNode } from 'react';
+import { useEffect, useId, useRef, type CSSProperties, type ReactNode } from 'react';
 import type { Club, Uniform } from '../game/clubs';
 import { useGame } from '../game/store';
 import { useDevice, type Device, type NavAction } from '../input/menuNavigation';
@@ -127,7 +127,7 @@ export function MenuItem({
   );
 }
 
-export type OptionKind = 'cycle' | 'toggle' | 'link';
+export type OptionKind = 'cycle' | 'toggle' | 'link' | 'slider';
 /** A settings line: label on the left, value on the right. Left and right step a selector. */
 export function OptionRow({
   label,
@@ -135,35 +135,45 @@ export function OptionRow({
   kind,
   checked,
   focused,
+  slider,
   onFocus,
   onSelect,
   onStep,
+  onSlide,
 }: {
   label: string;
   value: string;
   kind: OptionKind;
   checked?: boolean;
   focused: boolean;
+  /** 0–100, for volume rows. */
+  slider?: number;
   onFocus: () => void;
   onSelect: () => void;
   onStep?: (dir: 1 | -1) => void;
+  onSlide?: (value: number) => void;
 }) {
   const ref = useFollowFocus<HTMLButtonElement>(focused);
   const valueId = useId();
+  const sliding = kind === 'slider';
   return (
     <div className="option" data-focused={focused || undefined} onMouseEnter={onFocus}>
       <button
         ref={ref}
         className="option-hit"
-        role={kind === 'toggle' ? 'switch' : undefined}
+        role={kind === 'toggle' ? 'switch' : sliding ? 'slider' : undefined}
         aria-checked={kind === 'toggle' ? checked : undefined}
+        aria-valuemin={sliding ? 0 : undefined}
+        aria-valuemax={sliding ? 100 : undefined}
+        aria-valuenow={sliding ? slider : undefined}
+        aria-valuetext={sliding ? value : undefined}
         aria-label={label}
         aria-describedby={kind === 'toggle' ? undefined : valueId}
         onFocus={onFocus}
         onClick={onSelect}
       />
       <span className="option-label">{label}</span>
-      <span className="option-value">
+      <span className="option-value" data-kind={kind}>
         {kind === 'cycle' && (
           <button tabIndex={-1} aria-label={`Previous ${label}`} onClick={() => onStep?.(-1)}>
             <ChevronLeft size={18} />
@@ -172,9 +182,34 @@ export function OptionRow({
         {kind === 'toggle' ? (
           <i className="switch" data-on={checked || undefined} aria-hidden="true" />
         ) : null}
-        <span id={valueId}>{value}</span>
-        {kind === 'cycle' && (
-          <button tabIndex={-1} aria-label={`Next ${label}`} onClick={() => onStep?.(1)}>
+        {sliding && (
+          <>
+            <button tabIndex={-1} aria-label={`Decrease ${label}`} onClick={() => onStep?.(-1)}>
+              <ChevronLeft size={18} />
+            </button>
+            <input
+              className="volume-track"
+              type="range"
+              min={0}
+              max={100}
+              step={5}
+              value={slider ?? 0}
+              tabIndex={-1}
+              aria-hidden="true"
+              style={{ '--at': `${slider ?? 0}%` } as CSSProperties}
+              onChange={(e) => onSlide?.(Number(e.target.value) / 100)}
+            />
+          </>
+        )}
+        <span id={valueId} className={sliding ? 'volume-pct' : undefined}>
+          {value}
+        </span>
+        {(kind === 'cycle' || sliding) && (
+          <button
+            tabIndex={-1}
+            aria-label={`${kind === 'cycle' ? 'Next' : 'Increase'} ${label}`}
+            onClick={() => onStep?.(1)}
+          >
             <ChevronRight size={18} />
           </button>
         )}

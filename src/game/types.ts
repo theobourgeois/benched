@@ -250,6 +250,12 @@ export function cameraUsesAttackUp(camera: CameraMode) {
 }
 export interface Settings {
   sound: boolean;
+  /** 0–1. Scales music and effects together after mute. */
+  masterVolume: number;
+  /** 0–1. Hits, skating, horn and whistle. */
+  sfxVolume: number;
+  /** 0–1. Goal soundtrack. */
+  musicVolume: number;
   camera: CameraMode;
   quality: 'high' | 'low';
   /** Shot target in the net and pass-lane arrow. */
@@ -257,6 +263,8 @@ export interface Settings {
   difficulty: Difficulty;
   /** Replay the build-up after a goal; any button skips it. */
   goalReplays: boolean;
+  /** Drop a beat when a goal goes in. */
+  goalMusic: boolean;
   /** Frame counter in the corner of the ice. */
   showFps: boolean;
   /** Button prompts along the bottom of menus. */

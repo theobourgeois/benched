@@ -45,7 +45,15 @@ test('menu renders, selects teams, opens accessible controls and settings', asyn
   await page.getByRole('button', { name: 'Next Graphics' }).click();
   await page.getByRole('button', { name: 'Next Camera angle' }).click();
   await page.getByRole('switch', { name: 'FPS counter' }).click();
-  expect(await settings(page)).toMatchObject({ quality: 'low', showFps: false, beginner: false });
+  await page.getByRole('slider', { name: 'Master volume' }).focus();
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('ArrowLeft');
+  expect(await settings(page)).toMatchObject({
+    quality: 'low',
+    showFps: false,
+    beginner: false,
+    masterVolume: 0.9,
+  });
   expect((await settings(page)).camera).not.toBe('broadcast');
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: 'Play Now', exact: true }).click();
@@ -66,11 +74,30 @@ test('settings survive a reload', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByRole('switch', { name: 'Button prompts' }).click();
+  await page.getByRole('slider', { name: 'Music' }).focus();
+  await page.keyboard.press('ArrowLeft');
   await expect(page.locator('.prompts')).toHaveCount(0);
   await page.reload();
   expect((await settings(page)).hints).toBe(false);
+  expect((await settings(page)).musicVolume).toBe(0.65);
   await expect(page.getByRole('navigation', { name: 'Main menu' })).toBeVisible();
   await expect(page.locator('.prompts')).toHaveCount(0);
+});
+test('settings expose volume sliders, and a click preloads goal music', async ({ page }) => {
+  const song = page.waitForResponse((r) => r.url().includes('/audio/music/') && r.ok());
+  await page.goto('/');
+  await page.locator('.brand').click();
+  await song;
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await expect(page.getByRole('slider', { name: 'Master volume' })).toBeVisible();
+  await expect(page.getByRole('slider', { name: 'Sound effects' })).toBeVisible();
+  await expect(page.getByRole('slider', { name: 'Music' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await play(page);
+  await expect(live(page)).toBeVisible({ timeout: 30000 });
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Quit to Menu' }).click();
+  await expect(page.getByRole('navigation', { name: 'Main menu' })).toBeVisible();
 });
 test('an NHL matchup puts real clubs, logos and starters on the ice', async ({ page }) => {
   const errors: string[] = [];

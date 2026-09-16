@@ -59,7 +59,10 @@ export function step(index: number, dir: number, count: number, skip?: (i: numbe
 /** Runs once per frame from the simulation loop. True while a menu owns the pad. */
 export function navigateWithController() {
   const { controller } = runtime;
-  if (controller.padActive) setDevice('pad');
+  if (controller.padActive) {
+    setDevice('pad');
+    runtime.audio.unlock();
+  }
   if (!navActive()) return false;
   for (const button of MENU_BUTTONS) if (controller.ui[button]) dispatch(button);
   return true;

@@ -2,6 +2,7 @@ import { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { runtime, viewMatch, viewTimeScale } from '../game/store';
+import { RINK } from '../game/config';
 interface Particle {
   x: number;
   y: number;
@@ -87,5 +88,60 @@ export function IceSpray() {
       <tetrahedronGeometry args={[1]} />
       <meshBasicMaterial color="#f0ffff" transparent opacity={0.7} />
     </instancedMesh>
+  );
+}
+
+/**
+ * The red lamp behind the glass. It strobes on the eighths of the goal beat over the net that was
+ * scored on, and washes the ice around it, while the call is up.
+ */
+export function GoalLamp() {
+  const lamps = [useRef<THREE.Mesh>(null), useRef<THREE.Mesh>(null)],
+    lights = [useRef<THREE.PointLight>(null), useRef<THREE.PointLight>(null)],
+    clock = useRef(0),
+    lit = useRef(false);
+  useFrame((_, delta) => {
+    const s = viewMatch(),
+      on = s.phase === 'goal' && s.scoringTeam !== null && s.mode !== 'freeSkate';
+    if (on !== lit.current) clock.current = 0;
+    lit.current = on;
+    clock.current += Math.min(delta, 0.1) * viewTimeScale();
+    const end = Math.sign(s.puck.x) || 1;
+    const half = runtime.audio.celebrationBeat() / 2;
+    const beat = (clock.current % half) / half;
+    const glow = on ? 0.35 + 0.65 * Math.max(0, 1 - beat * 2.2) : 0;
+    for (const sign of [-1, 1]) {
+      const i = sign < 0 ? 0 : 1,
+        mine = on && sign === end;
+      const lamp = lamps[i].current,
+        light = lights[i].current;
+      if (lamp)
+        (lamp.material as THREE.MeshStandardMaterial).emissiveIntensity = mine ? glow * 3 : 0;
+      if (light) light.intensity = mine ? glow * 320 : 0;
+    }
+  });
+  return (
+    <>
+      {[-1, 1].map((sign, i) => (
+        <group key={sign} position={[sign * (RINK.halfLength + 0.55), 2.35, 0]}>
+          <mesh ref={lamps[i]}>
+            <sphereGeometry args={[0.28, 16, 12]} />
+            <meshStandardMaterial color="#3a0808" emissive="#ff1a10" emissiveIntensity={0} />
+          </mesh>
+          <mesh position={[0, -0.45, 0]}>
+            <cylinderGeometry args={[0.05, 0.05, 0.6, 6]} />
+            <meshStandardMaterial color="#1c1c1c" />
+          </mesh>
+          <pointLight
+            ref={lights[i]}
+            color="#ff3a22"
+            intensity={0}
+            distance={30}
+            decay={2}
+            position={[-sign * 1.2, 0, 0]}
+          />
+        </group>
+      ))}
+    </>
   );
 }

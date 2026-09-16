@@ -66,12 +66,16 @@ https://freesound.org/people/AudioAlchemyDesigns/sounds/826195/
 Creative Commons Attribution 4.0 International
 https://creativecommons.org/licenses/by/4.0/
 
-goal.mp3, horn.mp3
+horn.mp3
 “Hockey arena goal horn with crowd applause” by SEF7, via Freesound.
 https://freesound.org/people/SEF7/sounds/702099/
 Creative Commons Zero 1.0 (CC0)
 https://creativecommons.org/publicdomain/zero/1.0/
-Changes: goal clip keeps horn plus crowd; period horn is a shorter blast.
+Changes: a shorter blast, used for the end of a period.
+
+Goal music
+The sting and beat that play on a goal are synthesized in the game (src/audio/goalTrack.ts).
+No recordings are used.
 
 whistle.mp3
 “Referee whistle sound” by Rosa-Orenes256, via Freesound.
@@ -86,3 +90,8 @@ Creative Commons Zero 1.0 (CC0)
 https://creativecommons.org/publicdomain/zero/1.0/
 Source: high-quality MP3 preview. Changes: normalized and faded at loop boundaries;
 playback speed and volume follow skating speed.
+
+Goal soundtrack
+Original unfinished demos, bundled locally. A goal starts a song at its drop.
+
+leakssped.mp3, yo1vox.mp3, chopmyfingersoff.mp3, swagdemo2.mp3, blindluckvox.mp3

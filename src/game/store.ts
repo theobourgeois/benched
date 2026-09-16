@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import { createMatch, nextPeriod, startMatch, togglePause } from './engine';
-import { ArenaAudio } from '../audio/sound';
+import { ArenaAudio, readVolume } from '../audio/sound';
 import { Controller, type ReplayInput } from '../input/controller';
 import { clubByKey, DEFAULT_MATCHUP, type Club } from './clubs';
 import type { MatchSetup } from '../net/protocol';
@@ -45,23 +45,37 @@ export const runtime = {
   replay: null as ReplaySession | null,
   settings: loadSettings(),
 };
+runtime.audio.apply(runtime.settings);
 function loadSettings(): Settings {
   const defaults: Settings = {
     sound: true,
+    masterVolume: 1,
+    sfxVolume: 1,
+    musicVolume: 0.7,
     camera: 'broadcast',
     quality: 'high',
     beginner: true,
     difficulty: DEFAULT_DIFFICULTY,
     goalReplays: true,
+    goalMusic: true,
     showFps: true,
     hints: true,
   };
   try {
     const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') as Partial<Settings>;
-    return { ...defaults, ...saved };
+    const next = { ...defaults, ...saved };
+    next.masterVolume = readVolume(saved.masterVolume, defaults.masterVolume);
+    next.sfxVolume = readVolume(saved.sfxVolume, defaults.sfxVolume);
+    next.musicVolume = readVolume(saved.musicVolume, defaults.musicVolume);
+    return next;
   } catch {
     return defaults;
   }
+}
+if (typeof window !== 'undefined') {
+  const unlock = () => runtime.audio.unlock();
+  window.addEventListener('pointerdown', unlock);
+  window.addEventListener('keydown', unlock);
 }
 let revision = 0;
 const listeners = new Set<() => void>();
@@ -151,7 +165,7 @@ export function returnToMenu() {
 }
 export function updateSettings(settings: Partial<Settings>) {
   Object.assign(runtime.settings, settings);
-  runtime.audio.enabled = runtime.settings.sound;
+  runtime.audio.apply(runtime.settings);
   if (settings.difficulty) runtime.match.difficulty = settings.difficulty;
   try {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(runtime.settings));
@@ -219,6 +233,6 @@ export function driveReplay(r: ReplaySession, input: ReplayInput, dt: number) {
     });
   }
   const { events, finished } = advanceReplay(r, dt, r.kind === 'instant' ? input.scrub : 0);
-  for (const event of events) runtime.audio.play(event, runtime.match.mode);
+  for (const event of events) runtime.audio.play(event, runtime.match.mode, true);
   if (finished) closeReplay();
 }
