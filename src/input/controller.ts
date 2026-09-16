@@ -169,6 +169,7 @@ export class Controller {
       poke = false,
       check = false,
       checkPower = 0,
+      reach = false,
       deke = false,
       dekeSpecial: InputFrame['dekeSpecial'] = null;
     // Tap LT (or Ctrl) for a spin-o-rama; holding it still backskates.
@@ -210,6 +211,8 @@ export class Controller {
       // direct down-to-up flick that never crosses a neutral frame.
       check = stickY < -0.55 && !this.previous.up && !rb && !both;
       if (check) checkPower = this.windup;
+      // Any flick, as a goalie, throws a save that way.
+      reach = stickFlick && !rb && !both;
       this.bumperTime = 0;
       this.bumperChipped = false;
     }
@@ -282,6 +285,7 @@ export class Controller {
       dive,
       check,
       checkPower,
+      reach,
       block: lb && !rb && !hasPuck,
       switchPlayer: held.switchPlayer && !this.previous.switchPlayer,
       pause: held.pause && !this.previous.pause,

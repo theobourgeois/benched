@@ -103,7 +103,10 @@ const topShoulder = new THREE.Vector3(),
   frameQ = new THREE.Quaternion(),
   gripWrist = new THREE.Vector3(),
   gripHandQ = new THREE.Quaternion(),
-  freeHandQ = new THREE.Quaternion();
+  freeHandQ = new THREE.Quaternion(),
+  coverQ = new THREE.Quaternion(),
+  palmDown = new THREE.Quaternion();
+const X_AXIS = new THREE.Vector3(1, 0, 0);
 
 /** Largest distance down the shaft from the top hand, up to `want`, that a shoulder can reach. */
 function reachableDown(
@@ -277,7 +280,7 @@ export const Player = memo(function Player({ id }: { id: number }) {
     root.updateMatrixWorld(true);
     const { bones } = rig;
     const charge = shotWindup(skater, s.controlled === id ? s.shotCharge : 0);
-    if (goalie) sampleGoalieAction(skater, s.puck, goalieAction);
+    if (goalie) sampleGoalieAction(skater, s.puck, goalieAction, dt * viewTimeScale());
     // The ragdoll runs on replay time, so a knockdown tumbles slowly in slow motion.
     const posture = poseSkater(
       rig,
@@ -319,7 +322,12 @@ export const Player = memo(function Player({ id }: { id: number }) {
       BLADE_ICE_Y + action.bladeLift * stickBlend + (dekeMove?.lift ?? 0),
       THREE.MathUtils.lerp(0.2, reach_ + action.bladeReach, stickBlend),
     );
-    if (goalie) tip.set(-0.08 + goalieAction.side * 0.12, BLADE_ICE_Y, 0.63);
+    if (goalie) {
+      // The paddle sits where the simulation keeps the puck; a blocker save takes it up with the hand.
+      tip.set(skater.stickSide + goalieAction.side * 0.08, BLADE_ICE_Y, skater.stickReach);
+      // The paddle stays down and angles out under the raised blocker rather than standing up.
+      tip.lerp(offset.set(goalieAction.blockerX - 0.45, BLADE_ICE_Y, 0.42), goalieAction.blocker);
+    }
     if (chopper) {
       const spin = cellyMove.rotor;
       tip.set(Math.cos(spin) * 1.22, 1.58, Math.sin(spin) * 1.22);
@@ -350,7 +358,11 @@ export const Player = memo(function Player({ id }: { id: number }) {
       grip.x = THREE.MathUtils.lerp(grip.x, Math.min(grip.x, tip.x - 0.6), action.releaseHand);
       grip.z += action.releaseHand * 0.12;
     }
-    if (goalie) grip.copy(pelvis).add(offset.set(-0.22, -0.02, 0.34));
+    if (goalie)
+      grip
+        .copy(pelvis)
+        .add(offset.set(-0.22, -0.02, 0.34))
+        .lerp(offset.set(goalieAction.blockerX, goalieAction.blockerY, 0.3), goalieAction.blocker);
     grip.lerp(offset.set(-0.12, 0.08, -0.45), 1 - stickBlend);
     if (chopper) {
       const overhead = topShoulder.y + 0.46;
@@ -467,24 +479,28 @@ export const Player = memo(function Player({ id }: { id: number }) {
         }
         poseBone(rig, 'handL', 0.06 + support * 0.65, 0, 0);
         if (goalie && support === 0) {
+          // Ready with the mitt open; thrown to the committed point; or down over a frozen puck.
+          point
+            .copy(lowShoulder)
+            .add(offset.set(0.13 + Math.max(0, goalieAction.side) * 0.1, -0.16, 0.32))
+            .lerp(offset.set(goalieAction.gloveX, goalieAction.gloveY, 0.38), goalieAction.glove)
+            .lerp(offset.set(0.24, 0.06, 0.55), goalieAction.cover);
           reachLimb(
             rig,
             'arm',
             'L',
+            tilt.localToWorld(point),
             tilt.localToWorld(
-              point
-                .copy(lowShoulder)
-                .add(
-                  offset.set(
-                    0.13 + Math.max(0, goalieAction.side) * 0.22,
-                    -0.16 + goalieAction.high * goalieAction.reach * 0.32,
-                    0.32 + goalieAction.reach * 0.06,
-                  ),
-                ),
+              pole.copy(lowShoulder).add(offset.set(0.3, -0.28 + goalieAction.glove * 0.2, 0.1)),
             ),
-            tilt.localToWorld(pole.copy(lowShoulder).add(offset.set(0.3, -0.28, 0.1))),
           );
-          setWorldQuaternion(bones.handL, frameQ);
+          // The mitt faces the shooter; over a frozen puck it turns palm down.
+          setWorldQuaternion(
+            bones.handL,
+            coverQ
+              .copy(frameQ)
+              .multiply(palmDown.setFromAxisAngle(X_AXIS, (-Math.PI / 2) * goalieAction.cover)),
+          );
         }
         bones.handL.getWorldQuaternion(freeHandQ);
         setWorldQuaternion(bones.handL, freeHandQ.slerp(gripHandQ, 1 - freeHand));

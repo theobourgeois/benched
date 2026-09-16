@@ -7,6 +7,8 @@ export type DekeKind =
   'stride' | 'burst' | 'protect' | 'jump' | 'throughLegs' | 'windmill' | 'spin';
 export type DekeSpecial = 'jump' | 'throughLegs' | 'windmill' | 'spin';
 export type CellyKind = 'helicopter' | 'jump' | 'limp' | 'dance';
+/** What a goalie committed to, or what the puck met. */
+export type SaveKind = 'butterfly' | 'pad' | 'glove' | 'blocker' | 'body' | 'stick';
 export interface Vec2 {
   x: number;
   z: number;
@@ -59,9 +61,16 @@ export interface Skater extends Vec2 {
     height: number;
     tick: number;
   } | null;
+  /** Committed save: how long it holds, what it is, and where in the goalie's frame it reaches. */
   saveTimer?: number;
+  saveKind?: SaveKind | null;
+  /** Metres toward the glove (their left); tracks the body as it pushes across. */
   saveSide?: number;
   saveHeight?: number;
+  /** Reading a shot; the save commits when it runs out. */
+  readTimer?: number;
+  /** Holding a covered puck. Opponents cannot poke a frozen puck. */
+  coverTimer?: number;
   /** Recorded with the simulation so action clips are stable during replay and seeking. */
   shotStyle?: 'wrist' | 'slap' | 'backhand' | 'pass';
   shotDuration?: number;
@@ -129,6 +138,8 @@ export interface InputFrame {
   check: boolean;
   /** How far the stick was pulled back before the flick, 0 to 1. */
   checkPower?: number;
+  /** Skill-stick flick as a goalie: throw a glove, blocker or pad at the flicked side. */
+  reach: boolean;
   /** LB held without the puck: block a pass or shot. */
   block: boolean;
   /** Right stick in rink space, used for chips and checks. */

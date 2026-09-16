@@ -58,6 +58,7 @@ const noEdges = (input: InputFrame) => ({
   dekeSpecial: null,
   dive: false,
   check: false,
+  reach: false,
   switchPlayer: false,
   pause: false,
   celly: null,
@@ -158,6 +159,9 @@ function Simulation() {
           dive: frame.dive || old.dive,
           check: frame.check || old.check,
           checkPower: frame.check ? frame.checkPower : old.checkPower,
+          reach: frame.reach || old.reach,
+          stickIceX: frame.reach || !old.reach ? frame.stickIceX : old.stickIceX,
+          stickIceZ: frame.reach || !old.reach ? frame.stickIceZ : old.stickIceZ,
           switchPlayer: frame.switchPlayer || old.switchPlayer,
           pause: frame.pause || old.pause,
         }

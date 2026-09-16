@@ -191,6 +191,7 @@ export function sampleReplay(view: MatchState, frames: ReplayFrame[], time: numb
     if (to.checkTimer > from.checkTimer && t < 1) p.checkTimer = from.checkTimer;
     if ((to.saveTimer ?? 0) > (from.saveTimer ?? 0) && t < 1) {
       p.saveTimer = from.saveTimer;
+      p.saveKind = from.saveKind;
       p.saveSide = from.saveSide;
       p.saveHeight = from.saveHeight;
     }

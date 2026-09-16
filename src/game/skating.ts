@@ -1,5 +1,6 @@
-import { attackDirection, PHYSICS } from './config';
+import { attackDirection, GOALIE, PHYSICS } from './config';
 import { activeDeke } from './dekes';
+import { onPads, recovering, savePush } from './goalie';
 import { cellyAirborne, cellyRagdoll } from './cellys';
 import { clamp, turnToward } from './math';
 import { isOnIce } from './modes';
@@ -86,12 +87,25 @@ export function skateVelocity(
     // A committed shoulder follows its launch momentum. Left-stick input cannot cancel it or
     // steer it onto a dodging target. Stumbles likewise cannot be accelerated out of.
   } else if (goalie) {
-    const max = PHYSICS.maxSpeed * 0.64 * speedScale;
-    const scale = Math.max(1, Math.hypot(x, z));
-    const blend = 1 - Math.exp(-2.6 * dt);
-    p.vx += ((x / scale) * max - p.vx) * blend;
-    p.vz += ((z / scale) * max - p.vz) * blend;
-    drive = mag;
+    if (onPads(p) && !recovering(p)) {
+      // Down on the pads: the slide carries on and bleeds off; there is no shuffle until back up.
+      const decay = Math.exp(-GOALIE.slideDrag * dt);
+      p.vx *= decay;
+      p.vz *= decay;
+    } else {
+      // The shuffle keeps both skates down. A push across, or a hustle, gets the explosive step.
+      const pushing = hustle || savePush(p) !== null;
+      const max =
+        (pushing ? GOALIE.pushSpeed : GOALIE.shuffleSpeed) *
+        speedScale *
+        (carrying ? GOALIE.carry : 1) *
+        (recovering(p) ? 0.5 : 1);
+      const scale = Math.max(1, Math.hypot(x, z));
+      const blend = 1 - Math.exp(-GOALIE.response * dt);
+      p.vx += ((x / scale) * max - p.vx) * blend;
+      p.vz += ((z / scale) * max - p.vz) * blend;
+      drive = mag;
+    }
   } else if (mag > 0.05) {
     const stopping = alignment < PHYSICS.stopAlign && speed > 0.8;
     let nextSpeed: number, heading: number;

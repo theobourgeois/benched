@@ -42,6 +42,10 @@ Connect an Xbox controller by USB or Bluetooth and press any button after openin
 | Hustle                         | Hold left-stick click                               | Shift                                   |
 | Backskate                      | Hold LT                                             | Hold Left Ctrl                          |
 | Switch skater                  | A                                                   | Q                                       |
+| Goalie: shuffle                | Left stick                                          | WASD                                    |
+| Goalie: glove / blocker / pad  | Flick right stick that way (up-left, up-right, out) | Up + left / right arrow; left / right   |
+| Goalie: butterfly              | Flick right stick down; hold LB to stay down        | Down arrow; hold R to stay down         |
+| Goalie: play a covered puck    | Hold RT to aim a pass, or flick RS up to shoot      | Hold Space, or up arrow                 |
 | Pause / resume                 | Menu                                                | Escape                                  |
 
 Every menu runs on the controller: the D-pad or left stick moves (hold to repeat), A selects, B goes back, and Menu resumes from pause. Keyboard mirrors it with arrows or WASD, Enter and Escape. On the matchup screen, left/right picks your side, up/down changes your club, Y picks a random one, and X cycles CPU difficulty. A readies you up; while ready, up/down swaps between your home and away sweaters and the opponent wears the other set. A again drops the puck; B backs out of ready. In settings, left/right changes a focused selector. Button prompts along the bottom of menus and the in-game FPS counter can be turned off in settings.
@@ -63,7 +67,8 @@ src/
     math.ts        Vectors, angular smoothing, rounded-board collision
     skating.ts     Shared acceleration, edge forces, stops, pivots and committed movement
     dekes.ts       One-touch and special deke clips
-    ai.ts          Puck pursuit, support lanes, defensive shape, goalie movement
+    ai.ts          Puck pursuit, support lanes, defensive shape, goalie positioning and puck play
+    goalie.ts      Goalie model: reading shots, committed saves, coverage, rebounds and covers
     engine.ts      Pure simulation, possession, shots, collisions, periods, scoring
     store.ts       Runtime composition and React subscriptions
   input/
@@ -116,7 +121,7 @@ For development inspection only, `window.__BENCHED__` exposes the runtime, publi
 
 ## Prototype scope
 
-Single local player against AI. No online multiplayer, penalties, offside, icing, line changes, overtime, fighting, or manual goalie control. Faceoffs use a countdown followed by a race for the loose puck. All players share one sculpted skater, recolored per team with crest and number decals; goalies add pads. Its animation is procedural — skating crouch and stride, arms solved onto the stick, and knockdown recovery — with no motion capture. Settings persist in local storage; the matchup is kept for the session. The physics and AI are an arcade foundation for further playtesting and tuning.
+Single local player against AI. No online multiplayer, penalties, offside, icing, line changes, overtime, or fighting. You control your goalie in shootouts and whenever they freeze the puck (shuffle, throw a glove, blocker or pad with the right stick, butterfly, poke, then pass or shoot it out); the rest of the time the goalie reads shots itself. Faceoffs use a countdown followed by a race for the loose puck. All players share one sculpted skater, recolored per team with crest and number decals; goalies add pads. Its animation is procedural — skating crouch and stride, arms solved onto the stick, and knockdown recovery — with no motion capture. Settings persist in local storage; the matchup is kept for the session. The physics and AI are an arcade foundation for further playtesting and tuning.
 
 Technical references: [React Three Fiber setup](https://r3f.docs.pmnd.rs/getting-started/installation), [Gamepad API](https://developer.mozilla.org/en-US/docs/Web/API/Gamepad), [controller haptics](https://developer.mozilla.org/en-US/docs/Web/API/Gamepad/vibrationActuator).
 

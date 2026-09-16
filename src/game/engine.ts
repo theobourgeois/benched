@@ -2,6 +2,8 @@ import {
   attackDirection,
   EMPTY_INPUT,
   GET_UP,
+  GOALIE,
+  GOALIE_STICK,
   IRON,
   PHYSICS,
   PUCK,
@@ -23,7 +25,22 @@ import { decideAI } from './ai';
 import { DEFAULT_MATCHUP, type Club } from './clubs';
 import { cpuTune, DEFAULT_DIFFICULTY } from './difficulty';
 import { backcheckLaunchCap, backcheckScales, isBreakawayRush, skateVelocity } from './skating';
-import { SHOT_DOWNSWING, GOALIE_SAVE_TIME } from './actionTiming';
+import {
+  applySave,
+  canCover,
+  canRecommit,
+  committed,
+  commitSave,
+  goalieFacing,
+  manualSave,
+  recordContact,
+  savePush,
+  stepGoalieRead,
+  sweepGoalie,
+  trackSaveSide,
+  type SaveContact,
+} from './goalie';
+import { SHOT_DOWNSWING } from './actionTiming';
 import { clamp, constrainToRink, distance, hash01, normalized } from './math';
 import { isOnIce, modeInfo, SHOOTOUT_ROUNDS } from './modes';
 import type {
@@ -125,15 +142,18 @@ export function createMatch(
         queuedCheck: null,
         hitImmunity: 0,
         fallAngle: 0,
-        stickSide: STICK.restSide,
-        stickReach: STICK.restReach,
+        stickSide: ROLES[i] === 'G' ? GOALIE_STICK.side : STICK.restSide,
+        stickReach: ROLES[i] === 'G' ? GOALIE_STICK.reach : STICK.restReach,
         stickSideVel: 0,
         stickReachVel: 0,
         shotTimer: 0,
         pendingShot: null,
         saveTimer: 0,
+        saveKind: null,
         saveSide: 0,
         saveHeight: 0,
+        readTimer: 0,
+        coverTimer: 0,
         shotStyle: 'wrist',
         shotDuration: 0.34,
         shotSide: STICK.restSide,
@@ -180,14 +200,17 @@ export function resetFormation(s: MatchState) {
     p.checkLanded = false;
     p.queuedCheck = null;
     p.hitImmunity = 0;
-    p.stickSide = STICK.restSide;
-    p.stickReach = STICK.restReach;
+    p.stickSide = p.role === 'G' ? GOALIE_STICK.side : STICK.restSide;
+    p.stickReach = p.role === 'G' ? GOALIE_STICK.reach : STICK.restReach;
     p.stickSideVel = 0;
     p.stickReachVel = 0;
     p.shotTimer = 0;
     p.pendingShot = null;
     p.shotLoad = 0;
     p.saveTimer = 0;
+    p.saveKind = null;
+    p.readTimer = 0;
+    p.coverTimer = 0;
     p.passTimer = 0;
     p.diveTimer = 0;
     p.blockTimer = 0;
@@ -416,7 +439,8 @@ function spring(
 }
 function advanceStick(p: Skater, stickX: number, pull: number, dt: number, carrying: boolean) {
   const pose = activeDeke(p);
-  const target = pose ?? stickCarryTarget(stickX, pull);
+  // The paddle stays down in front of the skates; the puck rides on it when the goalie has it.
+  const target = pose ?? (p.role === 'G' ? GOALIE_STICK : stickCarryTarget(stickX, pull));
   const omega = pose ? STICK.omega * 1.55 : STICK.omega,
     zeta = pose ? 0.86 : STICK.zeta;
   const side = spring(p.stickSide, p.stickSideVel, target.side, dt, omega, zeta);
@@ -517,7 +541,8 @@ function beginAutoSkate(s: MatchState) {
 }
 export function switchSkater(s: MatchState) {
   const owner = s.puck.owner;
-  if (owner !== null && s.skaters[owner].team === s.homeTeam) {
+  // A goalie holding the puck can be left to play it while you take a skater.
+  if (owner !== null && s.skaters[owner].team === s.homeTeam && s.skaters[owner].role !== 'G') {
     s.controlled = owner;
     endAutoSkate(s);
     return;
@@ -1204,6 +1229,8 @@ function pokeCheck(s: MatchState, p: Skater, sweep = false) {
   p.stickReach += PHYSICS.pokeExtend + (sweep ? PHYSICS.sweepReach : 0);
   const owner = s.puck.owner !== null ? s.skaters[s.puck.owner] : null;
   if (!owner || owner.team === p.team) return;
+  // A frozen puck is under the goalie; there is nothing to poke until they play it.
+  if (owner.role === 'G' && (owner.coverTimer ?? 0) > 0) return;
   const toPuck = normalized(s.puck.x - p.x, s.puck.z - p.z);
   if (facing(p, toPuck.x, toPuck.z) < 0.22) return;
   if (distance(stickTip(p), s.puck) > PHYSICS.pokeReach + (sweep ? PHYSICS.sweepReach : 0)) return;
@@ -1511,26 +1538,46 @@ function containGoalPuck(s: MatchState) {
     if (p.vy > 0) p.vy *= -0.28;
   }
 }
-function goalieSave(s: MatchState, player: Skater) {
-  const p = s.puck,
-    defending = attackDirection(player.team, s.period);
-  player.saveTimer = GOALIE_SAVE_TIME;
-  player.saveHeight = p.y;
-  player.saveSide = clamp(
-    ((p.x - player.x) * Math.cos(player.angle) - (p.z - player.z) * Math.sin(player.angle)) / 0.8,
-    -1,
-    1,
-  );
-  const side = Math.sign(p.z - player.z || Math.sin(s.tick * 0.7));
-  p.vx = defending * (6.2 + Math.abs(p.vx) * 0.22);
-  p.vz = side * (3.6 + Math.abs(p.z - player.z) * 4.5) + (p.z - player.z) * 3;
-  p.vy = p.y > 0.7 ? 1.35 : 0.55;
-  p.lockout = 0.28;
+/** The goalie has the puck under them: a catch, a smother, or a loose puck they got to first. */
+function coverPuck(s: MatchState, g: Skater, label: string) {
+  const p = s.puck;
+  p.owner = g.id;
+  p.lastTouch = g.team;
   p.shot = false;
   p.passTo = null;
-  p.lastTouch = player.team;
-  emit(s, 'save');
-  notice(s, 'PAD SAVE');
+  p.lockout = 0;
+  p.vx = p.vz = p.vy = 0;
+  p.y = PUCK.restY;
+  g.coverTimer = g.team === s.homeTeam ? GOALIE.humanHold : GOALIE.hold;
+  g.cooldown = 0.25;
+  g.readTimer = 0;
+  if (g.team === s.homeTeam) {
+    s.controlled = g.id;
+    endAutoSkate(s);
+  }
+  notice(s, label);
+  if (s.mode === 'shootout') missShootout(s, 'SAVE');
+}
+/** The puck met the goalie: rebound it or freeze it, and call the play. Passes just bounce. */
+function goalieStop(s: MatchState, g: Skater, contact: SaveContact) {
+  const p = s.puck,
+    shot = p.shot;
+  recordContact(g, contact);
+  const outcome = applySave(g, p, contact);
+  if (shot) emit(s, 'save', clamp(contact.speed / 34, 0.4, 1));
+  if (outcome.cover) {
+    coverPuck(s, g, shot ? outcome.label : 'COVERED');
+    return;
+  }
+  p.shot = false;
+  p.passTo = null;
+  p.lastTouch = g.team;
+  p.lockout = 0.28;
+  if (!shot) {
+    emit(s, 'hit', 0.15);
+    return;
+  }
+  notice(s, outcome.label);
   if (s.mode === 'shootout') missShootout(s, 'SAVE');
 }
 function advancePuck(s: MatchState, dt: number) {
@@ -1542,8 +1589,12 @@ function advancePuck(s: MatchState, dt: number) {
     const forwardX = Math.sin(owner.angle),
       forwardZ = Math.cos(owner.angle);
     const pose = activeDeke(owner);
-    p.x = owner.x + forwardX * owner.stickReach + forwardZ * owner.stickSide;
-    p.z = owner.z + forwardZ * owner.stickReach - forwardX * owner.stickSide;
+    // A frozen puck is under the mitt, not out on the paddle.
+    const frozen = owner.role === 'G' && (owner.coverTimer ?? 0) > 0;
+    const reach = frozen ? 0.5 : owner.stickReach,
+      side = frozen ? 0.25 : owner.stickSide;
+    p.x = owner.x + forwardX * reach + forwardZ * side;
+    p.z = owner.z + forwardZ * reach - forwardX * side;
     p.y = PUCK.restY + (pose ? pose.hop + pose.lift : 0);
     p.vx = owner.vx;
     p.vz = owner.vz;
@@ -1583,6 +1634,25 @@ function advancePuck(s: MatchState, dt: number) {
   }
   p.vx *= Math.exp(-PHYSICS.puckDrag * dt);
   p.vz *= Math.exp(-PHYSICS.puckDrag * dt);
+  // The goalie is swept before the iron: they stand in front of it.
+  if (s.phase !== 'goal')
+    for (const g of s.skaters) {
+      if (g.role !== 'G' || !isOnIce(s, g) || g.downTimer > 0 || g.stumbleTimer > 0) continue;
+      const contact = sweepGoalie(g, p, { x: oldX, y: oldY, z: oldZ }, cpuTune(s, g).save);
+      if (!contact) continue;
+      // Back to the contact; the rebound carries it for the rest of the step.
+      const rest = (1 - contact.t) * dt;
+      p.x = oldX + (p.x - oldX) * contact.t;
+      p.z = oldZ + (p.z - oldZ) * contact.t;
+      p.y = Math.max(PUCK.restY, oldY + (p.y - oldY) * contact.t);
+      goalieStop(s, g, contact);
+      if (p.owner === null) {
+        p.x += p.vx * rest;
+        p.z += p.vz * rest;
+        p.y += p.vy * rest;
+      }
+      return;
+    }
   // Swept iron and goal-line tests keep fast shots from tunnelling through the frame.
   const ring = s.phase === 'goal' ? null : strikeIron(p, oldX, oldY, oldZ, dt);
   const from = ring ?? { x: oldX, y: oldY, z: oldZ };
@@ -1622,27 +1692,6 @@ function advancePuck(s: MatchState, dt: number) {
       if (Math.abs(dot) > 8) emit(s, 'hit', 0.15);
     }
   }
-  if (s.phase !== 'goal') {
-    for (const player of s.skaters) {
-      if (
-        player.role !== 'G' ||
-        !isOnIce(s, player) ||
-        player.downTimer > 0 ||
-        player.stumbleTimer > 0 ||
-        p.y > 1.7 ||
-        p.lockout > 0
-      )
-        continue;
-      const dist = distance(player, p),
-        lateral = Math.abs(p.z - player.z);
-      const save = cpuTune(s, player).save;
-      if (dist > 1.52 * save) continue;
-      const reach = (1.08 + Math.min(0.28, Math.hypot(p.vx, p.vz) * 0.006)) * save;
-      if (lateral > reach && dist > 0.9 * save) continue;
-      goalieSave(s, player);
-      return;
-    }
-  }
   for (const player of s.skaters) {
     if (
       !isOnIce(s, player) ||
@@ -1674,19 +1723,20 @@ function advancePuck(s: MatchState, dt: number) {
   const reachOf = (player: Skater) =>
     livePass && player.team !== p.lastTouch ? distance(player, p) : puckReach(player, p);
   const limitOf = (player: Skater) => {
+    if (player.role === 'G') return GOALIE.coverReach;
     if (livePass && player.id === p.passTo) return PHYSICS.pickupRadius + 0.22;
     if (livePass && player.team !== p.lastTouch) return PHYSICS.passIntercept;
     return PHYSICS.pickupRadius;
   };
+  // A goalie can smother a slow puck they get to first; anything quicker is a rebound to fight for.
   const candidates = s.skaters.filter(
     (player) =>
       isOnIce(s, player) &&
-      player.role !== 'G' &&
       player.downTimer <= 0 &&
       player.diveTimer <= 0 &&
       player.stumbleTimer <= 0 &&
       player.cooldown <= 0 &&
-      (p.y <= 0.65 || player.team === p.lastTouch) &&
+      (player.role === 'G' ? canCover(player, p) : p.y <= 0.65 || player.team === p.lastTouch) &&
       reachOf(player) < limitOf(player),
   );
   candidates.sort((a, b) => reachOf(a) - reachOf(b));
@@ -1696,6 +1746,10 @@ function advancePuck(s: MatchState, dt: number) {
   if (livePass && p.lastTouch !== null && player && player.team !== p.lastTouch) {
     const mate = candidates.find((candidate) => candidate.team === p.lastTouch);
     if (mate) player = mate;
+  }
+  if (player?.role === 'G') {
+    coverPuck(s, player, 'COVERED');
+    return;
   }
   if (player) {
     // Hard shots deflect off bodies; slower pucks can be collected cleanly.
@@ -1813,6 +1867,7 @@ export function stepMatch(s: MatchState, input: InputFrame = EMPTY_INPUT, dt = R
     p.hitImmunity = Math.max(0, p.hitImmunity - dt);
     p.shotTimer = Math.max(0, p.shotTimer - dt);
     p.saveTimer = Math.max(0, (p.saveTimer ?? 0) - dt);
+    p.coverTimer = Math.max(0, (p.coverTimer ?? 0) - dt);
     p.passTimer = Math.max(0, p.passTimer - dt);
     p.diveTimer = Math.max(0, p.diveTimer - dt);
     landDive(p);
@@ -1823,7 +1878,11 @@ export function stepMatch(s: MatchState, input: InputFrame = EMPTY_INPUT, dt = R
     stepCelly(p, dt);
     if (p.downTimer > 0 && p.cellyKind !== 'limp') clearCelly(p);
     const controlled = p.id === controlledThisStep;
-    if (controlled && s.puck.owner === p.id) tryStartDeke(p, input);
+    if (p.role === 'G') {
+      p.angle = goalieFacing(s, p);
+      stepGoalieRead(s, p, dt, cpuTune(s, p).reaction, controlled);
+    }
+    if (controlled && s.puck.owner === p.id && p.role !== 'G') tryStartDeke(p, input);
     if (controlled && input.celly && canStartCelly(s, p) && startCelly(p, input.celly)) {
       clearDeke(p);
       s.countdown = Math.max(s.countdown, cellyDuration(input.celly) + 0.5);
@@ -1848,13 +1907,14 @@ export function stepMatch(s: MatchState, input: InputFrame = EMPTY_INPUT, dt = R
       continue;
     }
     if (p.id === controlledThisStep) {
-      if (input.block) p.blockTimer = 0.16;
+      if (input.block && p.role !== 'G') p.blockTimer = 0.16;
       const skate = controlledSkate(s, p, input);
+      const push = p.role === 'G' ? savePush(p) : null;
       const human = backcheckScales(s, p, skate.push, 1);
       moveSkater(
         p,
-        skate.x,
-        skate.z,
+        push?.x ?? skate.x,
+        push?.z ?? skate.z,
         skate.hustle,
         skate.backskate,
         dt,
@@ -1863,8 +1923,21 @@ export function stepMatch(s: MatchState, input: InputFrame = EMPTY_INPUT, dt = R
         human.push,
         human.speed,
       );
+      if (p.role === 'G') {
+        trackSaveSide(p, previous[p.id].x, previous[p.id].z);
+        // A flick throws a hand or the pads at that side; holding the block button drops the pads.
+        if (input.reach && s.puck.owner !== p.id && (!committed(p) || canRecommit(p)))
+          manualSave(p, input.stickIceX, input.stickIceZ);
+        else if (input.block && s.puck.owner !== p.id && !committed(p))
+          commitSave(p, 'butterfly', 0, 0.2);
+        // A covered puck held past the freeze gets played, as a whistle would have it.
+        if (s.puck.owner === p.id && (p.coverTimer ?? 0) <= 0 && !input.passHeld) {
+          const play = decideAI(s, p);
+          if (play.pass) passPuck(s, p, play.passDir.x, play.passDir.z);
+        }
+      }
       if (input.dive && s.puck.owner !== p.id) startDive(s, p, input);
-      if (input.check && s.puck.owner !== p.id) {
+      if (input.check && s.puck.owner !== p.id && p.role !== 'G') {
         // RS up is a commitment gesture, not a world-space north aim. Backchecking toward
         // our own goal must drive the shoulder down-ice with the left stick and skating path.
         const aim =
@@ -1899,10 +1972,11 @@ export function stepMatch(s: MatchState, input: InputFrame = EMPTY_INPUT, dt = R
       if (!ai) continue;
       const tune = cpuTune(s, p);
       const cpu = backcheckScales(s, p, tune.speed, tune.speed);
+      const push = p.role === 'G' ? savePush(p) : null;
       moveSkater(
         p,
-        ai.move.x,
-        ai.move.z,
+        push?.x ?? ai.move.x,
+        push?.z ?? ai.move.z,
         ai.hustle,
         ai.backskate,
         dt,
@@ -1911,11 +1985,8 @@ export function stepMatch(s: MatchState, input: InputFrame = EMPTY_INPUT, dt = R
         cpu.push,
         cpu.speed,
       );
-      if (p.role === 'G')
-        p.angle = attackDirection(p.team, s.period) > 0 ? Math.PI / 2 : -Math.PI / 2;
-      else {
-        if (ai.check) launchCheck(s, p, ai.checkAim.x, ai.checkAim.z, ai.checkPower);
-      }
+      if (p.role === 'G') trackSaveSide(p, previous[p.id].x, previous[p.id].z);
+      else if (ai.check) launchCheck(s, p, ai.checkAim.x, ai.checkAim.z, ai.checkPower);
       if (ai.shoot && !p.pendingShot) shootPuck(s, p, ai.shotPower, ai.shotAim, ai.shotHeight);
       else if (ai.pass && !p.pendingShot) passPuck(s, p, ai.passDir.x, ai.passDir.z);
       if (ai.poke) pokeCheck(s, p, ai.pokeSweep);

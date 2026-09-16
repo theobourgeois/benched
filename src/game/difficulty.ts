@@ -62,8 +62,10 @@ export interface CpuTune {
   track: number;
   /** How far the goalie comes out. */
   depth: number;
-  /** CPU goalie save envelope. */
+  /** CPU goalie reach: hands and pads scale by this. */
   save: number;
+  /** Seconds between a shot's release and the goalie committing to it. */
+  reaction: number;
   /** How readily they hustle. */
   hustle: number;
   /** How readily they poke and hit. */
@@ -88,6 +90,7 @@ const ALL_STAR: CpuTune = {
   track: 1,
   depth: 1,
   save: 1,
+  reaction: 0.11,
   hustle: 1,
   bite: 1,
   shootLook: 0.42,
@@ -105,6 +108,7 @@ const ROOKIE: CpuTune = {
   track: 0.52,
   depth: 0.72,
   save: 0.68,
+  reaction: 0.22,
   hustle: 0.5,
   bite: 0.38,
   shootLook: 0.64,
@@ -122,6 +126,7 @@ const PRO: CpuTune = {
   track: 0.8,
   depth: 0.88,
   save: 0.86,
+  reaction: 0.16,
   hustle: 0.78,
   bite: 0.72,
   shootLook: 0.5,
@@ -139,6 +144,7 @@ const LEGEND: CpuTune = {
   track: 1.38,
   depth: 1.22,
   save: 1.28,
+  reaction: 0.075,
   hustle: 1.45,
   bite: 1.65,
   shootLook: 0.28,

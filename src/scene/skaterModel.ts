@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { clone as cloneRig } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import type { Uniform } from '../game/clubs';
+import { GOALIE } from '../game/config';
 import { makeNumberTexture } from './textures';
 import { limitWrist, solveTwoBone } from './animationMath';
 import { fitHockeyEquipment, SKATE_LIFT } from './hockeyEquipment';
@@ -260,7 +261,7 @@ export function createSkaterRig(
   goalie: boolean,
 ): SkaterRig {
   const root = cloneRig(template);
-  const scale = HEIGHT / templateHeight(template);
+  const scale = (HEIGHT * (goalie ? GOALIE.bulk : 1)) / templateHeight(template);
   root.scale.setScalar(scale);
   paintClothes(root, uniform);
 

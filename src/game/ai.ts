@@ -1,5 +1,6 @@
-import { attackDirection, PHYSICS, RINK } from './config';
+import { attackDirection, GOALIE, PHYSICS, RINK } from './config';
 import { cpuTune } from './difficulty';
+import { committed, goalieFrame, onPads } from './goalie';
 import { clamp, distance, normalized } from './math';
 import { isOnIce } from './modes';
 import type { MatchState, Skater, Vec2 } from './types';
@@ -104,18 +105,84 @@ function bestOutlet(s: MatchState, p: Skater) {
   }
   return best;
 }
+/**
+ * Where the goalie stands: on the line from the puck to the middle of the net, out far enough to
+ * cut the angle on a distant shooter and deep when the play is in tight or a pass across is on.
+ * Behind the goal line they hug the near post; a slow loose puck nobody else can reach gets covered.
+ */
 function goalieTarget(s: MatchState, p: Skater): Vec2 {
   const dir = attackDirection(p.team, s.period),
     puck = s.puck,
     netX = defendNet(p.team, s.period),
+    tune = cpuTune(s, p),
+    owner = puck.owner === null ? null : s.skaters[puck.owner];
+  if (owner?.id === p.id) return { x: p.x, z: p.z };
+  const postZ = RINK.goalHalfWidth - 0.35;
+  if (!owner && Math.hypot(puck.vx, puck.vz) < GOALIE.coverSpeed) {
+    // A dribbler in the crease: get on it before a forward does, then freeze it.
+    const gap = distance(p, puck),
+      threat = foes(s, p).reduce((d, o) => Math.min(d, distance(o, puck)), 99);
+    if (gap < 2.6 && (puck.x - netX) * dir > -0.3 && threat > gap + 0.25)
+      return { x: puck.x, z: puck.z };
+  }
+  const px = puck.x + puck.vx * 0.06,
+    pz = puck.z + puck.vz * 0.06;
+  const ahead = (px - netX) * dir;
+  if (ahead < 0.35) return { x: netX + dir * 0.35, z: Math.sign(pz || 1) * postZ };
+  const range = Math.hypot(ahead, pz);
+  let depth = clamp(0.45 + range * 0.075, 0.45, 1.6) * tune.depth;
+  // A far-side attacker in the slot means a one-timer across: stay deeper, ready to push.
+  if (owner && owner.team !== p.team && Math.abs(owner.z) > 2) {
+    const backdoor = foes(s, p).some(
+      (o) =>
+        o.id !== owner.id &&
+        Math.sign(o.z) !== Math.sign(owner.z) &&
+        Math.abs(o.z) < 4 &&
+        (o.x - netX) * dir < 8,
+    );
+    if (backdoor) depth *= 0.72;
+  }
+  const t = depth / ahead;
+  const z = clamp(pz * t * tune.track, -postZ - 0.3, postZ + 0.3);
+  return { x: netX + dir * depth, z };
+}
+/** With the puck under them: hold it a beat, then find a defender or dump it up the wall. */
+function goaliePlayPuck(s: MatchState, p: Skater, decision: AIDecision) {
+  const dir = attackDirection(p.team, s.period),
+    press = nearestGap(s, p);
+  if (p.cooldown > 0 || ((p.coverTimer ?? 0) > 0 && press > 2.4)) return;
+  let best: Skater | null = null,
+    score = -1e3;
+  for (const q of skaters(s, p)) {
+    const open = nearestGap(s, q),
+      dx = q.x - p.x,
+      dz = q.z - p.z,
+      lengthSq = dx * dx + dz * dz;
+    if (open < 1.6 || lengthSq < 4) continue;
+    const blocked = foes(s, p).some((o) => {
+      const t = ((o.x - p.x) * dx + (o.z - p.z) * dz) / Math.max(lengthSq, 0.01);
+      return t > 0.08 && t < 0.92 && Math.hypot(o.x - p.x - t * dx, o.z - p.z - t * dz) < 1.3;
+    });
+    if (blocked) continue;
+    const value = open * 1.2 + Math.min(dx * dir, 12) * 0.25 - Math.sqrt(lengthSq) * 0.1;
+    if (value > score) {
+      score = value;
+      best = q;
+    }
+  }
+  decision.pass = true;
+  decision.passDir = best
+    ? { x: best.x - p.x, z: best.z - p.z }
+    : { x: dir, z: Math.sign(p.z || (s.tick % 2 ? 1 : -1)) * 0.9 };
+}
+/** A carrier in tight walks into the paddle: jab when the puck comes within reach. */
+function goaliePoke(s: MatchState, p: Skater, owner: Skater | null, decision: AIDecision) {
+  if (!owner || owner.team === p.team || p.cooldown > 0 || committed(p)) return;
+  const puck = s.puck,
+    { side, depth } = goalieFrame(p, puck.x, puck.z),
     tune = cpuTune(s, p);
-  const base = clamp(0.5 + (16 - Math.abs(puck.x - netX)) * 0.07, 0.42, 1.85);
-  const depth = base * tune.depth;
-  const track = clamp(0.26 + base * 0.09, 0.24, 0.48) * tune.track;
-  return {
-    x: netX + dir * depth,
-    z: clamp(puck.z * track, -1.32 * Math.max(1, tune.track), 1.32 * Math.max(1, tune.track)),
-  };
+  const mood = Math.sin(s.tick * 0.017 + p.id * 1.7) > 0.35 / tune.bite;
+  decision.poke = mood && depth > 0.2 && depth < 1.3 && Math.abs(side) < 0.9;
 }
 function carrierTarget(s: MatchState, p: Skater): Vec2 {
   const dir = attackDirection(p.team, s.period),
@@ -436,8 +503,14 @@ export function decideAI(s: MatchState, p: Skater): AIDecision {
     tune = cpuTune(s, p);
   decision.passDir = { x: dir, z: 0 };
   let target: Vec2;
-  if (p.role === 'G') target = goalieTarget(s, p);
-  else if (puck.owner === p.id) {
+  if (p.role === 'G') {
+    target = goalieTarget(s, p);
+    if (puck.owner === p.id) goaliePlayPuck(s, p, decision);
+    else goaliePoke(s, p, owner, decision);
+    // A play in tight that has got away from the stance gets the explosive push, not a shuffle.
+    const near = Math.hypot(puck.x - p.x, puck.z - p.z) < 9;
+    decision.hustle = near && distance(p, target) > 0.9 && !onPads(p);
+  } else if (puck.owner === p.id) {
     const look = scoringLook(s, p),
       press = nearestGap(s, p),
       outlet = bestOutlet(s, p),
@@ -519,8 +592,8 @@ export function decideAI(s: MatchState, p: Skater): AIDecision {
   const d = distance(p, target),
     move = normalized(target.x - p.x, target.z - p.z);
   const chasing = !ours && puck.owner !== p.id && p.role !== 'G';
-  const ease = p.role === 'G' ? 2.4 : puck.owner === p.id ? 1.7 : chasing ? tune.chaseEase : 2.1;
-  const scale = clamp(d / ease, 0, p.role === 'G' ? 0.68 : 1);
+  const ease = p.role === 'G' ? 0.7 : puck.owner === p.id ? 1.7 : chasing ? tune.chaseEase : 2.1;
+  const scale = clamp(d / ease, 0, 1);
   decision.move = { x: move.x * scale, z: move.z * scale };
   if (p.role !== 'G' && !ours && puck.owner !== p.id && distance(p, puck) > 7 && p.stamina > 0.35)
     decision.hustle = decision.hustle || (isDefense(p) && puck.x * dir < -2);

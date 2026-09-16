@@ -187,7 +187,62 @@ export const STICK = {
   /** Extra edge while skating with the puck held off-center. */
   drift: 1.15,
 };
+/**
+ * Goalie coverage and movement. Distances are in the goalie's frame: `side` is toward the glove
+ * (their left), height is off the ice. A save is what the puck meets on the save plane.
+ */
+export const GOALIE = {
+  /** The save plane sits this far in front of the goalie's centre, where pads and hands are. */
+  plane: 0.3,
+  /** Inside this radius of the centre the puck is on the body, whatever it was doing. */
+  body: 0.42,
+  /** Half-width of the torso, standing. Nothing gets through it. */
+  bodyHalf: 0.4,
+  /** Standing pads and skates. */
+  padStand: 0.6,
+  padStandHeight: 0.42,
+  /** Butterfly pads at full extension, a pad stacked out to one side, and how high they cover. */
+  padReach: 0.95,
+  padStack: 1.25,
+  padHeight: 0.52,
+  /** Mitt-and-forearm radius, how far a hand can be thrown, and how high. */
+  hand: 0.33,
+  handReach: 1.25,
+  reachTop: 1.5,
+  /** Paddle on the ice in front of the skates. */
+  stickHalf: 0.55,
+  stickHeight: 0.16,
+  /** Time from commitment to full extension. The rest of the save is a hold and a recovery. */
+  extend: 0.18,
+  /** Tail of the save spent getting back up, with less to offer. */
+  recover: 0.3,
+  /** Early in a commit the body pushes toward the shot for this long. */
+  push: 0.34,
+  /** A shot arriving within this many seconds gets read. */
+  readAhead: 1.1,
+  /** Lateral shuffle, the explosive push across, and how quickly the shuffle answers the stick. */
+  shuffleSpeed: 5.4,
+  pushSpeed: 9,
+  response: 7,
+  /** Sliding on the pads bleeds speed. */
+  slideDrag: 3.5,
+  /** Share of shuffle speed while carrying the puck. */
+  carry: 0.62,
+  /** Loose pucks slower than this can be smothered; chest shots slower than `smother` are held. */
+  coverSpeed: 7,
+  coverReach: 0.98,
+  smother: 24,
+  /** A covered puck is frozen this long before it is played: by the CPU, or for you by your
+   * goalie if you have not moved it yourself. */
+  hold: 0.8,
+  humanHold: 2.2,
+  /** Visual scale over a skater. A goalie in gear is a bigger silhouette. */
+  bulk: 1.07,
+};
+/** Goalie paddle rest pose in player space, so the puck rides on the paddle when carried. */
+export const GOALIE_STICK = { side: -0.1, reach: 0.72 };
 export const DEFAULT_PHYSICS = Object.freeze({ ...PHYSICS });
+export const DEFAULT_GOALIE = Object.freeze({ ...GOALIE });
 export const DEFAULT_STICK = Object.freeze({ ...STICK });
 export const EMPTY_INPUT = {
   moveX: 0,
@@ -208,6 +263,7 @@ export const EMPTY_INPUT = {
   dive: false,
   check: false,
   checkPower: 0,
+  reach: false,
   block: false,
   stickIceX: 0,
   stickIceZ: 0,

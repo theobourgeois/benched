@@ -276,11 +276,18 @@ export function poseSkater(
           );
   // Lean into the turn: + is toward the skater's right (−x). The pose builds it from a hip shift,
   // splayed skates and a rolled torso, so the skater carves rather than tips over.
+  // A goalie's throw across takes the whole body with it: glove side is their left.
   const leanRight = clamp(
-    (move?.lean ?? 0) * 1.35 + (celly?.lean ?? 0) * 1.1 - skater.edgeLean * 0.55 + lurch * 0.15,
+    (move?.lean ?? 0) * 1.35 +
+      (celly?.lean ?? 0) * 1.1 -
+      skater.edgeLean * 0.55 +
+      lurch * 0.15 -
+      (save?.side ?? 0) * 0.4,
     -0.85,
     0.85,
   );
+  const cover = save?.cover ?? 0,
+    stack = save?.stack ?? 0;
 
   // Stride cycle. The left skate leads; the right runs half a cycle behind.
   const stance = goalie ? 0.29 : 0.19;
@@ -316,11 +323,17 @@ export function poseSkater(
   );
   // Loading a shot sits the weight on the back (right) skate; the release drives it onto the left.
   const pelvis = posture.pelvis.set(
-    sway * 0.18 - leanRight * 0.24 + action.hipX + weightTo * 0.07 + (save?.side ?? 0) * 0.09,
+    sway * 0.18 -
+      leanRight * 0.24 +
+      action.hipX +
+      weightTo * 0.07 +
+      (save?.side ?? 0) * 0.14 +
+      stack * 0.12,
     ICE_Y + rig.ankleHeight + hipAbove - rig.hipOffset.y,
-    -0.065 * crouch - backward * 0.06 + action.hipZ,
+    -0.065 * crouch - backward * 0.06 + action.hipZ + cover * 0.12,
   );
-  const pelvisPitch = 0.15 + 0.18 * crouch + dive * 0.5 - stumble * 0.1 - action.arch * 0.05;
+  const pelvisPitch =
+    0.15 + 0.18 * crouch + dive * 0.5 - stumble * 0.1 - action.arch * 0.05 + cover * 0.3;
   const pelvisYaw =
     0.13 * drive * (L.push - R.push) + deke * 0.06 + action.pelvisYaw + (celly?.twist ?? 0) * 0.35;
   const pelvisRoll = leanRight * 0.22 - 0.04 * drive * (R.weight - L.weight) + lurch * 0.1;
@@ -342,7 +355,8 @@ export function poseSkater(
     dive * 0.35 +
     lifting * 0.15 +
     blocking * 0.2 -
-    backward * 0.2;
+    backward * 0.2 +
+    cover * 0.55;
   // Shoulders sit slightly open toward the top hand, as a left-shot skater carries the stick.
   // A windup coils them toward the blade side; the release unwinds through the shot.
   const twist = -0.08 + deke * 0.2 - pelvisYaw * 0.8 + action.twist;
@@ -429,10 +443,12 @@ export function poseSkater(
         lerp(step.z, -0.15, outside) + lerp(0, 0.1, inside) - 0.1 * tuck - toeDrag * 0.14,
       );
       if (goalie) {
-        // Lateral shuffle blades stay on the ice; save pads fan outward from the knees.
-        _foot.y = ICE_Y + rig.ankleHeight;
-        _foot.x = lerp(_foot.x, out * 0.54, butterfly);
-        _foot.z = lerp(_foot.z, -0.14, butterfly);
+        // Lateral shuffle blades stay on the ice; save pads fan outward from the knees. A pad
+        // stack throws the save-side leg out along the ice.
+        const stacked = Math.max(0, out * stack);
+        _foot.y = ICE_Y + rig.ankleHeight + stacked * 0.04;
+        _foot.x = lerp(lerp(_foot.x, out * 0.54, butterfly), out * 1.05, stacked);
+        _foot.z = lerp(lerp(_foot.z, -0.14, butterfly), 0.1, stacked);
       }
       if (recovering > 0) {
         _foot.x = lerp(_foot.x, out * 0.19, recovering);
@@ -455,9 +471,10 @@ export function poseSkater(
         _knee.z = lerp(_knee.z, 0.2, recovering);
       }
       if (butterfly > 0) {
-        _knee.x = lerp(_knee.x, out * 0.16, butterfly);
+        const stacked = Math.max(0, out * stack);
+        _knee.x = lerp(lerp(_knee.x, out * 0.16, butterfly), out * 0.6, stacked);
         _knee.y = lerp(_knee.y, ICE_Y + 0.08, butterfly);
-        _knee.z = lerp(_knee.z, 0.18, butterfly);
+        _knee.z = lerp(lerp(_knee.z, 0.18, butterfly), 0.12, stacked);
       }
       frame.localToWorld(_foot);
       frame.localToWorld(_knee);

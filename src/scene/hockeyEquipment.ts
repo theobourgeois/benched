@@ -76,7 +76,24 @@ export function fitHockeyEquipment(
       pad(child, [0.028, Math.max(0.02, length), 0.029], [0, length * 0.4, -0.003], shell, 0.009);
     });
     if (goalie) {
-      if (side === 'R') pad(hand, [0.17, 0.23, 0.045], [0, 0.055, -0.06], holder, 0.024);
+      // Arm pads and shoulder caps: the silhouette a goalie in gear has over a skater.
+      const upper = bones[`upperArm${side}`],
+        elbow = bones[`forearm${side}`].position;
+      const armGeometry = new THREE.CylinderGeometry(
+        0.085 / scale,
+        0.072 / scale,
+        (elbow.length() * scale * 0.78) / scale,
+        14,
+      );
+      geometries.push(armGeometry);
+      const arm = new THREE.Mesh(armGeometry, padding);
+      arm.castShadow = true;
+      _axis.copy(elbow).normalize();
+      arm.quaternion.setFromUnitVectors(_up, _axis);
+      arm.position.copy(elbow).multiplyScalar(0.5);
+      upper.add(arm);
+      pad(upper, [0.18, 0.15, 0.18], [0, 0.01, 0], padding, 0.06);
+      if (side === 'R') pad(hand, [0.19, 0.26, 0.05], [0, 0.06, -0.06], holder, 0.026);
       else {
         // A catcher's mitt has a thumb lobe and an open pocket, rather than a blocker silhouette.
         const outline = new THREE.Shape();
@@ -126,9 +143,9 @@ export function fitHockeyEquipment(
       pads[side] = shin;
       shin.quaternion.copy(bindWorld[`shin${side}`]).invert();
       bones[`shin${side}`].add(shin);
-      pad(shin, [0.23, 0.48, 0.13], [0, -0.16, 0.09], holder, 0.025);
+      pad(shin, [0.28, 0.58, 0.15], [0, -0.17, 0.1], holder, 0.03);
       for (let i = 0; i < 4; i++)
-        pad(shin, [0.2, 0.014, 0.015], [0, 0.015 - i * 0.105, 0.16], padding, 0.005);
+        pad(shin, [0.25, 0.014, 0.015], [0, 0.03 - i * 0.12, 0.18], padding, 0.005);
     }
   }
   return {

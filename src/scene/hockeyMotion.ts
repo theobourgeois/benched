@@ -1,5 +1,5 @@
 import { MathUtils } from 'three';
-import { PHYSICS } from '../game/config';
+import { GOALIE, PHYSICS } from '../game/config';
 import { activeDeke, dekeDuration } from '../game/dekes';
 import { activeCelly } from '../game/cellys';
 import type { Puck, Skater } from '../game/types';
@@ -15,24 +15,57 @@ export function shotWindup(p: Skater, charge: number) {
 }
 
 export interface GoalieAction {
+  /** Into the butterfly, 0 to 1. */
   drop: number;
+  /** Lean toward the save: −1 blocker side to 1 glove side. */
   side: number;
+  /** How far the save has been thrown, 0 to 1. */
   reach: number;
   high: number;
+  /** Mitt thrown to a point in the goalie's frame: x toward the glove, y up. */
+  glove: number;
+  gloveX: number;
+  gloveY: number;
+  /** Blocker and paddle thrown out on the blocker side. */
+  blocker: number;
+  blockerX: number;
+  blockerY: number;
+  /** One pad stacked out to a side: −1 blocker side, 1 glove side. */
+  stack: number;
+  /** Kneeling on a frozen puck, glove over it. */
+  cover: number;
 }
 export function createGoalieAction(): GoalieAction {
-  return { drop: 0, side: 0, reach: 0, high: 0 };
+  return {
+    drop: 0,
+    side: 0,
+    reach: 0,
+    high: 0,
+    glove: 0,
+    gloveX: 0.34,
+    gloveY: 0.92,
+    blocker: 0,
+    blockerX: -0.36,
+    blockerY: 0.86,
+    stack: 0,
+    cover: 0,
+  };
 }
 
-/** Read an approaching shot; recorded contact then drives the hold and return to the ready stance. */
-export function sampleGoalieAction(p: Skater, puck: Puck, out: GoalieAction) {
+/**
+ * Read an approaching shot; a recorded commitment then throws the part it names, holds it and
+ * returns to the ready stance. A frozen puck is knelt on.
+ */
+export function sampleGoalieAction(p: Skater, puck: Puck, out: GoalieAction, dt = 1 / 60) {
   let weight = 0,
     side = 0,
     height = 0;
-  if ((p.saveTimer ?? 0) > 0) {
+  const kind = (p.saveTimer ?? 0) > 0 ? (p.saveKind ?? 'body') : null;
+  if (kind) {
+    // The throw takes the simulation's extension time to arrive, holds, then comes home.
     const u = clamp(1 - p.saveTimer! / GOALIE_SAVE_TIME, 0, 1);
-    weight = (0.6 + 0.4 * smoothstep(u, 0, 0.15)) * (1 - smoothstep(u, 0.48, 1));
-    side = p.saveSide ?? 0;
+    weight = smoothstep(u, 0, GOALIE.extend / GOALIE_SAVE_TIME) * (1 - smoothstep(u, 0.52, 1));
+    side = clamp(p.saveSide ?? 0, -1.2, 1.2);
     height = p.saveHeight ?? 0;
   } else if (puck.shot && puck.owner === null) {
     const dx = puck.x - p.x,
@@ -43,14 +76,67 @@ export function sampleGoalieAction(p: Skater, puck: Puck, out: GoalieAction) {
       nearZ = dz + puck.vz * time;
     if (time >= 0 && time < 0.24 && Math.hypot(nearX, nearZ) < 1.35) {
       weight = 0.6 * (1 - smoothstep(time, 0, 0.24));
-      side = clamp((nearX * Math.cos(p.angle) - nearZ * Math.sin(p.angle)) / 0.8, -1, 1);
+      side = clamp(nearX * Math.cos(p.angle) - nearZ * Math.sin(p.angle), -1, 1);
       height = Math.max(0, puck.y + puck.vy * time - 4.9 * time * time);
     }
   }
+  const cover =
+    puck.owner === p.id && (p.coverTimer ?? 0) > 0 ? clamp(p.coverTimer! / 0.2, 0, 1) : 0;
   out.high = smoothstep(height, 0.5, 1.2);
-  out.drop = weight * (1 - out.high * 0.8);
+  out.glove = out.blocker = out.stack = 0;
+  out.gloveX = 0.34;
+  out.gloveY = 0.92;
+  out.blockerX = -0.36;
+  out.blockerY = 0.86;
+  switch (kind) {
+    case 'butterfly':
+      out.drop = weight;
+      break;
+    case 'pad':
+      out.drop = weight * 0.9;
+      out.stack = weight * (Math.sign(side) || 1);
+      break;
+    case 'glove':
+      out.drop = weight * 0.3;
+      out.glove = weight;
+      out.gloveX = Math.max(0.3, side);
+      out.gloveY = Math.max(0.5, height);
+      break;
+    case 'blocker':
+      out.drop = weight * 0.3;
+      out.blocker = weight;
+      out.blockerX = Math.min(-0.3, side);
+      out.blockerY = Math.max(0.45, height);
+      break;
+    case 'body':
+      out.drop = weight * 0.35;
+      out.glove = out.blocker = weight * 0.6;
+      out.gloveX = 0.16;
+      out.gloveY = 0.95;
+      out.blockerX = -0.18;
+      out.blockerY = 0.9;
+      break;
+    case 'stick':
+      out.drop = weight * 0.6;
+      out.blocker = weight * 0.5;
+      out.blockerX = -0.2;
+      out.blockerY = 0.45;
+      break;
+    case null:
+      // Reading a shot: a small lean toward it, dropping for a low one.
+      out.drop = weight * (1 - out.high * 0.8);
+      break;
+    default: {
+      const _never: never = kind;
+      return _never;
+    }
+  }
+  // Going down onto the puck is a drop, not a cut; a scrub can land on any frame of it.
+  out.cover += (cover - out.cover) * (1 - Math.exp(-Math.min(dt, 0.1) * 11));
+  if (Math.abs(cover - out.cover) < 0.01) out.cover = cover;
+  out.drop = Math.max(out.drop, out.cover);
   out.side = side * weight;
-  out.reach = weight;
+  out.reach = Math.max(weight, out.cover);
   return out;
 }
 type Key = readonly [time: number, value: number];

@@ -228,9 +228,10 @@ describe('puck physics', () => {
     const s = openIce();
     Object.assign(s.skaters[11], { x: 25, z: 0 });
     Object.assign(s.puck, { x: 24.1, z: 0.1, y: 0.4, vx: 30, shot: true });
-    stepMatch(s);
+    tick(s, 0.05);
     expect(s.events.some((e) => e.type === 'save')).toBe(true);
     expect(s.skaters[11].saveTimer).toBeGreaterThan(0);
+    expect(s.skaters[11].saveKind).toBe('body');
     expect(s.skaters[11].saveHeight).toBeCloseTo(0.4, 1);
     expect(s.puck.vx).toBeLessThan(0);
     expect(s.score).toEqual([0, 0]);
@@ -1375,7 +1376,7 @@ describe('free skate', () => {
     const goalie = s.skaters.find((p) => p.role === 'G' && p.team !== s.homeTeam)!;
     Object.assign(goalie, { x: 25, z: 0 });
     Object.assign(s.puck, { owner: null, x: 24.1, z: 0.1, y: 0.4, vx: 30, shot: true });
-    stepMatch(s);
+    tick(s, 0.05);
     expect(s.events.some((e) => e.type === 'save')).toBe(true);
     expect(s.phase).toBe('playing');
     expect(s.puck.vx).toBeLessThan(0);
@@ -1464,7 +1465,7 @@ describe('shootout', () => {
     const goalie = s.skaters.find((p) => p.role === 'G' && p.team !== s.homeTeam)!;
     Object.assign(goalie, { x: 25, z: 0 });
     Object.assign(s.puck, { owner: null, x: 24.1, z: 0.1, y: 0.4, vx: 30, shot: true });
-    stepMatch(s);
+    tick(s, 0.05);
     expect(s.events.some((e) => e.type === 'save')).toBe(true);
     expect(s.phase).toBe('goal');
     expect(s.scoringTeam).toBeNull();
@@ -1538,5 +1539,210 @@ describe('shootout', () => {
     }
     expect(deked).toBe(true);
     if (shotAt >= 0) expect(shotAt).toBeGreaterThan(2);
+  });
+});
+
+describe('goalies', () => {
+  /** Open ice with the away goalie set in their crease and the puck loose in front of them. */
+  function crease() {
+    const s = openIce();
+    const g = s.skaters[11];
+    Object.assign(g, { x: 24.4, z: 0, cooldown: 0 });
+    return { s, g };
+  }
+  /** A shot that will cross the goalie's plane at `side` (metres toward the glove) and `height`. */
+  function shotAt(s: MatchState, from: number, side: number, height: number, speed = 32) {
+    const g = s.skaters[11];
+    const range = from - 0.3;
+    const travel = range / speed;
+    // The away goalie faces −x, so their glove (left) is toward +z.
+    Object.assign(s.puck, {
+      owner: null,
+      x: g.x - from,
+      z: g.z + side,
+      y: height,
+      vx: speed,
+      vz: 0,
+      vy: 4.9 * travel,
+      shot: true,
+      lockout: 0,
+    });
+  }
+  const saved = (s: MatchState) => s.events.some((e) => e.type === 'save');
+
+  it('reads a shot from distance and throws the glove at it', () => {
+    const { s, g } = crease();
+    shotAt(s, 14, 1.1, 1.15, 30);
+    tick(s, 0.2);
+    expect(g.saveKind).toBe('glove');
+    expect(g.saveTimer).toBeGreaterThan(0);
+    tick(s, 0.4);
+    expect(saved(s)).toBe(true);
+    expect(s.notice).toBe('GLOVE SAVE');
+    expect(s.puck.owner).toBe(g.id);
+    expect(g.coverTimer).toBeGreaterThan(0);
+    expect(s.score).toEqual([0, 0]);
+  });
+
+  it('is beaten by the same snipe from in close, before it can react', () => {
+    const { s } = crease();
+    shotAt(s, 3.2, 1.2, 1.15, 34);
+    while (s.phase === 'playing' && s.score[0] === 0 && s.puck.x < RINK.goalX + 1) stepMatch(s);
+    expect(saved(s)).toBe(false);
+    expect(s.score[0]).toBe(1);
+  });
+
+  it('steers a blocker-side shot to the corner and kicks a low one wide', () => {
+    const { s, g } = crease();
+    shotAt(s, 12, -0.95, 1.05, 30);
+    tick(s, 0.55);
+    expect(s.notice).toBe('BLOCKER SAVE');
+    expect(s.puck.owner).toBeNull();
+    expect(s.puck.vx).toBeLessThan(0);
+    // Off the blocker the puck goes away from the glove side, toward that corner.
+    expect(s.puck.z).toBeLessThan(g.z - 0.3);
+    const low = crease();
+    shotAt(low.s, 8, 1.3, 0.2, 30);
+    tick(low.s, 0.55);
+    expect(low.g.saveKind).toBe('pad');
+    expect(low.s.notice).toBe('PAD SAVE');
+    expect(low.s.puck.owner).toBeNull();
+  });
+
+  it('gets beaten over the pads once committed to a butterfly', () => {
+    const { s, g } = crease();
+    s.controlled = g.id;
+    s.homeTeam = 1;
+    stepMatch(s, { ...EMPTY_INPUT, block: true });
+    expect(g.saveKind).toBe('butterfly');
+    shotAt(s, 5, 1.05, 1.2, 34);
+    while (s.phase === 'playing' && s.score[0] === 0 && s.puck.x < RINK.goalX + 1) stepMatch(s);
+    expect(s.score[0]).toBe(1);
+  });
+
+  it('lets a human goalie throw a save with a stick flick, the wrong way included', () => {
+    const { s, g } = crease();
+    s.controlled = g.id;
+    s.homeTeam = 1;
+    // The away goalie faces −x; a flick toward +z is toward their glove.
+    stepMatch(s, { ...EMPTY_INPUT, reach: true, stickIceX: -0.4, stickIceZ: 0.9 });
+    expect(g.saveKind).toBe('glove');
+    expect(g.saveSide).toBeGreaterThan(0.5);
+    expect(g.saveHeight).toBeGreaterThan(0.7);
+    shotAt(s, 6, -1.15, 1.1, 34);
+    while (s.phase === 'playing' && s.score[0] === 0 && s.puck.x < RINK.goalX + 1) stepMatch(s);
+    expect(s.score[0]).toBe(1);
+  });
+
+  it('pushes across on a pad commit and keeps the reach on the same spot', () => {
+    const { s, g } = crease();
+    s.controlled = g.id;
+    s.homeTeam = 1;
+    stepMatch(s, { ...EMPTY_INPUT, reach: true, stickIceX: 0, stickIceZ: -1 });
+    expect(g.saveKind).toBe('pad');
+    const before = g.saveSide!;
+    tick(s, 0.2);
+    expect(g.z).toBeLessThan(-0.15);
+    expect(g.saveSide!).toBeGreaterThan(before + 0.1);
+  });
+
+  it('covers a slow puck in the crease, freezes it, and hands control to that side', () => {
+    const { s, g } = crease();
+    s.homeTeam = 1;
+    s.controlled = 6;
+    Object.assign(s.puck, {
+      owner: null,
+      x: g.x - 0.7,
+      z: 0.2,
+      y: PUCK.restY,
+      vx: -1.5,
+      vz: 0,
+      shot: false,
+      lockout: 0,
+    });
+    tick(s, 0.3);
+    expect(s.puck.owner).toBe(g.id);
+    expect(s.notice).toBe('COVERED');
+    expect(s.controlled).toBe(g.id);
+    const poker = s.skaters[0];
+    Object.assign(poker, { x: g.x - 1.2, z: 0.2, angle: Math.PI / 2, cooldown: 0 });
+    s.controlled = poker.id;
+    s.homeTeam = 0;
+    g.cooldown = 1;
+    stepMatch(s, { ...EMPTY_INPUT, poke: true });
+    expect(s.puck.owner).toBe(g.id);
+    expect(s.notice).not.toBe('POKE CHECK');
+  });
+
+  it('lets a CPU goalie hold a covered puck, then move it to a defender', () => {
+    const { s, g } = crease();
+    Object.assign(s.puck, {
+      owner: null,
+      x: g.x - 0.7,
+      z: 0,
+      y: PUCK.restY,
+      vx: -1,
+      vz: 0,
+      shot: false,
+      lockout: 0,
+    });
+    tick(s, 0.3);
+    expect(s.puck.owner).toBe(g.id);
+    const mate = s.skaters.find((p) => p.team === 1 && p.role === 'LD')!;
+    Object.assign(mate, { x: 16, z: -6, cooldown: 0 });
+    tick(s, 1.4);
+    expect(s.puck.owner).not.toBe(g.id);
+    expect(s.puck.lastTouch).toBe(1);
+    expect(s.events.some((e) => e.type === 'pass')).toBe(true);
+  });
+
+  it('lets a human goalie pass the puck out after a catch', () => {
+    const { s, g } = crease();
+    s.homeTeam = 1;
+    s.controlled = g.id;
+    shotAt(s, 14, 1.1, 1.15, 30);
+    tick(s, 0.6);
+    expect(s.puck.owner).toBe(g.id);
+    const mate = s.skaters.find((p) => p.team === 1 && p.role === 'LD')!;
+    Object.assign(mate, { x: 14, z: -4, cooldown: 0 });
+    stepMatch(s, { ...EMPTY_INPUT, passRelease: true, moveX: -1, moveZ: -0.35 });
+    expect(s.puck.owner).toBeNull();
+    expect(s.puck.passTo).toBe(mate.id);
+    expect(s.controlled).toBe(mate.id);
+  });
+
+  it('positions on the shooter, comes out for distance, and hugs the post behind the net', () => {
+    const { s, g } = crease();
+    const shooter = s.skaters[0];
+    const carry = (x: number, z: number) => {
+      Object.assign(shooter, { x, z, angle: Math.PI / 2, vx: 0, vz: 0 });
+      Object.assign(s.puck, { owner: shooter.id, x, z, vx: 0, vz: 0 });
+    };
+    carry(8, 6);
+    const out = decideAI(s, g);
+    tick(s, 1.5);
+    const outDepth = RINK.goalX - g.x;
+    expect(out.move.x).toBeLessThanOrEqual(0.01);
+    expect(g.z).toBeGreaterThan(0.3);
+    expect(g.z).toBeLessThan(s.puck.z);
+    carry(22.5, 1);
+    tick(s, 1.5);
+    expect(RINK.goalX - g.x).toBeLessThan(outDepth);
+    carry(27.5, 1.5);
+    tick(s, 1.5);
+    expect(g.z).toBeGreaterThan(1);
+    expect(RINK.goalX - g.x).toBeLessThan(PHYSICS.playerRadius + 0.05);
+  });
+
+  it('ends a shootout attempt on a catch', () => {
+    const s = createMatch(0, 'shootout');
+    startMatch(s);
+    const g = s.skaters.find((p) => p.role === 'G' && p.team === 1)!;
+    Object.assign(g, { x: 24.4, z: 0 });
+    shotAt(s, 14, 1.1, 1.15, 30);
+    tick(s, 0.6);
+    expect(s.puck.owner).toBe(g.id);
+    expect(s.phase).toBe('goal');
+    expect(s.scoringTeam).toBeNull();
   });
 });

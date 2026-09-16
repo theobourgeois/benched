@@ -1,10 +1,11 @@
 import { useSyncExternalStore } from 'react';
 import { clamp } from './math';
-import { DEFAULT_PHYSICS, DEFAULT_STICK, PHYSICS, STICK } from './config';
+import { DEFAULT_GOALIE, DEFAULT_PHYSICS, DEFAULT_STICK, GOALIE, PHYSICS, STICK } from './config';
 
-export type FeelGroupId = 'skate' | 'hit' | 'stick' | 'puck' | 'shot';
+export type FeelGroupId = 'skate' | 'hit' | 'stick' | 'puck' | 'shot' | 'goalie';
 type PhysicsKey = keyof typeof PHYSICS;
 type StickKey = keyof typeof STICK;
+type GoalieKey = keyof typeof GOALIE;
 
 export type FeelParam = {
   group: FeelGroupId;
@@ -16,7 +17,11 @@ export type FeelParam = {
   meaning: string;
   higher: string;
   lower: string;
-} & ({ table: 'physics'; key: PhysicsKey } | { table: 'stick'; key: StickKey });
+} & (
+  | { table: 'physics'; key: PhysicsKey }
+  | { table: 'stick'; key: StickKey }
+  | { table: 'goalie'; key: GoalieKey }
+);
 
 export const FEEL_GROUPS: { id: FeelGroupId; label: string; tryThis: string }[] = [
   {
@@ -43,6 +48,12 @@ export const FEEL_GROUPS: { id: FeelGroupId; label: string; tryThis: string }[] 
     id: 'shot',
     label: 'Puck movement',
     tryThis: 'Wrist, slap, saucer, dump, and a dive on a loose puck.',
+  },
+  {
+    id: 'goalie',
+    label: 'Goalie',
+    tryThis:
+      'Snipe a corner from the slot, then from the point; walk in and deke; crash for rebounds.',
   },
 ];
 
@@ -85,6 +96,30 @@ const s = (
 ): FeelParam => ({
   table: 'stick',
   group,
+  key,
+  label,
+  min,
+  max,
+  step,
+  meaning,
+  higher,
+  lower,
+  unit,
+});
+
+const g = (
+  key: GoalieKey,
+  label: string,
+  min: number,
+  max: number,
+  step: number,
+  meaning: string,
+  higher: string,
+  lower: string,
+  unit?: string,
+): FeelParam => ({
+  table: 'goalie',
+  group: 'goalie',
   key,
   label,
   min,
@@ -849,6 +884,149 @@ export const FEEL_PARAMS: FeelParam[] = [
     'you ragdoll right away',
     's',
   ),
+
+  g(
+    'handReach',
+    'Hand reach',
+    0.6,
+    1.8,
+    0.02,
+    'How far the glove or blocker can be thrown from centre.',
+    'corners get picked off',
+    'high corners are open',
+    'm',
+  ),
+  g(
+    'hand',
+    'Mitt size',
+    0.15,
+    0.6,
+    0.01,
+    'Radius the mitt and forearm cover around where they are thrown.',
+    'anything near the glove is caught',
+    'the shot has to hit the glove',
+    'm',
+  ),
+  g(
+    'padReach',
+    'Butterfly width',
+    0.6,
+    1.6,
+    0.02,
+    'How far each pad fans out in a butterfly.',
+    'low shots are sealed off',
+    'the five-hole and low corners open',
+    'm',
+  ),
+  g(
+    'padStack',
+    'Pad stack',
+    0.7,
+    1.8,
+    0.02,
+    'How far a stacked pad reaches on the committed side.',
+    'far-side low shots get a toe',
+    'a pad stack covers little',
+    'm',
+  ),
+  g(
+    'bodyHalf',
+    'Body width',
+    0.2,
+    0.7,
+    0.01,
+    'Half-width of the torso nothing gets through.',
+    'the goalie is a wall in the middle',
+    'shots squeeze through the body',
+    'm',
+  ),
+  g(
+    'extend',
+    'Extension time',
+    0.05,
+    0.5,
+    0.01,
+    'Seconds for a committed save to reach its full stretch.',
+    'in-tight shots beat the reach',
+    'saves arrive instantly',
+    's',
+  ),
+  g(
+    'push',
+    'Push time',
+    0,
+    0.7,
+    0.02,
+    'How long the body drives across toward the shot after committing.',
+    'the goalie slides right across',
+    'the goalie reaches from where they stand',
+    's',
+  ),
+  g(
+    'shuffleSpeed',
+    'Shuffle speed',
+    2,
+    9,
+    0.1,
+    'Lateral top speed tracking the play.',
+    'the goalie stays square to anything',
+    'lateral plays beat the shuffle',
+    'm/s',
+  ),
+  g(
+    'pushSpeed',
+    'Push speed',
+    4,
+    14,
+    0.2,
+    'Top speed of the explosive push across the crease.',
+    'cross-crease passes get stopped',
+    'a pass across is a tap-in',
+    'm/s',
+  ),
+  g(
+    'response',
+    'Shuffle response',
+    2,
+    14,
+    0.2,
+    'How quickly the shuffle answers the stick or the AI.',
+    'the goalie is twitchy',
+    'the goalie is heavy',
+  ),
+  g(
+    'smother',
+    'Smother speed',
+    8,
+    40,
+    0.5,
+    'Chest shots slower than this are held; harder ones drop a rebound in front.',
+    'everything on the chest is frozen',
+    'chest saves spit out rebounds',
+    'm/s',
+  ),
+  g(
+    'coverSpeed',
+    'Cover speed',
+    2,
+    14,
+    0.2,
+    'Loose pucks slower than this can be smothered in the crease.',
+    'rebounds get covered quickly',
+    'only a dead puck can be covered',
+    'm/s',
+  ),
+  g(
+    'hold',
+    'Hold time',
+    0,
+    2.5,
+    0.05,
+    'How long a CPU goalie sits on a covered puck before playing it.',
+    'play settles after a cover',
+    'the goalie moves it right away',
+    's',
+  ),
 ];
 
 const STORAGE_KEY = 'benched-feel-v1';
@@ -861,11 +1039,33 @@ const publishFeel = () => {
 };
 
 export function feelValue(param: FeelParam) {
-  return param.table === 'physics' ? PHYSICS[param.key] : STICK[param.key];
+  switch (param.table) {
+    case 'physics':
+      return PHYSICS[param.key];
+    case 'stick':
+      return STICK[param.key];
+    case 'goalie':
+      return GOALIE[param.key];
+    default: {
+      const _never: never = param;
+      return _never;
+    }
+  }
 }
 
 export function feelDefault(param: FeelParam) {
-  return param.table === 'physics' ? DEFAULT_PHYSICS[param.key] : DEFAULT_STICK[param.key];
+  switch (param.table) {
+    case 'physics':
+      return DEFAULT_PHYSICS[param.key];
+    case 'stick':
+      return DEFAULT_STICK[param.key];
+    case 'goalie':
+      return DEFAULT_GOALIE[param.key];
+    default: {
+      const _never: never = param;
+      return _never;
+    }
+  }
 }
 
 export function feelChanged(param: FeelParam) {
@@ -881,13 +1081,19 @@ function persistFeel() {
   try {
     const physics: Partial<Record<PhysicsKey, number>> = {};
     const stick: Partial<Record<StickKey, number>> = {};
+    const goalie: Partial<Record<GoalieKey, number>> = {};
     for (const key of Object.keys(PHYSICS) as PhysicsKey[])
       if (PHYSICS[key] !== DEFAULT_PHYSICS[key]) physics[key] = PHYSICS[key];
     for (const key of Object.keys(STICK) as StickKey[])
       if (STICK[key] !== DEFAULT_STICK[key]) stick[key] = STICK[key];
-    const empty = Object.keys(physics).length === 0 && Object.keys(stick).length === 0;
+    for (const key of Object.keys(GOALIE) as GoalieKey[])
+      if (GOALIE[key] !== DEFAULT_GOALIE[key]) goalie[key] = GOALIE[key];
+    const empty =
+      Object.keys(physics).length === 0 &&
+      Object.keys(stick).length === 0 &&
+      Object.keys(goalie).length === 0;
     if (empty) localStorage.removeItem(STORAGE_KEY);
-    else localStorage.setItem(STORAGE_KEY, JSON.stringify({ physics, stick }));
+    else localStorage.setItem(STORAGE_KEY, JSON.stringify({ physics, stick, goalie }));
   } catch {
     /* private mode / tests */
   }
@@ -906,9 +1112,10 @@ export function bootFeel() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return;
-    const parsed = JSON.parse(raw) as { physics?: unknown; stick?: unknown };
+    const parsed = JSON.parse(raw) as { physics?: unknown; stick?: unknown; goalie?: unknown };
     applyRecord(PHYSICS as Record<string, number>, parsed.physics, new Set(Object.keys(PHYSICS)));
     applyRecord(STICK as Record<string, number>, parsed.stick, new Set(Object.keys(STICK)));
+    applyRecord(GOALIE as Record<string, number>, parsed.goalie, new Set(Object.keys(GOALIE)));
   } catch {
     /* ignore bad payloads */
   }
@@ -918,7 +1125,8 @@ export function setFeelParam(param: FeelParam, value: number) {
   if (!Number.isFinite(value)) return;
   const next = clamp(value, param.min, param.max);
   if (param.table === 'physics') PHYSICS[param.key] = next;
-  else STICK[param.key] = next;
+  else if (param.table === 'stick') STICK[param.key] = next;
+  else GOALIE[param.key] = next;
   persistFeel();
   publishFeel();
 }
@@ -931,7 +1139,8 @@ export function resetFeelGroup(group: FeelGroupId) {
   for (const param of FEEL_PARAMS)
     if (param.group === group) {
       if (param.table === 'physics') PHYSICS[param.key] = DEFAULT_PHYSICS[param.key];
-      else STICK[param.key] = DEFAULT_STICK[param.key];
+      else if (param.table === 'stick') STICK[param.key] = DEFAULT_STICK[param.key];
+      else GOALIE[param.key] = DEFAULT_GOALIE[param.key];
     }
   persistFeel();
   publishFeel();
@@ -940,6 +1149,7 @@ export function resetFeelGroup(group: FeelGroupId) {
 export function resetFeel() {
   Object.assign(PHYSICS, DEFAULT_PHYSICS);
   Object.assign(STICK, DEFAULT_STICK);
+  Object.assign(GOALIE, DEFAULT_GOALIE);
   persistFeel();
   publishFeel();
 }
@@ -953,7 +1163,8 @@ export function copyFeelTweaks() {
   if (changed.length === 0) return '// No feel tweaks. Everything is at the shipped defaults.\n';
   const lines = ['// Feel tweaks — paste into src/game/config.ts', ''];
   for (const param of changed) {
-    const table = param.table === 'physics' ? 'PHYSICS' : 'STICK';
+    const table =
+      param.table === 'physics' ? 'PHYSICS' : param.table === 'stick' ? 'STICK' : 'GOALIE';
     lines.push(
       `${table}.${param.key} = ${formatFeel(feelValue(param), param.step)}; // default ${formatFeel(feelDefault(param), param.step)} · ${param.meaning}`,
     );

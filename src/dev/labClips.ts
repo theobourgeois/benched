@@ -54,8 +54,11 @@ export const REST_SKATER = {
   shotTimer: 0,
   pendingShot: null,
   saveTimer: 0,
+  saveKind: null,
   saveSide: 0,
   saveHeight: 0,
+  readTimer: 0,
+  coverTimer: 0,
   shotStyle: 'wrist',
   shotDuration: 0.34,
   shotLoad: 0,
@@ -591,26 +594,45 @@ export const CLIPS: LabClip[] = [
       [
         'goalie-low',
         'Butterfly save',
+        'butterfly',
         0.1,
-        0.7,
+        0.3,
         'Drops to the butterfly, pads flare, then recovers to ready.',
+      ],
+      [
+        'goalie-stack',
+        'Pad stack',
+        'pad',
+        0.25,
+        1.1,
+        'Pushes to the glove side and stacks that pad out along the ice, then gathers back up.',
       ],
       [
         'goalie-glove',
         'Glove save',
+        'glove',
         1.25,
-        0.7,
-        'Glove snaps up and out to the puck, holds, then returns.',
+        1.0,
+        'Glove snaps up and out to the puck, body leans with it, holds, then returns.',
       ],
       [
         'goalie-blocker',
         'Blocker save',
+        'blocker',
+        1.0,
+        -0.9,
+        'Blocker and paddle kick out and up on the stick side, then return.',
+      ],
+      [
+        'goalie-chest',
+        'Chest save',
+        'body',
         0.9,
-        -0.7,
-        'Blocker side kicks out, stick stays covering the ice.',
+        0.1,
+        'Stands tall and hugs the puck into the chest with both hands in.',
       ],
     ] as const
-  ).map(([id, label, height, side, look]) =>
+  ).map(([id, label, kind, height, side, look]) =>
     clip({
       id,
       label,
@@ -621,11 +643,26 @@ export const CLIPS: LabClip[] = [
       look,
       frame: (t) =>
         hold(
-          { saveTimer: countdown(t, 0.2, GOALIE_SAVE_TIME), saveHeight: height, saveSide: side },
+          {
+            saveTimer: countdown(t, 0.2, GOALIE_SAVE_TIME),
+            saveKind: kind,
+            saveHeight: height,
+            saveSide: side,
+          },
           'none',
         ),
     }),
   ),
+  clip({
+    id: 'goalie-cover',
+    label: 'Cover puck',
+    group: 'Goalie',
+    goalie: true,
+    duration: 1.6,
+    loop: false,
+    look: 'Drops onto the puck, bends over it with the mitt on top, then comes back up to ready.',
+    frame: (t) => hold({ coverTimer: countdown(t, 0.15, 1.0) }, 'tape'),
+  }),
 ];
 
 /** One frame of a live take: the skater, and the puck in rink space. */
