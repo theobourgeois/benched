@@ -292,7 +292,12 @@ function clearance(
  */
 function bellyDepth(tip: THREE.Vector3, torso: NonNullable<StickReach['torso']>) {
   const ahead = (tip.x - torso.at.x) * torso.front.x + (tip.z - torso.at.z) * torso.front.z;
-  return THREE.MathUtils.smoothstep(ahead, 0.9, 1.15);
+  // Bent right over (a deep crouch, a jump's load) the hands hang under the chest, which the
+  // leaning plane counts as inside the body and answers by standing the stick on its toe with
+  // the hands at the chin. It fades back to the upright plane through the pelvis as the torso
+  // pitches past about 40°.
+  const upright = torso.up ? THREE.MathUtils.smoothstep(torso.up.y, 0.66, 0.82) : 1;
+  return THREE.MathUtils.smoothstep(ahead, 0.9, 1.15) * upright;
 }
 /** How far a rigid stick may rock onto its heel or toe, and the search step for it. */
 const MAX_ROLL = 0.9;
@@ -304,6 +309,8 @@ export interface StickReach {
   armReach: number;
   /** 0 to 1: a raised blade follows the hands instead of lying flat. Rigid sticks only. */
   handsLead?: number;
+  /** Roll to settle at when nothing else binds: + rocks onto the heel, toe up. Rigid sticks only. */
+  restRoll?: number;
   /**
    * The skater's pelvis and horizontal facing: the socket stays in front of the belly. A plane
    * rather than a keep-out disc, so the top hand crosses in front of the body continuously instead
@@ -462,13 +469,13 @@ function placeRigid(
     // A soft clearance cost starts yielding before a reach limit. Choosing the first feasible
     // sample made the hand velocity discontinuous at tangency; choosing a discrete fallback
     // also quantized close toe drags. Minimize continuously around the best sampled interval.
-    const preferred = roll;
+    const preferred = roll + (limits.restRoll ?? 0) * (1 - handsLead);
     const soft = (x: number) => (x + Math.sqrt(x * x + 0.0004)) * 0.5;
     const cost = (r: number) => {
       const d = place(r);
       const reach = shoulder ? soft(d - armReach + 0.015) : 0;
       const body = torso ? soft(-clearance(_socket, torso, belt, deep)) : 0;
-      return 80 * reach * reach + 8 * body * body + 0.012 * (r - preferred) ** 2;
+      return 80 * reach * reach + 8 * body * body + 0.03 * (r - preferred) ** 2;
     };
     let best = Infinity;
     for (let r = -MAX_ROLL; r <= MAX_ROLL + 1e-9; r += 0.06) {
@@ -493,7 +500,7 @@ function placeRigid(
   if (handsLead > 0) {
     // A raised blade has nothing to rest on: the top hand stays where the hands want it, clamped
     // to reach and clear of the body, and the shaft points through the tip.
-    _leadPos.copy(parts.root.position);
+    _leadPos.copy(_socket);
     _want.copy(grip);
     if (torso) {
       const short = -clearance(_want, torso, _want.y, deep);
@@ -515,17 +522,17 @@ function placeRigid(
     _local.subVectors(tip, _want);
     const toward =
       Math.atan2(_local.y, _local.dot(heading)) - Math.atan2(-socketY, contact - socketX);
+    // Blend the top-hand socket itself between the on-ice solution and where the hands want it,
+    // then hang the stick off that socket at the blended roll. Blending the stick's root
+    // position under two different rolls swung the socket, and the hands, somewhere else again.
     const blendedRoll = THREE.MathUtils.lerp(roll, toward, handsLead);
     parts.root.quaternion
       .copy(_planeQ)
       .multiply(_rollQ.setFromAxisAngle(FORWARD_FACE, blendedRoll));
+    _socket.lerpVectors(_leadPos, _want, handsLead);
     parts.root.position
-      .copy(_want)
+      .copy(_socket)
       .sub(_local.set(socketX, socketY, 0).applyQuaternion(parts.root.quaternion));
-    parts.root.position.lerpVectors(_leadPos, parts.root.position, handsLead);
-    _socket
-      .copy(parts.root.position)
-      .add(_local.set(socketX, socketY, 0).applyQuaternion(parts.root.quaternion));
   }
   layoutShaft(parts, spec, Math.PI / 2 - lie, spec.shaft);
   hosel

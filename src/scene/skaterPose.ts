@@ -255,6 +255,9 @@ export function poseSkater(
   const checking = action.check;
   const lifting = Math.min(1, skater.liftTimer / 0.18);
   const blocking = Math.min(1, skater.blockTimer / 0.12);
+  // The puck pulled in close: the skater gets down over it so the arms can reach the stick
+  // across the body rather than the stick standing up.
+  const pull = goalie ? 0 : 1 - THREE.MathUtils.smoothstep(skater.stickReach, 0.35, 0.95);
   const crouch =
     phase === 'limp'
       ? 0.2
@@ -270,6 +273,7 @@ export function poseSkater(
               checking * 0.2 +
               tuck * 0.3 +
               backward * 0.12 +
+              pull * 0.2 +
               action.arch * 0.15,
             0,
             1,
@@ -356,10 +360,13 @@ export function poseSkater(
     lifting * 0.15 +
     blocking * 0.2 -
     backward * 0.2 +
+    pull * 0.12 +
     cover * 0.55;
   // Shoulders sit slightly open toward the top hand, as a left-shot skater carries the stick.
   // A windup coils them toward the blade side; the release unwinds through the shot.
-  const twist = -0.08 + deke * 0.2 - pelvisYaw * 0.8 + action.twist;
+  // Pulling the puck in brings the bottom-hand shoulder round toward the hands, which the
+  // pose has out to the top-hand side, so both arms can still reach the shaft.
+  const twist = -0.08 + deke * 0.2 - pelvisYaw * 0.8 + action.twist - pull * 0.35;
   const dip = 0.09 * carry;
   applyMix(
     rig,

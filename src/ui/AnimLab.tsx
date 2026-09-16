@@ -540,7 +540,8 @@ function Inspector() {
           <Row k="wrist bend" v={lr(s.angles.wristL, s.angles.wristR, '°')} bad={bad('wrist')} />
           <Row k="arm reach" v={lr(s.reach.armL, s.reach.armR)} bad={bad('arm')} />
           <Row k="leg reach" v={lr(s.reach.legL, s.reach.legR)} bad={bad('leg')} />
-          <Row k="palm→shaft" v={lr(s.grip.L, s.grip.R, ' cm')} bad={bad('hand')} />
+          <Row k="fingers→shaft" v={lr(s.grip.L, s.grip.R, ' cm')} bad={bad('hand')} />
+          <Row k="shaft off knuckles" v={lr(s.grip.angleL, s.grip.angleR, '°')} bad={bad('hand')} />
           <Row k="skate lift" v={lr(s.lift.L, s.lift.R, ' cm')} bad={bad('skate')} />
         </dl>
         <h3>Body and stick</h3>

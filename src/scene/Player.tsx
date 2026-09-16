@@ -62,7 +62,7 @@ useLoader.preload(GLTFLoader, HELMET_GOALIE_URL);
 const BLADE_ICE_Y = -0.028;
 /** How far down the shaft from the top hand the bottom hand likes to sit, in world units. */
 /** The bottom hand slides up the shaft rather than leave it when the arm cannot reach that far. */
-const BOTTOM_HAND_MIN = 0.14;
+const BOTTOM_HAND_MIN = 0.11;
 const REACH_SOFT = 0.08;
 /** Forward speed along facing before the bottom hand comes off for a pumping stride. */
 const ONE_HAND_FORWARD = 4.5;
@@ -78,13 +78,20 @@ const FRONT = new THREE.Vector3(0, 0, 1);
  * Which way each elbow bends, in the skater's frame: out, back and a little down. Fitted to every
  * lab clip so the shoulder-to-hand line never comes within 15° (top) or 50° (bottom) of it.
  */
-const TOP_ELBOW = new THREE.Vector3(-0.66, -0.32, -0.68).normalize(),
+const TOP_ELBOW = new THREE.Vector3(-0.76, -0.34, -0.55).normalize(),
   LOW_ELBOW = new THREE.Vector3(0.58, -0.66, -0.47).normalize(),
   /**
    * Reaching across for the backhand, the upper arm swings in front of the chest and the elbow drops,
    * rather than folding back through the body.
    */
-  TOP_ELBOW_ACROSS = new THREE.Vector3(-0.2, -0.9, 0.4).normalize();
+  TOP_ELBOW_ACROSS = new THREE.Vector3(-0.2, -0.9, 0.4).normalize(),
+  /**
+   * With the top hand drawn in near the shoulder the arm folds; an elbow out and back then puts
+   * the forearm in line with the shaft, like holding a cane. It comes out and forward instead, so
+   * the forearm crosses the shaft. (Bending square to the shaft itself was tried: it fixes each
+   * fold but the direction flips as the shaft crosses the arm, which costs more than it saves.)
+   */
+  TOP_ELBOW_FOLD = new THREE.Vector3(-0.62, 0, 0.78).normalize();
 
 const topShoulder = new THREE.Vector3(),
   lowShoulder = new THREE.Vector3(),
@@ -341,16 +348,24 @@ export const Player = memo(function Player({ id }: { id: number }) {
     // crosses in front of the belt so the shaft passes in front of the body rather than through it.
     // It hangs off the top shoulder, so it follows the torso through a deke's lean.
     const cross = Math.abs(side - STICK.restSide) * (side > STICK.restSide ? 0.13 : 0.2);
+    // With the puck pulled in close (toe drag, pull-in) the hands cannot stay behind it at the
+    // belt: the long rigid stick would stand up and lift the top hand to the chin. They go out to
+    // the side away from the puck and forward, level with it, so the shaft lies across the body
+    // and the arms reach rather than fold. A one-handed wrap keeps its own socket.
+    const wrap =
+      skater.dekeKind === 'throughLegs' || skater.dekeKind === 'windmill' ? action.releaseHand : 0;
     const closeCarry =
-      (1 - THREE.MathUtils.smoothstep(reach_, 0.15, 0.95)) *
-      (1 - THREE.MathUtils.smoothstep(action.bladeLift, 0, 0.3));
+      (1 - THREE.MathUtils.smoothstep(reach_, 0.25, 0.95)) *
+      (1 - THREE.MathUtils.smoothstep(action.bladeLift, 0, 0.3)) *
+      (1 - wrap);
+    const puckSide = THREE.MathUtils.clamp((tip.x - topShoulder.x) / 0.3, -1, 1);
     grip
       .copy(topShoulder)
       .add(
         offset.set(
-          0.085 + cross - closeCarry * 0.3,
-          -0.29 + action.handLift + freeHand * swing * 0.025,
-          0.125 + cross * 0.4 + action.check * 0.08 + action.handForward + closeCarry * 0.15,
+          0.085 + cross - closeCarry * 0.32 * puckSide,
+          -0.29 + action.handLift + freeHand * swing * 0.025 - closeCarry * 0.06,
+          0.125 + cross * 0.4 + action.check * 0.08 + action.handForward + closeCarry * 0.38,
         ),
       );
     if (skater.dekeKind === 'throughLegs' || skater.dekeKind === 'windmill') {
@@ -384,6 +399,9 @@ export const Player = memo(function Player({ id }: { id: number }) {
             armReach: rig.armReach - 0.065,
             // A blade lifted for a windup or follow-through follows the hands; on the ice it lies flat.
             handsLead: THREE.MathUtils.smoothstep(tip.y - BLADE_ICE_Y, 0, 0.5),
+            // Crouched low, the belt drops under the flat stick's top hand and the arms fold up to
+            // the chin; the stick rocks a little onto its heel instead so the hands stay at the belt.
+            restRoll: THREE.MathUtils.smoothstep(1.24 - topShoulder.y, 0, 0.26) * 0.16,
             torso: {
               at: pelvis,
               front: FRONT,
@@ -392,6 +410,8 @@ export const Player = memo(function Player({ id }: { id: number }) {
           },
     );
     if (stickBlend > 0.4) {
+      // How far the top hand has crossed in front of the chest (backhand, protect).
+      const across = THREE.MathUtils.smoothstep(grip.x - topShoulder.x, 0.15, 0.45);
       tilt.getWorldQuaternion(frameQ);
       along.subVectors(grip, hosel).normalize();
       alongWorld.copy(along).applyQuaternion(frameQ);
@@ -406,17 +426,26 @@ export const Player = memo(function Player({ id }: { id: number }) {
           elbowPole(
             topShoulder,
             grip,
-            topBend.lerpVectors(
-              TOP_ELBOW,
-              TOP_ELBOW_ACROSS,
-              THREE.MathUtils.smoothstep(grip.x - topShoulder.x, 0.15, 0.45),
-            ),
+            topBend
+              .lerpVectors(TOP_ELBOW, TOP_ELBOW_ACROSS, across)
+              .lerp(
+                TOP_ELBOW_FOLD,
+                (1 - across) *
+                  THREE.MathUtils.smoothstep(
+                    1 - grip.distanceTo(topShoulder) / rig.armReach,
+                    0.3,
+                    0.55,
+                  ),
+              )
+              .normalize(),
             pole,
             polePrev.top,
             dt,
           ),
         ),
         1,
+        // The paddle hangs almost along the forearm; the blocker hides the hand anyway.
+        goalie ? 1.1 : undefined,
       );
       if (!goalie) {
         const down = reachableDown(
@@ -435,11 +464,12 @@ export const Player = memo(function Player({ id }: { id: number }) {
           tilt.localToWorld(elbowPole(lowShoulder, lowHand, LOW_ELBOW, pole, polePrev.low, dt)),
           1,
         );
-        // With the puck at the skates the shaft can pass out of the bottom arm's reach entirely;
-        // that hand comes off the stick, as in a one-handed toe drag, rather than float beside it.
+        // Only when the shaft passes well out of the bottom arm's reach, even with the hands
+        // together, does that hand come off the stick rather than float beside it. Letting go
+        // any earlier turned every toe drag one-handed, which read as the hand slipping off.
         // armReach runs shoulder to wrist; the palm on the shaft reaches about a hand past that.
         const gap = lowHand.distanceTo(lowShoulder) - rig.armReach - 0.06;
-        freeHand = Math.max(freeHand, THREE.MathUtils.smoothstep(gap, -0.12, 0.2));
+        freeHand = Math.max(freeHand, THREE.MathUtils.smoothstep(gap, 0, 0.22));
       }
       if (freeHand > 0) {
         // Blend the wrist target before IK. Blending independently solved bone rotations can

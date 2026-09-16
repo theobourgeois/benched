@@ -332,8 +332,14 @@ export function setOverlay(id: OverlayId, on = !lab.overlays[id]) {
   lab.overlays[id] = on;
   notify();
 }
-export function set(patch: Partial<Pick<typeof lab, 'loop' | 'travel'>>) {
-  Object.assign(lab, patch);
+export function set(patch: Partial<Pick<typeof lab, 'loop' | 'travel' | 'orbit'>>) {
+  const { orbit, ...rest } = patch;
+  Object.assign(lab, rest);
+  // A scripted close-up: the orbit camera at a yaw, pitch, distance and target height.
+  if (orbit) {
+    lab.orbit = { ...lab.orbit, ...orbit };
+    lab.camera = 'orbit';
+  }
   if ('travel' in patch) lab.track.clear();
   writeUrl();
   notify();

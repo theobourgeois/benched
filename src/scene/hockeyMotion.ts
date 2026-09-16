@@ -181,47 +181,50 @@ export function sampleTrack(keys: Track, time: number): number {
   return keys[last][1];
 }
 
-// Contact -> loaded glide -> lateral extension -> recovery under the hip -> contact.
-// The supporting blade travels along its edge; the recovering blade is lifted and turned in.
+// Contact under the hip -> loaded glide as the body passes over -> push out to the side and a
+// little back -> low recovery back under the hip -> contact. A hockey stride is sideways: the
+// skate lands under the hip rather than ahead, drives out at about 60° off the line of travel
+// and comes back low along the ice, so from the front the legs open and close like scissors
+// rather than swinging fore and aft like running.
 const FORWARD = {
   x: [
-    [0, 0],
-    [0.22, -0.035],
-    [0.48, 0.09],
-    [0.66, 0.38],
-    [0.79, 0.25],
-    [0.92, -0.025],
-    [1, 0],
+    [0, 0.02],
+    [0.2, 0.0],
+    [0.44, 0.14],
+    [0.66, 0.5],
+    [0.8, 0.36],
+    [0.92, 0.08],
+    [1, 0.02],
   ],
   z: [
-    [0, 0.23],
-    [0.25, 0.08],
-    [0.48, -0.17],
-    [0.66, -0.4],
-    [0.82, -0.22],
-    [1, 0.23],
+    [0, 0.06],
+    [0.24, 0.0],
+    [0.46, -0.12],
+    [0.66, -0.3],
+    [0.82, -0.14],
+    [1, 0.06],
   ],
   y: [
     [0, 0],
-    [0.6, 0],
-    [0.7, 0.035],
-    [0.82, 0.17],
-    [0.94, 0.045],
+    [0.62, 0],
+    [0.72, 0.03],
+    [0.84, 0.07],
+    [0.95, 0.02],
     [1, 0],
   ],
   yaw: [
     [0, 0.05],
-    [0.34, 0.1],
-    [0.62, 0.64],
-    [0.76, 0.46],
-    [0.92, -0.12],
+    [0.34, 0.08],
+    [0.62, 0.6],
+    [0.76, 0.5],
+    [0.92, 0.0],
     [1, 0.05],
   ],
   pitch: [
     [0, 0],
     [0.58, 0],
-    [0.71, 0.28],
-    [0.84, 0.12],
+    [0.71, 0.25],
+    [0.84, 0.1],
     [1, 0],
   ],
   weight: [

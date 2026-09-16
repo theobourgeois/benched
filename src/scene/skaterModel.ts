@@ -3,7 +3,7 @@ import { clone as cloneRig } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import type { Uniform } from '../game/clubs';
 import { GOALIE } from '../game/config';
 import { makeNumberTexture } from './textures';
-import { limitWrist, solveTwoBone } from './animationMath';
+import { solveTwoBone } from './animationMath';
 import { fitHockeyEquipment, SKATE_LIFT } from './hockeyEquipment';
 
 /** Mixamo-rigged character (see public/models/CREDITS.txt). mixamorig / mixamorig12 both work. */
@@ -16,9 +16,6 @@ const HEIGHT = 2;
  * real proportions), which pinned the bottom hand against the top one. Both segments are lengthened.
  */
 const ARM_STRETCH = 1.15;
-/** Wrist to the middle of the palm, and palm thickness, in world units. */
-const PALM_ALONG = 0.068;
-const PALM_THICK = 0.03;
 /** Helmet height in Mixamo centimetres, parented to the head bone. */
 const HELMET_CM = { player: 30, goalie: 30 } as const;
 
@@ -503,6 +500,7 @@ export function faceGoaliePads(rig: SkaterRig, frame: THREE.Object3D) {
 
 const _palm = new THREE.Vector3(),
   _fingersDir = new THREE.Vector3(),
+  _forearmDir = new THREE.Vector3(),
   _across = new THREE.Vector3(),
   _wrist = new THREE.Vector3(),
   _elbow = new THREE.Vector3(),
@@ -510,7 +508,6 @@ const _palm = new THREE.Vector3(),
   _forearmQ = new THREE.Quaternion(),
   _handQ = new THREE.Quaternion(),
   _rollQ = new THREE.Quaternion(),
-  _inverseHand = new THREE.Quaternion(),
   _yAxis = new THREE.Vector3(0, 1, 0);
 /**
  * Share of the wrist's twist the forearm takes as pronation. Mixamo rigs have no forearm twist
@@ -518,10 +515,24 @@ const _palm = new THREE.Vector3(),
  */
 const FOREARM_TWIST = 0.7;
 /**
+ * Where the shaft sits in the hand bone's frame: the middle of the loop the curled fingers make
+ * (see `curlFingers`), measured on the rig. Along the fingers from the wrist, and out past the palm.
+ */
+export const GRIP_ALONG = 0.096,
+  GRIP_OUT = 0.033;
+/**
+ * The wrist takes this much sideways deviation from the forearm before the shaft goes diagonal
+ * across the palm, index knuckle to the heel of the hand, as a real grip does; and the most
+ * diagonal it goes. Beyond both the wrist just bends. Limiting the wrist by turning the hand
+ * instead put the shaft through the palm.
+ */
+const DEVIATION_FREE = 0.28,
+  DIAGONAL_MAX = 0.48;
+/**
  * Wraps a hand around the stick. `point` is on the shaft axis and `along` runs up the shaft toward
- * the knob. The knuckle line lies along the shaft and the fingers carry on from the forearm, so the
- * wrist only deviates sideways rather than folding over. Thumbs point down the shaft toward the
- * blade, like a real grip.
+ * the knob. The shaft lies along the knuckle line through the curled fingers, and the fingers carry
+ * on from the forearm, so the wrist only deviates sideways rather than folding over. Thumbs point
+ * down the shaft toward the blade, like a real grip.
  */
 export function holdStick(
   rig: SkaterRig,
@@ -530,41 +541,46 @@ export function holdStick(
   along: THREE.Vector3,
   pole: THREE.Vector3,
   curl: number,
+  /** How far the shaft may cross the palm diagonally; a goalie's paddle hand allows more. */
+  diagonalMax = DIAGONAL_MAX,
 ) {
   const forearm = rig.bones[`forearm${side}`],
     hand = rig.bones[`hand${side}`];
   _elbowPole.copy(pole);
-  // A first reach to the shaft finds the elbow, which sets where the forearm points.
+  // A first reach to the shaft finds the elbow, which sets where the forearm points. The wrist
+  // sits a hand's length back from the shaft, which moves the elbow again, so the hand is
+  // rebuilt on the forearm the second reach gives before the final one.
   reachLimb(rig, 'arm', side, point, _elbowPole);
-  forearm.getWorldPosition(_elbow);
-  _fingersDir.subVectors(point, _elbow);
-  _fingersDir.addScaledVector(along, -_fingersDir.dot(along));
-  if (_fingersDir.lengthSq() < 1e-8) _fingersDir.set(0, -1, 0).addScaledVector(along, along.y);
-  _fingersDir.normalize();
-  _across.copy(along).multiplyScalar(sideSign(side));
-  _palm.crossVectors(_across, _fingersDir);
-  _wrist.copy(point).addScaledVector(_fingersDir, -PALM_ALONG).addScaledVector(_palm, -PALM_THICK);
-  reachLimb(rig, 'arm', side, _wrist, _elbowPole);
+  for (let pass = 0; pass < 2; pass++) {
+    forearm.getWorldPosition(_elbow);
+    _forearmDir.subVectors(pass === 0 ? point : _wrist, _elbow).normalize();
+    const lean = _forearmDir.dot(along);
+    _fingersDir.copy(_forearmDir).addScaledVector(along, -lean);
+    if (_fingersDir.lengthSq() < 1e-8) _fingersDir.set(0, -1, 0).addScaledVector(along, along.y);
+    _fingersDir.normalize();
+    _across.copy(along).multiplyScalar(sideSign(side));
+    _palm.crossVectors(_across, _fingersDir);
+    // The forearm leaning along the shaft is wrist deviation. Past what a wrist gives, turn the
+    // hand in its own palm plane so the shaft crosses it diagonally; the fingers still wrap it.
+    const deviation = Math.asin(THREE.MathUtils.clamp(Math.abs(lean), 0, 1));
+    const diagonal =
+      THREE.MathUtils.clamp(deviation - DEVIATION_FREE, 0, diagonalMax) * Math.sign(lean);
+    if (diagonal !== 0) {
+      _fingersDir
+        .multiplyScalar(Math.cos(diagonal))
+        .addScaledVector(along, Math.sin(diagonal))
+        .normalize();
+      _across.crossVectors(_fingersDir, _palm).normalize();
+    }
+    _wrist.copy(point).addScaledVector(_fingersDir, -GRIP_ALONG).addScaledVector(_palm, -GRIP_OUT);
+    reachLimb(rig, 'arm', side, _wrist, _elbowPole);
+  }
   // Pronate the forearm part of the way toward the hand; the wrist keeps the rest.
   forearm.getWorldQuaternion(_forearmQ);
   _handQ.setFromRotationMatrix(_basis.makeBasis(_across, _fingersDir, _palm));
   _rollQ.copy(_forearmQ).invert().multiply(_handQ);
   const twist = 2 * Math.atan2(_rollQ.y, _rollQ.w);
   const wrapped = Math.atan2(Math.sin(twist), Math.cos(twist));
-  forearm.quaternion.multiply(
-    _rollQ.setFromAxisAngle(_yAxis, THREE.MathUtils.clamp(wrapped * FOREARM_TWIST, -1.25, 1.25)),
-  );
-  // Limit the remaining wrist deviation relative to this character's rest hand.
-  forearm.getWorldQuaternion(_forearmQ);
-  _rollQ.copy(_forearmQ).multiply(rig.bind[`hand${side}`]);
-  _handQ.premultiply(_inverseHand.copy(_rollQ).invert());
-  limitWrist(_handQ, 0.65);
-  _handQ.premultiply(_rollQ);
-  // Recompute the wrist from the constrained palm, so limiting rotation cannot open the grip.
-  _fingersDir.set(0, 1, 0).applyQuaternion(_handQ);
-  _palm.set(0, 0, 1).applyQuaternion(_handQ);
-  _wrist.copy(point).addScaledVector(_fingersDir, -PALM_ALONG).addScaledVector(_palm, -PALM_THICK);
-  reachLimb(rig, 'arm', side, _wrist, _elbowPole);
   forearm.quaternion.multiply(
     _rollQ.setFromAxisAngle(_yAxis, THREE.MathUtils.clamp(wrapped * FOREARM_TWIST, -1.25, 1.25)),
   );
@@ -579,12 +595,16 @@ export function curlFingers(rig: SkaterRig, side: Side, curl: number) {
   const s = sideSign(side);
   for (const { bone, bind, finger, joint } of rig.fingers[side]) {
     if (finger === 'thumb') {
-      // Thumb folds across the shaft rather than curling with the fingers.
-      if (joint === 1) _e.set(0.15 * curl, -s * 0.35 * curl, s * 0.55 * curl);
-      else _e.set(0.5 * curl, 0, s * 0.15 * curl);
+      // The thumb comes up over the shaft and lies along it toward the blade, on the far side of
+      // the shaft from the fingers. Fitted numerically to the loop at GRIP_ALONG / GRIP_OUT.
+      if (joint === 1) _e.set(0.5 * curl, s * 0.6 * curl, -s * 0.2 * curl);
+      else if (joint === 2) _e.set(-0.7 * curl, s * 0.4 * curl, s * 0.2 * curl);
+      else _e.set(-0.4 * curl, s * 0.3 * curl, s * 0.3 * curl);
     } else {
       const spread = joint === 1 ? (finger === 'index' ? -0.06 : finger === 'pinky' ? 0.08 : 0) : 0;
-      _e.set((joint === 1 ? 1.15 : joint === 2 ? 1.35 : 0.9) * curl, 0, s * spread * curl);
+      // Closed, the three joints make a loop about 3.5 cm across (finger pads included) with its
+      // centre at GRIP_ALONG / GRIP_OUT: room for the shaft rather than fingers through it.
+      _e.set((joint === 1 ? 1.0 : joint === 2 ? 1.04 : 0.93) * curl, 0, s * spread * curl);
     }
     bone.quaternion.copy(bind).multiply(_q.setFromEuler(_e));
   }

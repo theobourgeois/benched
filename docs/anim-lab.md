@@ -56,7 +56,13 @@ node scripts/anim-lab.mjs --list                        # clip ids and what each
 node scripts/anim-lab.mjs slap-shot                     # bundle; prints report.md
 node scripts/anim-lab.mjs slap-shot --at 0.6,0.617 --cams side,hands --overlays skeleton,stick
 node scripts/anim-lab.mjs all --quiet --strict          # every clip; exit 1 on any issue or pop
+node scripts/anim-closeup.mjs stance 0.5 hands 0.9 0.3 1.3 0.75   # close-up from an orbit camera
 ```
+
+`anim-closeup.mjs <clip> <t[,t…]> <name> [yaw] [pitch] [distance] [height]` saves captioned
+close-ups under `artifacts/anim-lab/shots/`. The contact sheets are too small to judge fingers or
+a wrist; use this (distance about 1.2, height about 0.8, yaw 0.6 for the hands from the front-left)
+before deciding a grip is right.
 
 Loop: run the clip, read `report.md`, look at the flagged frames (`frames/…png` or `--at` those
 times with a close camera), edit the pose code, run it again and compare the issue and pop counts.
@@ -64,7 +70,7 @@ The numbers show _that_ something is off. Look at the frames before deciding _wh
 
 In a browser session, `window.__LAB__` has `clips()`, `open(id, {camera, travel})`, `seek(t)`
 (holds the frame and returns its measurements), `sample()`, `analyze()`, `camera(id)`,
-`overlay(id, on)`, `set({loop, travel})`, `screenshot({camera})`, `bundle({frames, times, cameras,
+`overlay(id, on)`, `set({loop, travel, orbit: {yaw, pitch, distance, height}})` (orbit switches to that close-up camera), `screenshot({camera})`, `bundle({frames, times, cameras,
 video})`, `record(seconds)`, `state()` and `close()`.
 
 ## What the checks mean

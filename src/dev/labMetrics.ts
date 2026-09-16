@@ -2,7 +2,7 @@
 // then issue spans, one-frame pops and a plain-text report for a whole clip.
 import * as THREE from 'three';
 import type { PoseDebug } from '../scene/animationReview';
-import type { BoneName, SkaterRig } from '../scene/skaterModel';
+import { GRIP_ALONG, GRIP_OUT, type BoneName, type SkaterRig } from '../scene/skaterModel';
 import type { StickParts } from '../scene/stick';
 import type { Skater } from '../game/types';
 
@@ -35,8 +35,10 @@ export type V3 = [number, number, number];
 
 /** Thresholds for flagged frames. One place, so the lab and the report agree. */
 export const LIMITS = {
-  /** Palm centre to the shaft axis while that hand should be holding, cm. */
+  /** Middle of the closed fingers to the shaft axis while that hand should be holding, cm. */
   gripCm: 3.5,
+  /** Shaft off the knuckle line while holding, degrees: past this it runs through the palm. */
+  gripDeg: 35,
   kneeStraightDeg: 6,
   kneeFoldDeg: 145,
   elbowStraightDeg: 4,
@@ -57,6 +59,7 @@ export const LIMITS = {
 
 export type IssueKind =
   | 'grip'
+  | 'grip-angle'
   | 'knee-straight'
   | 'knee-fold'
   | 'elbow-straight'
@@ -93,8 +96,8 @@ export interface LabSample {
     torsoRoll: number;
     torsoTwist: number;
   };
-  /** Palm centre to the shaft axis, and hand spread along the shaft, cm. */
-  grip: { L: number; R: number; spread: number };
+  /** Finger loop to the shaft axis (cm), hand spread along the shaft (cm), and the shaft's angle off each knuckle line (degrees). */
+  grip: { L: number; R: number; spread: number; angleL: number; angleR: number };
   /** Ankle height over its planted height, cm. */
   lift: { L: number; R: number };
   /** Hosel height (cm), shaft angle from vertical, shaft length (m), shaft-to-torso distance (cm). */
@@ -102,6 +105,8 @@ export interface LabSample {
   /** Fraction of full limb length in use. 1 is locked straight. */
   reach: { armL: number; armR: number; legL: number; legR: number };
   pose: Omit<PoseDebug, 'tip' | 'grip' | 'hosel'>;
+  /** What the pose asked for before the stick was solved: blade tip, top-hand target, hosel (skater frame, m). */
+  targets: { tip: V3; grip: V3; hosel: V3 };
   input: {
     speed: number;
     along: number;
@@ -127,8 +132,8 @@ const _w = new THREE.Vector3(),
   _inv = new THREE.Matrix4(),
   _a = new THREE.Vector3(),
   _b = new THREE.Vector3();
-/** Wrist to palm centre in the hand bone's frame, world units (matches holdStick). */
-const PALM = new THREE.Vector3(0, 0.068, 0.03);
+/** Wrist to the middle of the closed fingers in the hand bone's frame, world units (see holdStick). */
+const PALM = new THREE.Vector3(0, GRIP_ALONG, GRIP_OUT);
 /** Rig-root height plus the pose's ICE_Y: where a planted ankle sits above its bind height. */
 const PLANT_Y = 0.01;
 
@@ -144,6 +149,8 @@ function between(a: V3, b: V3) {
 }
 /** Bend at `b` on the chain a–b–c, 0 when straight. */
 const flex = (a: V3, b: V3, c: V3) => 180 - between(sub(a, b), sub(c, b));
+/** Angle between two lines, ignoring which way each points, degrees. */
+const acute = (a: V3, b: V3) => Math.min(between(a, b), 180 - between(a, b));
 const deg = (r: number) => (r * 180) / Math.PI;
 
 /** Closest distance between segments p0–p1 and q0–q1. */
@@ -243,10 +250,12 @@ export function measure(
   // The knob is whichever end the top hand holds.
   if (dist(j.palmR, ends[1]) < dist(j.palmR, ends[0])) [j.knob, j.hosel] = [ends[1], ends[0]];
 
-  const handAxis = (side: 'L' | 'R'): V3 => {
+  const handAxis = (side: 'L' | 'R', axis: 'x' | 'y' = 'y'): V3 => {
     rig.bones[`hand${side}`].getWorldQuaternion(_q);
     // Direction only: rotate into the skater frame without the translation.
-    _b.set(0, 1, 0).applyQuaternion(_q).transformDirection(_inv);
+    _b.set(axis === 'x' ? 1 : 0, axis === 'y' ? 1 : 0, 0)
+      .applyQuaternion(_q)
+      .transformDirection(_inv);
     return [_b.x, _b.y, _b.z];
   };
   const torsoUp = sub(j.neck, j.pelvis);
@@ -285,7 +294,8 @@ export function measure(
     legL = limb('shinL', 'footL'),
     legR = limb('shinR', 'footR');
   const along = skater.vx * Math.sin(skater.angle) + skater.vz * Math.cos(skater.angle);
-  const { tip: _tip, grip: _grip, hosel: _hosel, action, ...rest } = pose;
+  const { tip, grip, hosel, action, ...rest } = pose;
+  const target = (v: V3): V3 => [r3(v[0]), r3(v[1] + lift), r3(v[2])];
   const sample: LabSample = {
     t: r3(t),
     frame: Math.round(t * 60),
@@ -295,6 +305,8 @@ export function measure(
       L: r1(gripL.off * 100),
       R: r1(gripR.off * 100),
       spread: r1(Math.abs(gripR.along - gripL.along) * 100),
+      angleL: r1(acute(shaft, handAxis('L', 'x'))),
+      angleR: r1(acute(shaft, handAxis('R', 'x'))),
     },
     lift: {
       L: r1((j.ankleL[1] - PLANT_Y - rig.ankleHeight) * 100),
@@ -312,6 +324,7 @@ export function measure(
       legL: r3(dist(j.hipL, j.ankleL) / legL),
       legR: r3(dist(j.hipR, j.ankleR) / legR),
     },
+    targets: { tip: target(tip), grip: target(grip), hosel: target(hosel) },
     pose: {
       ...rest,
       action: Object.fromEntries(
@@ -351,6 +364,10 @@ export function findIssues(s: LabSample): Issue[] {
   if (s.grip.R > LIMITS.gripCm) flag('grip', 'top hand (R)', s.grip.R, LIMITS.gripCm);
   if (!pose.goalie && pose.freeHand < 0.05 && s.grip.L > LIMITS.gripCm)
     flag('grip', 'bottom hand (L)', s.grip.L, LIMITS.gripCm);
+  if (!pose.goalie && s.grip.angleR > LIMITS.gripDeg)
+    flag('grip-angle', 'top hand (R)', s.grip.angleR, LIMITS.gripDeg);
+  if (!pose.goalie && pose.freeHand < 0.05 && s.grip.angleL > LIMITS.gripDeg)
+    flag('grip-angle', 'bottom hand (L)', s.grip.angleL, LIMITS.gripDeg);
   for (const side of ['L', 'R'] as const) {
     const knee = s.angles[`knee${side}`],
       elbow = s.angles[`elbow${side}`],
@@ -377,6 +394,7 @@ export function findIssues(s: LabSample): Issue[] {
 
 export const ISSUE_TEXT: Record<IssueKind, string> = {
   grip: 'hand off the shaft',
+  'grip-angle': 'shaft through the palm',
   'knee-straight': 'knee locked straight',
   'knee-fold': 'knee over-folded',
   'elbow-straight': 'elbow locked straight',
@@ -389,6 +407,7 @@ export const ISSUE_TEXT: Record<IssueKind, string> = {
 };
 const UNITS: Record<IssueKind, string> = {
   grip: 'cm',
+  'grip-angle': '°',
   'knee-straight': '°',
   'knee-fold': '°',
   'elbow-straight': '°',

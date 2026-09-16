@@ -4,6 +4,7 @@
 import { GET_UP, PHYSICS, PUCK, STICK } from '../game/config';
 import { dekeDuration, sampleDeke } from '../game/dekes';
 import { cellyDuration } from '../game/cellys';
+import { stickCarryTarget } from '../game/engine';
 import { GOALIE_SAVE_TIME, SHOT_DOWNSWING } from '../game/actionTiming';
 import type { CellyKind, DekeKind, Skater } from '../game/types';
 
@@ -399,14 +400,24 @@ export const CLIPS: LabClip[] = [
     group: 'Puck',
     duration: 1.6,
     loop: false,
-    look: 'Puck pulled into the skates; the bottom hand may come off, the top hand must not clip the torso.',
+    look: "The engine's forehand pull: the puck sweeps around the lower hand to beside the left skate. Both hands stay on; the hands go right and forward so the shaft lies across the body, no higher than the chest.",
     frame(t) {
       const pull = Math.sin((Math.PI * t) / 1.6);
-      return hold({
-        ...skate(t, 4, 0.2),
-        stickSide: STICK.restSide - 0.45 * pull,
-        stickReach: STICK.restReach - 0.9 * pull,
-      });
+      const blade = stickCarryTarget(0, pull);
+      return hold({ ...skate(t, 4, 0.2), stickSide: blade.side, stickReach: blade.reach });
+    },
+  }),
+  clip({
+    id: 'toe-drag-back',
+    label: 'Toe drag, backhand side',
+    group: 'Puck',
+    duration: 1.6,
+    loop: false,
+    look: "The engine's pull with the stick held right: the puck comes to beside the right skate under the top hand. The hands cross left so the shaft lies across the body rather than standing up.",
+    frame(t) {
+      const pull = Math.sin((Math.PI * t) / 1.6);
+      const blade = stickCarryTarget(-1, pull);
+      return hold({ ...skate(t, 4, 0.2), stickSide: blade.side, stickReach: blade.reach });
     },
   }),
   clip({
