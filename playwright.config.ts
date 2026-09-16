@@ -6,7 +6,8 @@ export default defineConfig({
   workers: 1,
   timeout: 30000,
   use: {
-    baseURL: 'http://localhost:5173',
+    // E2E_BASE_URL points the suite at a preview build, to check the deployed rooms.
+    baseURL: process.env.E2E_BASE_URL ?? 'http://localhost:5173',
     channel: 'chrome',
     headless: true,
     viewport: { width: 1440, height: 960 },
