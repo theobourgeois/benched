@@ -13,18 +13,25 @@ import { test, expect } from '@playwright/test';
 test.skip(!process.env.E2E_BASE_URL, 'point E2E_BASE_URL at a preview build');
 
 test('the production build reaches the deployed rooms', async ({ browser }) => {
-  test.setTimeout(90_000);
+  // Two fresh browsers each pull the 53 MB skater model over a real connection before the menu
+  // is usable, so this is generous where the local suite does not need to be.
+  test.setTimeout(240_000);
+  // Paths stay relative. A project page lives under a subdirectory, and `/` would resolve to the
+  // root of the whole domain rather than to the game.
   const a = await (await browser.newContext()).newPage();
   const b = await (await browser.newContext()).newPage();
-  await a.goto('/');
+  await a.goto('./');
+  await expect(a.getByRole('button', { name: 'Online', exact: true })).toBeVisible({
+    timeout: 120_000,
+  });
   await a.getByRole('button', { name: 'Online', exact: true }).click();
   await a.getByRole('button', { name: /Create game/ }).click();
   await expect(a.getByRole('heading', { name: 'Game Lobby' })).toBeVisible({ timeout: 25000 });
   const code = (await a.locator('.room-code strong').textContent())!.trim();
   console.log('ROOM', code);
   await expect(a.getByText('Waiting for a player')).toBeVisible();
-  await b.goto(`/?join=${code}`);
-  await expect(b.getByRole('heading', { name: 'Game Lobby' })).toBeVisible({ timeout: 25000 });
+  await b.goto(`./?join=${code}`);
+  await expect(b.getByRole('heading', { name: 'Game Lobby' })).toBeVisible({ timeout: 120_000 });
   // Both ends now show two seats rather than one and a spinner.
   await expect(a.locator('.seat').filter({ hasNotText: 'Waiting' })).toHaveCount(2, {
     timeout: 20000,
