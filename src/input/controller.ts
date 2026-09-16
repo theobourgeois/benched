@@ -44,8 +44,18 @@ const REPEAT_DELAY = 0.38,
   REPEAT_EVERY = 0.09;
 const repeatStep = (held: number) =>
   held < REPEAT_DELAY ? -1 : Math.floor((held - REPEAT_DELAY) / REPEAT_EVERY);
+/**
+ * Every attached seat. A seat polls the pads the others are not holding, so a second person
+ * picking up a controller gets their own rather than doubling up on the first.
+ */
+const seated = new Set<Controller>();
 /** One input vocabulary for Gamepad API and keyboard. Shot gestures are edge-triggered. */
 export class Controller {
+  /**
+   * Seat one owns the keyboard; a second local player is pad-only, since one keyboard cannot
+   * sensibly be split between two people mid-rush.
+   */
+  constructor(readonly keyboard = true) {}
   private keys = new Set<string>();
   private taps = new Set<string>();
   private previous = {
@@ -81,7 +91,7 @@ export class Controller {
   status: ControllerStatus = { ...WAITING_STATUS };
   layout: ControllerLayout = 'auto';
   refresh = () => {
-    this.status = pollGamepads(this.layout, this.lastPad?.index).status;
+    this.status = pollGamepads(this.layout, this.lastPad?.index, this.claimed()).status;
   };
   onDisconnect?: () => void;
   private keyDown = (e: KeyboardEvent) => {
@@ -110,14 +120,25 @@ export class Controller {
     this.triggerTime = 0;
     this.onDisconnect?.();
   };
+  /** Pads the other seats are holding, so this one does not claim the same controller. */
+  private claimed() {
+    return [...seated]
+      .filter((seat) => seat !== this)
+      .map((seat) => seat.lastPad?.index)
+      .filter((index): index is number => index !== undefined);
+  }
   attach() {
-    window.addEventListener('keydown', this.keyDown);
-    window.addEventListener('keyup', this.keyUp);
+    seated.add(this);
+    if (this.keyboard) {
+      window.addEventListener('keydown', this.keyDown);
+      window.addEventListener('keyup', this.keyUp);
+    }
     window.addEventListener('blur', this.blur);
     window.addEventListener('gamepadconnected', this.refresh);
     window.addEventListener('gamepaddisconnected', this.refresh);
     this.refresh();
     return () => {
+      seated.delete(this);
       window.removeEventListener('keydown', this.keyDown);
       window.removeEventListener('keyup', this.keyUp);
       window.removeEventListener('blur', this.blur);
@@ -126,7 +147,7 @@ export class Controller {
     };
   }
   read(dt: number, hasPuck = false): InputFrame {
-    const { pad, status } = pollGamepads(this.layout, this.lastPad?.index);
+    const { pad, status } = pollGamepads(this.layout, this.lastPad?.index, this.claimed());
     if (this.lastPad && !pad) {
       this.windup = 0;
       this.arcDrag = false;
@@ -315,7 +336,7 @@ export class Controller {
    * read() clears the key taps, so a button already held when a replay opens is not a press.
    */
   replayInput() {
-    const { pad } = pollGamepads(this.layout, this.lastPad?.index);
+    const { pad } = pollGamepads(this.layout, this.lastPad?.index, this.claimed());
     const key = (k: string) => this.keys.has(k) || this.taps.has(k);
     const button = (i: number) => !!pad?.buttons[i]?.pressed || (pad?.buttons[i]?.value ?? 0) > 0.5;
     const trigger = (i: number) => {

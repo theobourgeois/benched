@@ -6,7 +6,6 @@ import {
   beginGame,
   canInstantReplay,
   continueGame,
-  mySide,
   openInstantReplay,
   pauseGame,
   returnToMenu,
@@ -67,7 +66,15 @@ export function Hud() {
         </div>
       )}
       {s.phase === 'playing' && !cameraUsesAttackUp(settings.camera) && <AttackArrow s={s} />}
-      {s.phase !== 'intermission' && s.phase !== 'final' && <PlayerCard s={s} />}
+      {s.phase !== 'intermission' && s.phase !== 'final' && (
+        <>
+          <PlayerCard s={s} team={runtime.myTeam} />
+          {/* A second person on the couch gets their own card, mirrored to the far corner. */}
+          {s.sides[1 - runtime.myTeam].human && (
+            <PlayerCard s={s} team={(1 - runtime.myTeam) as Team} seat="two" />
+          )}
+        </>
+      )}
       {s.phase === 'faceoff' && <Faceoff s={s} />}
       {s.phase === 'goal' && <GoalCall s={s} />}
       {paused && !panel && !feel && (
@@ -128,12 +135,12 @@ function AttackArrow({ s }: { s: MatchState }) {
   );
 }
 
-function PlayerCard({ s }: { s: MatchState }) {
-  const side = mySide(s);
+function PlayerCard({ s, team, seat }: { s: MatchState; team: Team; seat?: 'two' }) {
+  const side = s.sides[team];
   const p = s.skaters[side.controlled];
   const status = p.downTimer > 0 ? 'Down' : p.stumbleTimer > 0 ? 'Off balance' : null;
   return (
-    <div className="player-card" style={club(s.teams[runtime.myTeam].accent)}>
+    <div className="player-card" data-seat={seat} style={club(s.teams[team].accent)}>
       <span className="pc-number">{p.number}</span>
       <div className="pc-body">
         {side.shotCharge > 0.05 && (

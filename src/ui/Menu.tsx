@@ -8,9 +8,10 @@ import { Brand, MenuItem, Prompts } from './kit';
 import { SettingsScreen } from './Settings';
 import { TeamSelect } from './TeamSelect';
 
-type Entry = GameMode | 'settings' | 'controls' | 'lab';
+type Entry = GameMode | 'twoPlayer' | 'settings' | 'controls' | 'lab';
 const ENTRIES: { id: Entry; label: string }[] = [
   { id: 'exhibition', label: 'Play Now' },
+  { id: 'twoPlayer', label: '2 Players' },
   { id: 'threeOnThree', label: '3 on 3' },
   { id: 'oneOnOne', label: '1 on 1' },
   { id: 'shootout', label: 'Shootout' },
@@ -26,6 +27,8 @@ export function Menu() {
   const [screen, setScreen] = useState<Screen>('main');
   const [index, setIndex] = useState(0);
   const [mode, setMode] = useState<GameMode>('exhibition');
+  /** A second person on the other bench, sharing the screen. */
+  const [guests, setGuests] = useState(false);
   // The matchup outlives the screens, so backing out to change modes keeps your picks.
   const [teams, setTeams] = useState<[Club, Club]>(match.teams);
   const [side, setSide] = useState<Team>(runtime.myTeam);
@@ -33,7 +36,8 @@ export function Menu() {
   const pick = (id: Entry) => {
     if (id === 'settings' || id === 'controls') return setScreen(id);
     if (id === 'lab') return void import('../dev/lab').then((m) => m.openLab());
-    setMode(id);
+    setGuests(id === 'twoPlayer');
+    setMode(id === 'twoPlayer' ? 'exhibition' : id);
     setScreen('teams');
   };
   const home = () => setScreen('main');
@@ -49,6 +53,7 @@ export function Menu() {
           setSide={setSide}
           jersey={jersey}
           setJersey={setJersey}
+          guests={guests}
           onBack={home}
         />
       )}

@@ -445,6 +445,10 @@ a {
   font-size: 21px;
   font-weight: 800;
 }
+/* Seat two has no controller yet, so the match cannot start. */
+.cpu-chip[data-waiting] strong {
+  color: #b8541f;
+}
 .matchup {
   display: grid;
   grid-template-columns: 1fr clamp(88px, 10vw, 132px) 1fr;
@@ -739,6 +743,14 @@ a {
 }
 .cta:hover {
   filter: brightness(1.06);
+}
+/* Waiting on a second controller: the button says why rather than going dead and silent. */
+.cta:disabled {
+  filter: saturate(0.25) brightness(0.82);
+  cursor: default;
+}
+.cta:disabled .caret {
+  opacity: 0.35;
 }
 .team-select[data-stage='ready'] .cta {
   background:
@@ -1224,6 +1236,16 @@ a {
   align-items: stretch;
   height: 58px;
   filter: drop-shadow(0 12px 20px rgba(0, 0, 0, 0.55));
+}
+/* The second seat sits in the far corner, mirrored, so neither card crowds the other. */
+.player-card[data-seat='two'] {
+  left: auto;
+  right: 22px;
+  flex-direction: row-reverse;
+  text-align: right;
+}
+.player-card[data-seat='two'] .pc-body {
+  align-items: flex-end;
 }
 .pc-number {
   display: grid;
@@ -2335,6 +2357,10 @@ a {
   .player-card {
     left: 10px;
     bottom: 10px;
+  }
+  .player-card[data-seat='two'] {
+    left: auto;
+    right: 10px;
   }
   .pc-body {
     min-width: 150px;

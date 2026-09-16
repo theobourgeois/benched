@@ -543,3 +543,62 @@ test('a goal rolls a skippable replay, and pause opens a scrubbable instant repl
   await expect(page.getByRole('dialog', { name: 'Game paused' })).toBeVisible();
   expect(errors).toEqual([]);
 });
+
+test('two pads take a bench each and drive their own skater', async ({ page }) => {
+  await page.addInitScript(() => {
+    const w = window as unknown as {
+      pads: { connected: boolean; index: number; axes: number[] }[];
+    };
+    w.pads = [0, 1].map((index) => ({
+      connected: true,
+      index,
+      id: 'Xbox Wireless Controller (test)',
+      mapping: 'standard',
+      axes: [0, 0, 0, 0],
+      buttons: Array.from({ length: 17 }, () => ({ pressed: false, value: 0 })),
+    }));
+    Object.defineProperty(navigator, 'getGamepads', { value: () => w.pads });
+  });
+  await page.goto('/');
+  // Each seat must claim a different pad rather than both grabbing the first one.
+  await expect
+    .poll(() =>
+      page.evaluate(
+        'JSON.stringify([runtime.controller.status.connected, runtime.controllerTwo.status.connected])'.replace(
+          /runtime/g,
+          'window.__BENCHED__.runtime',
+        ),
+      ),
+    )
+    .toBe('[true,true]');
+
+  await page.getByRole('button', { name: '2 Players', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Select Teams' })).toBeVisible();
+  await page.getByRole('button', { name: 'Ready', exact: true }).click();
+  await page.getByRole('button', { name: 'Play game', exact: true }).click();
+  await expect(live(page)).toBeVisible({ timeout: 30000 });
+
+  const started = await state(page);
+  expect(started.sides.map((side: { human: boolean }) => side.human)).toEqual([true, true]);
+  // Two cards on the ice, one per bench.
+  await expect(page.locator('.player-card')).toHaveCount(2);
+
+  await changeState(
+    page,
+    `const s=runtime.match; s.phase='playing'; s.countdown=0; s.puck.owner=null;
+     s.skaters.forEach(p=>{p.cooldown=0;p.vx=0;p.vz=0});
+     s.skaters[s.sides[0].controlled].x=-6; s.skaters[s.sides[1].controlled].x=6;`,
+  );
+  // Opposite sticks: each bench should travel its own way, not share one input.
+  await page.evaluate('window.pads[0].axes[0]=1; window.pads[1].axes[0]=-1');
+  await page.waitForTimeout(600);
+  await page.evaluate('window.pads[0].axes[0]=0; window.pads[1].axes[0]=0');
+  const moved = await state(page);
+  // Compare the velocity vectors rather than one axis: the camera decides which way screen
+  // left runs on the ice, and both seats map through the same one.
+  const drift = (team: number) => moved.skaters[moved.sides[team].controlled];
+  const [a, b] = [drift(0), drift(1)];
+  expect(Math.hypot(a.vx, a.vz)).toBeGreaterThan(1);
+  expect(Math.hypot(b.vx, b.vz)).toBeGreaterThan(1);
+  expect(a.vx * b.vx + a.vz * b.vz).toBeLessThan(0);
+});

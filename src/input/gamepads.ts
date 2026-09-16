@@ -31,7 +31,15 @@ export function supportsPad(pad: Gamepad, layout: ControllerLayout) {
     (layout === 'xbox' || /xbox|xinput/i.test(pad.id))
   );
 }
-export function pollGamepads(layout: ControllerLayout, previousIndex?: number) {
+/**
+ * `claimed` holds the pads other seats are already using. Two people on one couch must never end
+ * up sharing a controller, so a seat only ever sees pads nobody else is holding.
+ */
+export function pollGamepads(
+  layout: ControllerLayout,
+  previousIndex?: number,
+  claimed: readonly number[] = [],
+) {
   const fail = (state: ConnectionState, detail: string) => ({
     pad: null,
     status: { ...WAITING_STATUS, state, detail },
@@ -55,9 +63,10 @@ export function pollGamepads(layout: ControllerLayout, previousIndex?: number) {
       'Controller access is blocked by the browser or the page embedding this game. Open the game directly in a browser tab.',
     );
   }
-  const supported = pads.filter((p) => supportsPad(p, layout));
+  const free = pads.filter((p) => !claimed.includes(p.index));
+  const supported = free.filter((p) => supportsPad(p, layout));
   const pad = supported.find((p) => p.index === previousIndex) ?? supported[0] ?? null;
-  const visible = pad ?? pads[0];
+  const visible = pad ?? free[0];
   if (!visible) return { pad: null, status: { ...WAITING_STATUS } };
   return {
     pad,

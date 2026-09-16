@@ -33,7 +33,8 @@ import { cameraFraming } from './camera';
 import { playerLocator } from './locator';
 import { PUCK, RULES } from '../game/config';
 import { hasActiveCelly } from '../game/cellys';
-import type { InputFrame, Phase, SideInputs } from '../game/types';
+import type { InputFrame, Phase, SideInputs, Team } from '../game/types';
+import type { Controller } from '../input/controller';
 import { labHooks } from './animationReview';
 /** Dev-only animation lab: drives the subject, the close-up camera, overlays and captures. */
 const LabScene = import.meta.env.DEV
@@ -64,16 +65,46 @@ const noEdges = (input: InputFrame) => ({
   pause: false,
   celly: null,
 });
+/**
+ * Keep button edges until a simulation step consumes them, even on 240 Hz displays, along with
+ * the analog values latched at the moment of the press.
+ */
+function mergeEdges(old: InputFrame | null, frame: InputFrame): InputFrame {
+  if (!old) return frame;
+  return {
+    ...frame,
+    shoot: frame.shoot || old.shoot,
+    shotPower: frame.shoot ? frame.shotPower : old.shotPower,
+    shotHeight: frame.shoot ? frame.shotHeight : old.shoot ? old.shotHeight : frame.shotHeight,
+    aimZ: frame.shoot ? frame.aimZ : old.shoot ? old.aimZ : frame.aimZ,
+    pass: frame.pass || old.pass,
+    passRelease: frame.passRelease || old.passRelease,
+    poke: frame.poke || old.poke,
+    saucer: frame.saucer || old.saucer,
+    chip: frame.chip || old.chip,
+    deke: frame.deke || old.deke,
+    dekeSpecial: frame.dekeSpecial ?? old.dekeSpecial,
+    dive: frame.dive || old.dive,
+    check: frame.check || old.check,
+    checkPower: frame.check ? frame.checkPower : old.checkPower,
+    reach: frame.reach || old.reach,
+    stickIceX: frame.reach || !old.reach ? frame.stickIceX : old.stickIceX,
+    stickIceZ: frame.reach || !old.reach ? frame.stickIceZ : old.stickIceZ,
+    switchPlayer: frame.switchPlayer || old.switchPlayer,
+    pause: frame.pause || old.pause,
+  };
+}
 function Simulation() {
   const accumulator = useRef(0),
     lastEvent = useRef(-1),
     publishTime = useRef(0),
     lastMatch = useRef(runtime.match),
-    pending = useRef<InputFrame | null>(null),
+    pending = useRef<SideInputs>([null, null]),
     steps = useRef(0),
     goalReplay = useRef(false);
   useEffect(() => {
-    const detach = runtime.controller.attach();
+    const detach = runtime.controller.attach(),
+      detachTwo = runtime.controllerTwo.attach();
     const pause = () => {
       if (runtime.replay) {
         if (runtime.replay.kind === 'instant') runtime.replay.playing = false;
@@ -86,13 +117,19 @@ function Simulation() {
       }
     };
     runtime.controller.onDisconnect = pause;
+    // A second player's pad dying mid-shift stops the game too, but only while they are on it.
+    runtime.controllerTwo.onDisconnect = () => {
+      if (runtime.match.sides[1 - runtime.myTeam].human) pause();
+    };
     const visibility = () => {
       if (document.hidden) pause();
     };
     document.addEventListener('visibilitychange', visibility);
     return () => {
       detach();
+      detachTwo();
       runtime.controller.onDisconnect = undefined;
+      runtime.controllerTwo.onDisconnect = undefined;
       document.removeEventListener('visibilitychange', visibility);
     };
   }, []);
@@ -102,7 +139,7 @@ function Simulation() {
       lastMatch.current = s;
       lastEvent.current = -1;
       accumulator.current = 0;
-      pending.current = null;
+      pending.current = [null, null];
       goalReplay.current = false;
     }
     const tickPublish = () => {
@@ -120,60 +157,49 @@ function Simulation() {
       const dt = Math.min(delta, 0.05);
       // Play input keeps reading too, so buttons held on the way out aren't fresh presses.
       runtime.controller.read(dt, false);
-      pending.current = null;
+      runtime.controllerTwo.read(dt, false);
+      pending.current = [null, null];
       accumulator.current = 0;
       driveReplay(replay, replayInput, dt);
       runtime.audio.updateSkating(viewMatch(), Math.min(1, viewTimeScale()), runtime.myTeam);
       tickPublish();
       return;
     }
-    const you = mySide(s);
-    const frame = screenInputToRink(
-      runtime.controller.read(Math.min(delta, 0.05), s.puck.owner === you.controlled),
-      s,
-      runtime.settings.camera,
-      runtime.myTeam,
-    );
-    if (navigateWithController()) {
-      frame.pause = false;
-      frame.switchPlayer = false;
-    }
-    if (document.querySelector('[data-block-game-input]')) frame.pause = false;
-    // Keep button edges until a simulation step consumes them, even on 240 Hz displays.
-    const old = pending.current;
-    pending.current = old
-      ? {
-          ...frame,
-          shoot: frame.shoot || old.shoot,
-          shotPower: frame.shoot ? frame.shotPower : old.shotPower,
-          shotHeight: frame.shoot
-            ? frame.shotHeight
-            : old.shoot
-              ? old.shotHeight
-              : frame.shotHeight,
-          aimZ: frame.shoot ? frame.aimZ : old.shoot ? old.aimZ : frame.aimZ,
-          pass: frame.pass || old.pass,
-          passRelease: frame.passRelease || old.passRelease,
-          poke: frame.poke || old.poke,
-          saucer: frame.saucer || old.saucer,
-          chip: frame.chip || old.chip,
-          deke: frame.deke || old.deke,
-          dekeSpecial: frame.dekeSpecial ?? old.dekeSpecial,
-          dive: frame.dive || old.dive,
-          check: frame.check || old.check,
-          checkPower: frame.check ? frame.checkPower : old.checkPower,
-          reach: frame.reach || old.reach,
-          stickIceX: frame.reach || !old.reach ? frame.stickIceX : old.stickIceX,
-          stickIceZ: frame.reach || !old.reach ? frame.stickIceZ : old.stickIceZ,
-          switchPlayer: frame.switchPlayer || old.switchPlayer,
-          pause: frame.pause || old.pause,
-        }
-      : frame;
+    // Every seat reads its own pad but maps through the same anchor: one screen, one orientation,
+    // so up is up for whoever is holding a stick.
+    const readSeat = (seat: Controller, team: Team) =>
+      screenInputToRink(
+        seat.read(Math.min(delta, 0.05), s.puck.owner === s.sides[team].controlled),
+        s,
+        runtime.settings.camera,
+        runtime.myTeam,
+      );
+    const guest = (1 - runtime.myTeam) as Team;
+    const mine = readSeat(runtime.controller, runtime.myTeam);
+    // Seat two is polled even with nobody on it, so the matchup screen can tell you whether a
+    // second controller has turned up yet. Its frame only counts once somebody is playing it.
+    const guestFrame = readSeat(runtime.controllerTwo, guest);
+    // Menus consume the pad only after it has been read, or a press lands on the stale frame.
+    const menuOwnsInput = navigateWithController();
+    const blocked = !!document.querySelector('[data-block-game-input]');
+    const gate = (frame: InputFrame) => {
+      if (menuOwnsInput) {
+        frame.pause = false;
+        frame.switchPlayer = false;
+      }
+      if (blocked) frame.pause = false;
+      return frame;
+    };
+    pending.current[runtime.myTeam] = mergeEdges(pending.current[runtime.myTeam], gate(mine));
+    pending.current[guest] = s.sides[guest].human
+      ? mergeEdges(pending.current[guest], gate(guestFrame))
+      : null;
     // Pausing is a request from a person, not something the physics can decide: with two sticks
-    // on the ice the engine cannot know whose pause it is, so it is resolved out here.
-    if (pending.current.pause) {
+    // on the ice the engine cannot know whose pause it is, so it is resolved out here. Either
+    // seat can call it.
+    if (pending.current.some((frame) => frame?.pause)) {
       togglePause(s);
-      pending.current = noEdges(pending.current);
+      pending.current = pending.current.map((frame) => frame && noEdges(frame)) as SideInputs;
       runtime.audio.updateSkating(s, 1, runtime.myTeam);
       publish();
       accumulator.current = 0;
@@ -181,11 +207,9 @@ function Simulation() {
     }
     accumulator.current +=
       Math.min(delta, 0.05) * (import.meta.env.DEV && labHooks.active ? labHooks.simScale : 1);
-    const sides: SideInputs = [null, null];
     while (accumulator.current >= RULES.fixedStep) {
-      sides[runtime.myTeam] = pending.current;
-      stepMatch(s, sides, RULES.fixedStep);
-      pending.current = noEdges(pending.current);
+      stepMatch(s, pending.current, RULES.fixedStep);
+      pending.current = pending.current.map((frame) => frame && noEdges(frame)) as SideInputs;
       accumulator.current -= RULES.fixedStep;
       if (RECORDED.includes(s.phase) && ++steps.current % RECORD_EVERY === 0)
         recordRagdollPoses(runtime.recorder.record(s));

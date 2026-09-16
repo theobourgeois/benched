@@ -27,6 +27,8 @@ export const runtime = {
    */
   myTeam: 0 as Team,
   controller: new Controller(),
+  /** Second seat for local two-player. Pad only; it claims a controller seat one is not using. */
+  controllerTwo: new Controller(false),
   audio: new ArenaAudio(),
   /** Recent play, recorded by the simulation loop. */
   recorder: new ReplayBuffer(),
@@ -76,16 +78,21 @@ export const mySide = (s: MatchState = viewMatch()) => s.sides[runtime.myTeam];
 export const mySkater = (s: MatchState = viewMatch()) => s.skaters[mySide(s).controlled];
 /** How fast the drawn state moves against real time: replays run slow, held or reversed. */
 export const viewTimeScale = () => (runtime.replay ? Math.abs(runtime.replay.rate) : 1);
+/**
+ * `team` is the side seat one plays. `guests` seats a second local player on the other side; the
+ * camera and HUD still take seat one's point of view, because there is only one screen.
+ */
 export function beginGame(
   team: Team,
   mode: GameMode = 'exhibition',
   teams: [Club, Club] = runtime.match.teams,
   jerseys: [Jersey, Jersey] = runtime.match.jerseys,
+  guests = false,
 ) {
   runtime.audio.unlock();
   runtime.replay = null;
   runtime.myTeam = team;
-  runtime.match = createMatch(team, mode, teams, jerseys);
+  runtime.match = createMatch(guests ? [0, 1] : team, mode, teams, jerseys);
   runtime.match.difficulty = runtime.settings.difficulty;
   startMatch(runtime.match);
   publish();

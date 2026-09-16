@@ -29,6 +29,7 @@ export function TeamSelect({
   setSide,
   jersey,
   setJersey,
+  guests = false,
   onBack,
 }: {
   mode: GameMode;
@@ -38,9 +39,11 @@ export function TeamSelect({
   setSide: (side: Team) => void;
   jersey: Jersey;
   setJersey: Dispatch<SetStateAction<Jersey>>;
+  /** A second person is taking the other bench on this screen. */
+  guests?: boolean;
   onBack: () => void;
 }) {
-  const { settings } = useGame();
+  const { settings, controllerTwo } = useGame();
   const device = useDevice();
   const [stage, setStage] = useState<Stage>('team');
   const info = modeInfo(mode);
@@ -77,15 +80,19 @@ export function TeamSelect({
     updateSettings({ difficulty: DIFFICULTIES[(i + 1) % DIFFICULTIES.length].id });
   };
   const flip = () => setJersey((j) => otherJersey(j));
-  const play = () => beginGame(side, mode, teams, jerseys);
-  const advance = () => (stage === 'ready' ? play() : setStage('ready'));
+  // Two people need two pads. Starting without the second one would leave that bench frozen,
+  // so the match waits rather than dropping somebody into a game they cannot play.
+  const secondPad = controllerTwo.status.connected;
+  const ready = !guests || secondPad;
+  const play = () => ready && beginGame(side, mode, teams, jerseys, guests);
+  const advance = () => (stage === 'ready' ? play() : ready && setStage('ready'));
   const unready = () => setStage('team');
 
   useNav((a) => {
     if (a === 'back') return stage === 'ready' ? unready() : onBack();
     if (a === 'confirm') return advance();
     if (a === 'start') return play();
-    if (a === 'x') return nextDifficulty();
+    if (a === 'x') return guests ? undefined : nextDifficulty();
     if (stage === 'ready') {
       if (a === 'up' || a === 'down') flip();
       return;
@@ -110,15 +117,30 @@ export function TeamSelect({
     <div className="screen team-select" data-stage={stage}>
       <div className="stage-frame">
         <TitleBar crumb={info.eyebrow} title={info.practice ? 'Select Team' : 'Select Teams'}>
-          <button
-            className="cpu-chip"
-            onClick={nextDifficulty}
-            aria-label={`CPU difficulty: ${difficulty.label}`}
-          >
-            <Glyph k="x" />
-            <span>CPU</span>
-            <strong>{difficulty.label}</strong>
-          </button>
+          {guests ? (
+            // Both benches skate All-Star with two people on, so there is no difficulty to set.
+            <span
+              className="cpu-chip"
+              data-waiting={!secondPad || undefined}
+              aria-label={
+                secondPad ? 'Player two controller ready' : 'Waiting for a second controller'
+              }
+            >
+              <Gamepad2 size={14} aria-hidden="true" />
+              <span>P2</span>
+              <strong>{secondPad ? 'Ready' : 'Connect'}</strong>
+            </span>
+          ) : (
+            <button
+              className="cpu-chip"
+              onClick={nextDifficulty}
+              aria-label={`CPU difficulty: ${difficulty.label}`}
+            >
+              <Glyph k="x" />
+              <span>CPU</span>
+              <strong>{difficulty.label}</strong>
+            </button>
+          )}
         </TitleBar>
         <div className="plate matchup">
           {([1, 0] as Team[]).map((t) => (
@@ -129,7 +151,7 @@ export function TeamSelect({
               mine={t === side}
               stage={stage}
               jersey={jerseys[t]}
-              opponent={info.practice ? 'Goalie' : 'CPU'}
+              opponent={guests ? 'P2' : info.practice ? 'Goalie' : 'CPU'}
               canCycle={league.clubs.length > 2}
               onPick={() => onPanel(t)}
               onCycle={cycle}
@@ -145,8 +167,8 @@ export function TeamSelect({
         </div>
         <div className="matchup-foot">
           {LEAGUES.length > 1 && <span className="league-tag">{league.name}</span>}
-          <button className="cta" onClick={advance}>
-            {stage === 'ready' ? 'Play game' : 'Ready'}
+          <button className="cta" onClick={advance} disabled={!ready}>
+            {!ready ? 'Connect P2 controller' : stage === 'ready' ? 'Play game' : 'Ready'}
             <i className="caret" aria-hidden="true" />
           </button>
         </div>
