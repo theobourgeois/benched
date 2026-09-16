@@ -602,3 +602,29 @@ test('two pads take a bench each and drive their own skater', async ({ page }) =
   expect(Math.hypot(b.vx, b.vz)).toBeGreaterThan(1);
   expect(a.vx * b.vx + a.vz * b.vz).toBeLessThan(0);
 });
+
+test('two-player waits for a second pad and says why', async ({ page }) => {
+  await page.addInitScript(() => {
+    const w = window as unknown as { pad: { connected: boolean } };
+    w.pad = {
+      connected: true,
+      index: 0,
+      id: 'Xbox Wireless Controller (test)',
+      mapping: 'standard',
+      axes: [0, 0, 0, 0],
+      buttons: Array.from({ length: 17 }, () => ({ pressed: false, value: 0 })),
+    };
+    Object.defineProperty(navigator, 'getGamepads', { value: () => [w.pad] });
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: '2 Players', exact: true }).click();
+  // One pad is seat one's. Seat two must not quietly share it.
+  await expect
+    .poll(() => page.evaluate('window.__BENCHED__.runtime.controllerTwo.status.connected'))
+    .toBe(false);
+  await expect(page.getByRole('button', { name: /Connect P2 controller/ })).toBeVisible();
+  await expect(page.getByText(/Press a button on the second controller/)).toBeVisible();
+  // And the match cannot start on one pad.
+  await page.getByRole('button', { name: /Connect P2 controller/ }).click({ force: true });
+  await expect(page.getByRole('heading', { name: 'Select Teams' })).toBeVisible();
+});

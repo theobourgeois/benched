@@ -156,7 +156,10 @@ function Simulation() {
     if (replay) {
       const dt = Math.min(delta, 0.05);
       // Play input keeps reading too, so buttons held on the way out aren't fresh presses.
+      runtime.controller.claimed = [];
       runtime.controller.read(dt, false);
+      runtime.controllerTwo.claimed =
+        runtime.controller.padIndex === undefined ? [] : [runtime.controller.padIndex];
       runtime.controllerTwo.read(dt, false);
       pending.current = [null, null];
       accumulator.current = 0;
@@ -175,7 +178,11 @@ function Simulation() {
         runtime.myTeam,
       );
     const guest = (1 - runtime.myTeam) as Team;
+    // Seat one picks first and seat two takes what is left, so one pad always belongs to P1.
+    runtime.controller.claimed = [];
     const mine = readSeat(runtime.controller, runtime.myTeam);
+    runtime.controllerTwo.claimed =
+      runtime.controller.padIndex === undefined ? [] : [runtime.controller.padIndex];
     // Seat two is polled even with nobody on it, so the matchup screen can tell you whether a
     // second controller has turned up yet. Its frame only counts once somebody is playing it.
     const guestFrame = readSeat(runtime.controllerTwo, guest);

@@ -166,6 +166,15 @@ export function TeamSelect({
           </div>
         </div>
         <div className="matchup-foot">
+          {/* Say why the second bench is empty. A browser hides a pad until it has seen a press
+              from that exact controller, which reads as a dead cable if nothing explains it. */}
+          {guests && !secondPad && (
+            <span className="pad-hint" role="status">
+              {controllerTwo.status.state === 'unsupported'
+                ? `Second controller not in a layout the browser exposes (${controllerTwo.status.name}).`
+                : 'Press a button on the second controller to wake it up.'}
+            </span>
+          )}
           {LEAGUES.length > 1 && <span className="league-tag">{league.name}</span>}
           <button className="cta" onClick={advance} disabled={!ready}>
             {!ready ? 'Connect P2 controller' : stage === 'ready' ? 'Play game' : 'Ready'}

@@ -39,7 +39,8 @@ function toggleFullscreen() {
 }
 
 export function SettingsScreen({ crumb, onClose }: { crumb: string; onClose: () => void }) {
-  const { settings, controller } = useGame();
+  const runtime = useGame();
+  const { settings, controller } = runtime;
   const [index, setIndex] = useState(0);
   const [testing, setTesting] = useState(false);
   const fullscreen = useFullscreen();
@@ -68,9 +69,13 @@ export function SettingsScreen({ crumb, onClose }: { crumb: string; onClose: () 
     updateSettings({ camera: cycle(CAMERA_OPTIONS, camera, dir).value });
   const setQuality = () =>
     updateSettings({ quality: settings.quality === 'high' ? 'low' : 'high' });
+  // Both seats, or forcing the layout would fix one player's unlabeled pad and not the other's.
   const setLayout = () => {
-    controller.layout = controller.layout === 'auto' ? 'xbox' : 'auto';
-    controller.refresh();
+    const next = controller.layout === 'auto' ? 'xbox' : 'auto';
+    for (const seat of [runtime.controller, runtime.controllerTwo]) {
+      seat.layout = next;
+      seat.refresh();
+    }
     publish();
   };
 
@@ -238,13 +243,31 @@ const BUTTONS = [
 
 /** Live readout of what the browser sees from the pad. */
 function ControllerTest({ onClose }: { onClose: () => void }) {
-  const { controller } = useGame();
+  const runtime = useGame();
+  // Each seat holds its own pad, so each is tested on its own. A second controller that the
+  // browser has not seen yet shows up here rather than silently going missing on the ice.
+  const [seat, setSeat] = useState(0);
+  const controller = seat ? runtime.controllerTwo : runtime.controller;
   const status = controller.status;
   return (
     <section className="plate controller-test" aria-labelledby="controller-name">
       <button className="close-button" onClick={onClose} aria-label="Close controller test">
         <X size={18} />
       </button>
+      <div className="tabs" role="tablist" aria-label="Seat">
+        {['Player 1', 'Player 2'].map((label, i) => (
+          <button key={label} role="tab" aria-selected={seat === i} onClick={() => setSeat(i)}>
+            {label}
+            <i
+              className="seat-dot"
+              data-on={
+                (i ? runtime.controllerTwo : runtime.controller).status.connected || undefined
+              }
+              aria-hidden="true"
+            />
+          </button>
+        ))}
+      </div>
       <div className={`pad-status ${status.connected ? 'connected' : ''}`} role="status">
         <Gamepad2 size={26} />
         <div>
@@ -286,7 +309,10 @@ function ControllerTest({ onClose }: { onClose: () => void }) {
       {!status.connected && (
         <div className="pad-help">
           <ol>
-            <li>Click inside this tab, then press a face button.</li>
+            <li>
+              Click inside this tab, then press a face button <strong>on this controller</strong>. A
+              browser hides a pad until it has seen input from that exact one.
+            </li>
             <li>Open the game directly on localhost or HTTPS, not in an embedded preview.</li>
             <li>Still nothing? Try Chrome, or reconnect the controller by USB.</li>
           </ol>

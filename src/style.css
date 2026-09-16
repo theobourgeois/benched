@@ -752,6 +752,28 @@ a {
 .cta:disabled .caret {
   opacity: 0.35;
 }
+/* Why the second bench is still empty, said next to the button that is waiting on it. */
+.pad-hint {
+  margin-right: auto;
+  max-width: 46ch;
+  font-size: 14px;
+  line-height: 1.35;
+  color: #c9d7e6;
+}
+/* A lit dot on each seat tab: at a glance, which controllers the browser can actually see. */
+.seat-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 7px;
+  border-radius: 50%;
+  background: #6e849b;
+  vertical-align: middle;
+}
+.seat-dot[data-on] {
+  background: #58c06a;
+  box-shadow: 0 0 6px rgba(88, 192, 106, 0.9);
+}
 .team-select[data-stage='ready'] .cta {
   background:
     var(--brushed), linear-gradient(180deg, #f4fbff 0%, #cdeaff 46%, #94cff3 54%, #bde3fb 100%);
