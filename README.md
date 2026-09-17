@@ -123,7 +123,7 @@ Connect an Xbox controller by USB or Bluetooth and press any button after openin
 | Toe drag                       | RS click + pull RS down; or roll RS sideways → down | Hold C + down arrow                     |
 | Aim shot                       | Left stick (any direction)                          | WASD                                    |
 | Pass / switch on defense       | Hold RT to aim, release to send                     | Hold Space to aim, release to send      |
-| Poke check                     | RB                                                  | E                                       |
+| Poke check, aimed at the puck  | RB, aim with left stick                             | E, aim with WASD                        |
 | Body check, without possession | Flick right stick up; pull down first to load       | Up arrow; hold down arrow first to load |
 | Hustle                         | Hold left-stick click                               | Shift                                   |
 | Backskate                      | Hold LT                                             | Hold Left Ctrl                          |

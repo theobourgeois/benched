@@ -117,12 +117,24 @@ export const PHYSICS = {
   checkStamina: 0.06,
   /** Time frozen on a knockdown for impact. */
   hitstop: 0.07,
-  /** Blade must be this close to the puck for a poke to lift it. */
-  pokeReach: 0.62,
-  /** Stick jab on a poke; not a steal from across a body-length. */
+  /** Half-width of the lane a poke covers: how far off the aimed line the puck can sit. */
+  pokeReach: 0.45,
+  /** How far from the body the jab reaches along the aim; not a steal from across a body-length. */
+  pokeLength: 1.95,
+  /** Visual stick jab on a poke. */
   pokeExtend: 0.32,
-  /** Extra blade reach while holding a sweep. */
+  /** Cosine limit between the aim and the body's facing; pokes further round than this use the blade line. */
+  pokeCone: -0.1,
+  /** Speed the poked puck leaves the carrier's blade at, and how much of it goes off to the side. */
+  pokeKick: 3.6,
+  pokeOff: 0.7,
+  /** Seconds the poked carrier cannot touch the puck. */
+  pokeRecover: 0.4,
+  /** Extra blade reach and lane width while holding a sweep. */
   sweepReach: 0.38,
+  sweepLane: 0.2,
+  /** A carrier whose body is this close to the poker's line to the puck is shielding it. */
+  pokeShield: 0.4,
   chipSpeed: 16.5,
   chipLift: 3.6,
   saucerLift: 4.4,
@@ -157,11 +169,11 @@ export const SHOT = {
   topShelf: 1.24,
   /** Widest aim point, inside the posts. */
   corner: 1.46,
-  spread: 0.01,
+  spread: 0.018,
   /** Per m/s of skating across the shot line. */
   spreadLateral: 0.0016,
   spreadBackhand: 0.012,
-  spreadPower: 0.005,
+  spreadPower: 0.02,
   /** Shooting across the body, scaled by how far the shot turns from the skater's facing. */
   spreadFacing: 0.014,
 };
@@ -196,10 +208,12 @@ export const GOALIE = {
   /** Inside this radius of the centre the puck is on the body, whatever it was doing. */
   body: 0.42,
   /** Half-width of the torso, standing. Nothing gets through it. */
-  bodyHalf: 0.4,
+  bodyHalf: 0.44,
   /** Standing pads and skates. */
-  padStand: 0.6,
-  padStandHeight: 0.42,
+  padStand: 0.68,
+  padStandHeight: 0.5,
+  /** Share of the difficulty's reach scale applied to the standing stance as well. */
+  standScale: 1,
   /** Butterfly pads at full extension, a pad stacked out to one side, and how high they cover. */
   padReach: 0.95,
   padStack: 1.25,
@@ -213,6 +227,33 @@ export const GOALIE = {
   stickHeight: 0.16,
   /** Time from commitment to full extension. The rest of the save is a hold and a recovery. */
   extend: 0.18,
+  /** Hand travel that takes the whole `extend`; shorter reaches are quicker, longer ones slower,
+   * within these shares of it. */
+  reachFull: 0.85,
+  reachQuick: 0.35,
+  reachSlow: 1.3,
+  /** Share of the reaction time a set goalie needs against a shooter in close, how far off the
+   * angle still counts as set, and the range inside which the head start starts to build. */
+  setRead: 0.75,
+  squareSlack: 0.35,
+  setRange: 9,
+  /** How far off the goal line the goalie plays a puck at their feet, and how much further out
+   * per metre of range, up to the top of the crease and beyond. */
+  depthMin: 0.75,
+  depthRate: 0.075,
+  /** Seconds of puck travel the goalie plays ahead of, so a cut across is met rather than chased. */
+  lead: 0.16,
+  /** Distance off their spot at which a CPU goalie stops shuffling and pushes across. */
+  pushGap: 0.7,
+  /** Seconds of their own speed a CPU goalie brakes ahead by, so a push across stops on the spot. */
+  brake: 0.14,
+  /** A carrier this close, moving the puck across at this speed, draws a pad slide after this share
+   * of the reaction time. */
+  dekeRange: 3.2,
+  dekeSpeed: 3,
+  /** How far ahead, in seconds of puck travel, the goalie reads a move across. */
+  dekeLook: 0.3,
+  dekeRead: 1,
   /** Tail of the save spent getting back up, with less to offer. */
   recover: 0.3,
   /** Early in a commit the body pushes toward the shot for this long. */

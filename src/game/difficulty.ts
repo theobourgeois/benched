@@ -58,7 +58,7 @@ export interface CpuTune {
   gap: number;
   /** Stick ease when chasing; lower closes harder. All-Star chase is 1.05. */
   chaseEase: number;
-  /** Goalie lateral tracking of the puck. */
+  /** Goalie lateral tracking of the puck. Under 1 lags inside the angle; over 1 is capped at square. */
   track: number;
   /** How far the goalie comes out. */
   depth: number;

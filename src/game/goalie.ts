@@ -24,6 +24,22 @@ export function goalieFrame(g: Skater, x: number, z: number) {
   return { side: dx * fz - dz * fx, depth: dx * fx + dz * fz };
 }
 
+/**
+ * Where the goalie's angle line crosses `depth` out from the goal line, for a puck `ahead` of the
+ * line and `lateral` across it. The line bisects the angle the posts make at the puck, which is
+ * what a goalie means by square: off-centre, it leans toward the short side instead of splitting
+ * the net down the middle and leaving the near post bare.
+ */
+export function angleLine(ahead: number, lateral: number, depth: number) {
+  const half = RINK.goalHalfWidth;
+  const near = Math.hypot(ahead, half - lateral),
+    far = Math.hypot(ahead, -half - lateral);
+  const bx = -ahead / near - ahead / far,
+    bz = (half - lateral) / near + (-half - lateral) / far;
+  if (bx > -1e-6) return lateral;
+  return lateral + (bz * (depth - ahead)) / bx;
+}
+
 /** Rink direction of the goalie's glove side. */
 export function gloveSide(g: Skater): Vec2 {
   return { x: Math.cos(g.angle), z: -Math.sin(g.angle) };
@@ -90,11 +106,34 @@ export const onPads = (g: Skater) =>
   (g.saveTimer ?? 0) < GOALIE_SAVE_TIME - GOALIE.push;
 /** A committed save can be replaced once the body starts coming back. */
 export const canRecommit = (g: Skater) => (g.saveTimer ?? 0) <= GOALIE.recover;
+/**
+ * Seconds from commitment to full extension. A hand flicked a hand-width to the near post or a pad
+ * kicked just past the stance gets there almost at once; a full stretch to the far corner takes
+ * the whole `extend` or longer. The butterfly is a drop and always takes the same time.
+ */
+export function reachTime(g: Skater) {
+  const kind = g.saveKind;
+  if (kind === 'body') return GOALIE.extend * GOALIE.reachQuick;
+  if (kind === 'pad') {
+    const travel =
+      Math.max(0, Math.abs(g.saveSide ?? 0) - GOALIE.padStand) /
+      (GOALIE.padStack - GOALIE.padStand);
+    return GOALIE.extend * clamp(travel, GOALIE.reachQuick, 1);
+  }
+  if (kind !== 'glove' && kind !== 'blocker') return GOALIE.extend;
+  const rest = kind === 'glove' ? GLOVE_REST : BLOCKER_REST,
+    sign = kind === 'glove' ? 1 : -1;
+  const travel = Math.hypot(
+    Math.max(0.2, (g.saveSide ?? 0) * sign) * sign - rest.side,
+    Math.max(0.35, g.saveHeight ?? rest.height) - rest.height,
+  );
+  return GOALIE.extend * clamp(travel / GOALIE.reachFull, GOALIE.reachQuick, GOALIE.reachSlow);
+}
 /** How far the hands and pads have got toward the committed point, 0 to 1. */
 export function extension(g: Skater) {
   if (!committed(g)) return 0;
   const elapsed = GOALIE_SAVE_TIME - (g.saveTimer ?? 0);
-  return clamp(elapsed / GOALIE.extend, 0, 1);
+  return clamp(elapsed / reachTime(g), 0, 1);
 }
 /** Coming back up from a save; the parts are on their way home. */
 export const recovering = (g: Skater) => committed(g) && (g.saveTimer ?? 0) < GOALIE.recover;
@@ -160,7 +199,9 @@ export function coverage(g: Skater, side: number, height: number, reach: number)
     reach *
     back *
     (kind === 'pad' && !stack ? 0.3 : 1);
-  if (Math.abs(side) < GOALIE.padStand + spread && height < padTop) return 'pad';
+  // A better goalie is simply bigger in the net: the stance widens with difficulty too.
+  const stand = GOALIE.padStand * (1 + (reach - 1) * GOALIE.standScale);
+  if (Math.abs(side) < stand + spread && height < padTop) return 'pad';
   if (
     kind !== 'glove' &&
     kind !== 'blocker' &&
@@ -200,6 +241,9 @@ export function sweepGoalie(
   let t: number | null = null;
   if (a.depth > GOALIE.plane && b.depth <= GOALIE.plane)
     t = (a.depth - GOALIE.plane) / (a.depth - b.depth);
+  // Released from inside the plane, a shot in tight still has to get past the pads and skates on
+  // its way by the goalie's line.
+  else if (a.depth > 0 && b.depth <= 0) t = a.depth / (a.depth - b.depth);
   if (t === null) {
     // Already inside the plane: point-blank, or a puck that slipped by and came back.
     const inside = Math.hypot(b.side, b.depth) < GOALIE.body;
@@ -278,6 +322,24 @@ export function canCover(g: Skater, puck: Puck) {
 }
 
 /**
+ * A goalie square to a shooter in close has been reading the blade all the way in and reacts
+ * sooner than to a shot from distance. Pulled off the angle by a move across, they get no head
+ * start: that is what a deke is for.
+ */
+export function setRead(s: MatchState, g: Skater) {
+  const dir = attackDirection(g.team, s.period),
+    netX = -dir * RINK.goalX,
+    puck = s.puck,
+    ahead = (puck.x - netX) * dir,
+    depth = (g.x - netX) * dir;
+  if (ahead <= depth + 0.3) return 1;
+  const off = Math.abs(g.z - angleLine(ahead, puck.z, depth));
+  if (off > GOALIE.squareSlack) return 1;
+  const range = Math.hypot(ahead, puck.z);
+  return 1 - (1 - GOALIE.setRead) * clamp((GOALIE.setRange - range) / 5, 0, 1);
+}
+
+/**
  * Reads a live shot and commits to it after the reaction time. Human goalies read too, a beat
  * slower, so a flick of the stick is worth throwing.
  */
@@ -294,17 +356,50 @@ export function stepGoalieRead(
     return;
   }
   const arrival = puck.owner === null && puck.shot ? shotArrival(g, puck) : null;
-  if (!onNet(arrival)) {
+  const shot = onNet(arrival);
+  // Your own goalie never slides on a deke for you; that is your read to make.
+  const deke = shot || human ? 0 : dekeThreat(s, g);
+  if (!shot && !deke) {
     g.readTimer = 0;
     return;
   }
   if ((g.readTimer ?? 0) <= 0) {
-    g.readTimer = reaction * (human ? 1.35 : 1);
+    g.readTimer = reaction * (human ? 1.35 : 1) * (deke ? GOALIE.dekeRead : setRead(s, g));
     return;
   }
   g.readTimer = Math.max(0, g.readTimer! - dt);
   if (g.readTimer > 0) return;
-  commitSave(g, pickSaveKind(arrival.side, arrival.height), arrival.side, arrival.height);
+  if (shot) commitSave(g, pickSaveKind(arrival.side, arrival.height), arrival.side, arrival.height);
+  else commitSave(g, 'pad', deke * GOALIE.padStack, 0.3);
+}
+
+/**
+ * A carrier in tight pulling the puck back across the mouth of the net: the side it is heading for
+ * (+1 glove, −1 blocker), or 0. A goalie cannot beat a backhand from arm's length by reacting to
+ * the release, so they read the move and slide the pad across, sealing the ice and leaving the top
+ * of the net for a shooter with the hands to lift it. Taking the puck wide is not a read: that is
+ * the fake, and the goalie just shuffles with it.
+ */
+export function dekeThreat(s: MatchState, g: Skater) {
+  const puck = s.puck;
+  if (puck.owner === null) return 0;
+  const carrier = s.skaters[puck.owner];
+  if (carrier.team === g.team) return 0;
+  const { depth } = goalieFrame(g, puck.x, puck.z);
+  if (depth < 0.3 || depth > GOALIE.dekeRange) return 0;
+  // A carried puck moves with the blade as well as the body: a pull across is mostly hands.
+  const cx = Math.sin(carrier.angle),
+    cz = Math.cos(carrier.angle);
+  const vx = carrier.vx + cz * carrier.stickSideVel + cx * carrier.stickReachVel,
+    vz = carrier.vz - cx * carrier.stickSideVel + cz * carrier.stickReachVel;
+  // Goal-line lateral is rink z; heading across means toward and over the middle of the net.
+  if (Math.abs(vz) < GOALIE.dekeSpeed) return 0;
+  if (puck.z * vz > 0 && Math.abs(puck.z) > 0.5) return 0;
+  const soon = puck.z + vz * GOALIE.dekeLook - g.z;
+  if (Math.sign(soon) !== Math.sign(vz) || Math.abs(soon) < GOALIE.bodyHalf + 0.15) return 0;
+  const fx = Math.sin(g.angle),
+    fz = Math.cos(g.angle);
+  return Math.sign(vx * fz - vz * fx);
 }
 
 /** A human flick in rink space becomes a committed reach in the goalie's frame. */

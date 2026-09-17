@@ -1,6 +1,6 @@
 import { attackDirection, GOALIE, PHYSICS, RINK } from './config';
 import { cpuTune } from './difficulty';
-import { committed, goalieFrame, onPads } from './goalie';
+import { angleLine, committed, goalieFrame, onPads } from './goalie';
 import { clamp, distance, normalized } from './math';
 import { isOnIce } from './modes';
 import type { MatchState, Skater, Vec2 } from './types';
@@ -11,6 +11,8 @@ export interface AIDecision {
   poke: boolean;
   /** Held poke: a sweep from the hip instead of a jab from their back. */
   pokeSweep: boolean;
+  /** Where the poke is jabbed, as a left stick would aim it. */
+  pokeAim: Vec2;
   hustle: boolean;
   backskate: boolean;
   passDir: Vec2;
@@ -30,6 +32,7 @@ const idle = (): AIDecision => ({
   pass: false,
   poke: false,
   pokeSweep: false,
+  pokeAim: { x: 0, z: 0 },
   hustle: false,
   backskate: false,
   passDir: { x: 0, z: 0 },
@@ -106,8 +109,8 @@ function bestOutlet(s: MatchState, p: Skater) {
   return best;
 }
 /**
- * Where the goalie stands: on the line from the puck to the middle of the net, out far enough to
- * cut the angle on a distant shooter and deep when the play is in tight or a pass across is on.
+ * Where the goalie stands: on the angle line from the puck, out far enough to cut the angle on a
+ * distant shooter and deep when the play is in tight or a pass across is on.
  * Behind the goal line they hug the near post; a slow loose puck nobody else can reach gets covered.
  */
 function goalieTarget(s: MatchState, p: Skater): Vec2 {
@@ -125,12 +128,18 @@ function goalieTarget(s: MatchState, p: Skater): Vec2 {
     if (gap < 2.6 && (puck.x - netX) * dir > -0.3 && threat > gap + 0.25)
       return { x: puck.x, z: puck.z };
   }
-  const px = puck.x + puck.vx * 0.06,
-    pz = puck.z + puck.vz * 0.06;
+  // Lead a carrier's hands; a released shot is already on its way and the read handles it.
+  const lead = owner ? GOALIE.lead : 0.06,
+    px = puck.x + puck.vx * lead,
+    pz = puck.z + puck.vz * lead;
   const ahead = (px - netX) * dir;
   if (ahead < 0.35) return { x: netX + dir * 0.35, z: Math.sign(pz || 1) * postZ };
   const range = Math.hypot(ahead, pz);
-  let depth = clamp(0.45 + range * 0.075, 0.45, 1.6) * tune.depth;
+  // Never further out than halfway to a puck near the goal line: on a sharp angle the post is home.
+  let depth = Math.min(
+    clamp(GOALIE.depthMin + range * GOALIE.depthRate, GOALIE.depthMin, 1.6) * tune.depth,
+    Math.max(0.35, ahead * 0.5),
+  );
   // A far-side attacker in the slot means a one-timer across: stay deeper, ready to push.
   if (owner && owner.team !== p.team && Math.abs(owner.z) > 2) {
     const backdoor = foes(s, p).some(
@@ -142,8 +151,8 @@ function goalieTarget(s: MatchState, p: Skater): Vec2 {
     );
     if (backdoor) depth *= 0.72;
   }
-  const t = depth / ahead;
-  const z = clamp(pz * t * tune.track, -postZ - 0.3, postZ + 0.3);
+  // The angle line is already square. A slow tracker lags inside it; nobody gains by cheating past it.
+  const z = clamp(angleLine(ahead, pz, depth) * Math.min(1, tune.track), -postZ - 0.3, postZ + 0.3);
   return { x: netX + dir * depth, z };
 }
 /** With the puck under them: hold it a beat, then find a defender or dump it up the wall. */
@@ -183,6 +192,7 @@ function goaliePoke(s: MatchState, p: Skater, owner: Skater | null, decision: AI
     tune = cpuTune(s, p);
   const mood = Math.sin(s.tick * 0.017 + p.id * 1.7) > 0.35 / tune.bite;
   decision.poke = mood && depth > 0.2 && depth < 1.3 && Math.abs(side) < 0.9;
+  decision.pokeAim = pokeAimAt(s, p, puck, tune.bite);
 }
 function carrierTarget(s: MatchState, p: Skater): Vec2 {
   const dir = attackDirection(p.team, s.period),
@@ -208,14 +218,31 @@ function wrapSide(p: Skater, owner: Skater) {
   return insideOf(owner, p.id % 2 === 0 ? 1 : -1);
 }
 
-/** Same shield as pokeCheck: a stick on their spine cannot lift the puck. */
-function pokeShielded(p: Skater, owner: Skater, puck: Vec2) {
-  const toPoker = normalized(p.x - owner.x, p.z - owner.z);
-  return (
-    facing(owner, toPoker.x, toPoker.z) < 0.18 && distance(p, puck) > distance(owner, puck) + 0.12
-  );
+const AI_POKE_PATIENCE = 0.65,
+  AI_POKE_WOBBLE = 0.5;
+/** A CPU pokes at the puck with a hand that is only as steady as its bite. */
+function pokeAimAt(s: MatchState, p: Skater, puck: Vec2, bite: number): Vec2 {
+  const angle =
+    Math.atan2(puck.x - p.x, puck.z - p.z) +
+    Math.sin(s.tick * 0.23 + p.id * 3.1) * AI_POKE_WOBBLE * clamp(1.5 - bite * 0.5, 0.5, 1.4);
+  return { x: Math.sin(angle), z: Math.cos(angle) };
 }
 
+/**
+ * The carrier's body sits across the line from the poker to the puck. Standing beside them, or
+ * reaching past their hip, is not a shield; reaching through their back is.
+ */
+export function pokeShielded(p: Vec2, owner: Vec2, puck: Vec2) {
+  const dx = puck.x - p.x,
+    dz = puck.z - p.z,
+    lengthSq = Math.max(dx * dx + dz * dz, 1e-6),
+    t = clamp(((owner.x - p.x) * dx + (owner.z - p.z) * dz) / lengthSq, 0, 1);
+  return (
+    t > 0.05 &&
+    t < 0.95 &&
+    Math.hypot(p.x + dx * t - owner.x, p.z + dz * t - owner.z) < PHYSICS.pokeShield
+  );
+}
 function chaseTarget(s: MatchState, p: Skater, owner: Skater | null): Vec2 {
   const puck = s.puck;
   if (!owner || owner.role === 'G')
@@ -272,16 +299,21 @@ function pressureCarrier(s: MatchState, p: Skater, owner: Skater, decision: AIDe
       across = (owner.x - p.x) * hz - (owner.z - p.z) * hx;
     decision.stickX = clamp(-Math.sign(across || wrapSide(p, owner)) * 0.82, -1, 1);
   }
-  decision.poke =
+  const pokeLook =
     !pokeShielded(p, owner, puck) &&
     distance(p, puck) < 1.7 * (0.72 + 0.28 * tune.bite) &&
     facePuck > 0.18 &&
     (beside || !behind);
+  // An aimed poke takes the puck, so a CPU picks its moments instead of jabbing on every cooldown.
+  const pokeMood =
+    Math.sin(s.tick * 0.019 + p.id * 1.3) > Math.min(0.9, AI_POKE_PATIENCE + (1 - tune.bite) * 0.3);
+  decision.poke = pokeLook && pokeMood;
   decision.pokeSweep = decision.poke && beside && ownerSpeed < 3.5;
+  decision.pokeAim = pokeAimAt(s, p, puck, tune.bite);
   const mood = Math.sin(s.tick * 0.011 + p.id * 2.3) > 0.2 / tune.bite;
   const bumpSlow = ownerSpeed < 2.6 && beside && gap < 1.9 && closing > 0.4;
   decision.check =
-    !decision.poke &&
+    !pokeLook &&
     mood &&
     gap < 2.15 * (0.78 + 0.22 * tune.bite) &&
     p.stamina > 0.12 &&
@@ -509,7 +541,7 @@ export function decideAI(s: MatchState, p: Skater): AIDecision {
     else goaliePoke(s, p, owner, decision);
     // A play in tight that has got away from the stance gets the explosive push, not a shuffle.
     const near = Math.hypot(puck.x - p.x, puck.z - p.z) < 9;
-    decision.hustle = near && distance(p, target) > 0.9 && !onPads(p);
+    decision.hustle = near && distance(p, target) > GOALIE.pushGap && !onPads(p);
   } else if (puck.owner === p.id) {
     const look = scoringLook(s, p),
       press = nearestGap(s, p),
@@ -589,6 +621,9 @@ export function decideAI(s: MatchState, p: Skater): AIDecision {
       }
     }
   }
+  // A goalie steers for where their own momentum will not carry them past, or a push overshoots.
+  if (p.role === 'G')
+    target = { x: target.x - p.vx * GOALIE.brake, z: target.z - p.vz * GOALIE.brake };
   const d = distance(p, target),
     move = normalized(target.x - p.x, target.z - p.z);
   const chasing = !ours && puck.owner !== p.id && p.role !== 'G';

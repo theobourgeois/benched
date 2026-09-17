@@ -50,7 +50,7 @@ const PAD: Group[] = [
     rows: [
       ['RS ↑', 'Body check'],
       ['RS ↓ then ↑', 'Loaded check'],
-      ['RB', 'Poke check'],
+      ['RB + LS', 'Poke check, aimed at the puck'],
       ['LB + RB', 'Dive block'],
       ['hold LB', 'Block the lane'],
       ['A', 'Stick lift, next to a carrier'],
@@ -127,7 +127,7 @@ const KEYBOARD: Group[] = [
     rows: [
       ['↑', 'Body check'],
       ['↓ then ↑', 'Loaded check'],
-      ['E', 'Poke check'],
+      ['E + WASD', 'Poke check, aimed at the puck'],
       ['F', 'Dive block'],
       ['hold R', 'Block the lane'],
       ['Q', 'Stick lift, next to a carrier'],

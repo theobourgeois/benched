@@ -26,9 +26,10 @@ import {
   STICK,
 } from '../src/game/config';
 import { decideAI } from '../src/game/ai';
+import { angleLine, commitSave, dekeThreat, reachTime } from '../src/game/goalie';
 import { dekeDuration } from '../src/game/dekes';
 import { constrainToRink } from '../src/game/math';
-import type { MatchState } from '../src/game/types';
+import type { InputFrame, MatchState } from '../src/game/types';
 import { drive, played, seat } from './support';
 function tick(s: MatchState, seconds: number) {
   for (let t = 0; t < Math.ceil(seconds / RULES.fixedStep); t++) stepMatch(s);
@@ -406,6 +407,51 @@ describe('skating and defense', () => {
     stepMatch(s, seat(s, { ...EMPTY_INPUT, poke: true }));
     expect(s.puck.owner).toBeNull();
     expect(s.events.some((e) => e.type === 'hit')).toBe(true);
+  });
+  /** A carrier skating up ice with a poker on their stick side, a little behind the puck. */
+  function pokeOnHip() {
+    const s = openIce();
+    const poker = s.skaters[0],
+      carrier = s.skaters[6];
+    Object.assign(carrier, { x: 0, z: 0, vx: 4, vz: 0, angle: Math.PI / 2, cooldown: 0 });
+    // A carrier facing +x holds the puck on their left, toward −z.
+    Object.assign(poker, { x: 0.2, z: -1.6, vx: 4, vz: 0, angle: Math.PI / 2, cooldown: 0 });
+    const puck = stickTip(carrier);
+    Object.assign(s.puck, { owner: carrier.id, x: puck.x, z: puck.z });
+    drive(s, poker.id);
+    return { s, poker, carrier, puck };
+  }
+  it('an aimed poke takes the puck off the carrier and they cannot scoop it straight back', () => {
+    const { s, poker, carrier, puck } = pokeOnHip();
+    const aim = { x: puck.x - poker.x, z: puck.z - poker.z };
+    stepMatch(s, seat(s, { ...EMPTY_INPUT, poke: true, moveX: aim.x, moveZ: aim.z }));
+    expect(s.notice).toBe('POKE CHECK');
+    expect(s.puck.owner).toBeNull();
+    tick(s, 0.3);
+    expect(s.puck.owner).not.toBe(carrier.id);
+  });
+  it('a poke aimed off the puck misses', () => {
+    const { s, carrier } = pokeOnHip();
+    carrier.cooldown = 10;
+    // Up ice and away from the carrier: the puck sits well off that line.
+    stepMatch(s, seat(s, { ...EMPTY_INPUT, poke: true, moveX: 1, moveZ: -0.3 }));
+    expect(s.puck.owner).toBe(carrier.id);
+  });
+  it("a poke through the carrier's back is shielded", () => {
+    const s = openIce();
+    const poker = s.skaters[0],
+      carrier = s.skaters[6];
+    Object.assign(carrier, { x: 0, z: 0, angle: Math.PI / 2, cooldown: 10 });
+    // Tucked in behind, where the stick has to go through the carrier to reach the puck.
+    Object.assign(poker, { x: -0.3, z: 0.2, angle: Math.PI / 2, cooldown: 0 });
+    const puck = stickTip(carrier);
+    Object.assign(s.puck, { owner: carrier.id, x: puck.x, z: puck.z });
+    drive(s, poker.id);
+    stepMatch(
+      s,
+      seat(s, { ...EMPTY_INPUT, poke: true, moveX: puck.x - poker.x, moveZ: puck.z - poker.z }),
+    );
+    expect(s.puck.owner).toBe(carrier.id);
   });
   it('a poke from a body-length away does not steal the puck', () => {
     const s = openIce();
@@ -1735,6 +1781,117 @@ describe('goalies', () => {
     tick(s, 1.5);
     expect(g.z).toBeGreaterThan(1);
     expect(RINK.goalX - g.x).toBeLessThan(PHYSICS.playerRadius + 0.05);
+  });
+
+  it('plays the angle toward the short side instead of splitting the net down the middle', () => {
+    // A shooter 5 m out and 3 m across: the middle line would stand the goalie 0.48 m across.
+    const middle = (-3 * 0.8) / 5;
+    expect(angleLine(5, -3, 0.8)).toBeLessThan(middle - 0.15);
+    expect(angleLine(5, 3, 0.8)).toBeCloseTo(-angleLine(5, -3, 0.8));
+    expect(angleLine(5, 0, 0.8)).toBeCloseTo(0);
+  });
+
+  it('gets a hand to the near post sooner than to the far corner', () => {
+    const { g } = crease();
+    commitSave(g, 'blocker', -0.6, 0.8);
+    const near = reachTime(g);
+    commitSave(g, 'blocker', -1.25, 1.2);
+    expect(near).toBeLessThan(reachTime(g) * 0.6);
+  });
+
+  /** A shootout breakaway: skate in, cut to one side, and shoot from `release`. */
+  function breakaway(seed: number, release = 6.5) {
+    const s = createMatch(0, 'shootout');
+    startMatch(s);
+    const me = s.skaters[s.sides[0].controlled];
+    const cut = seed % 2 ? 1 : -1;
+    me.z += ((seed % 5) - 2) * 0.5;
+    s.tick += seed * 7;
+    let shot = false;
+    for (let i = 0; i < 120 * 10 && s.phase === 'playing'; i++) {
+      const dist = RINK.goalX - me.x;
+      let input: InputFrame = { ...EMPTY_INPUT, moveX: 1 };
+      if (!shot && dist < release + 4) input.moveZ = cut * 0.85;
+      if (!shot && dist < release) {
+        input = { ...input, shoot: true, shotPower: 0.35, aimZ: cut * 0.9, shotHeight: 0.15 };
+        shot = true;
+      }
+      stepMatch(s, seat(s, input));
+      if (shot && s.puck.owner !== null) break;
+    }
+    return s.score[0] > 0;
+  }
+
+  it('saves the short side off a cut', () => {
+    const seeds = Array.from({ length: 10 }, (_, i) => i);
+    expect(seeds.filter((seed) => breakaway(seed)).length).toBeLessThanOrEqual(2);
+  });
+
+  /** In tight: pull the puck wide, drag it back across the crease, and shoot for the far side. */
+  function pullAcross(seed: number, difficulty: MatchState['difficulty']) {
+    const s = createMatch(0, 'shootout');
+    s.difficulty = difficulty;
+    startMatch(s);
+    s.tick += seed * 13;
+    const me = s.skaters[s.sides[0].controlled];
+    me.z += ((seed % 5) - 2) * 0.3;
+    const dir = seed % 2 ? 1 : -1;
+    let shot = false;
+    for (let i = 0; i < 120 * 12 && s.phase === 'playing'; i++) {
+      const dist = RINK.goalX - me.x;
+      let input: InputFrame = { ...EMPTY_INPUT, moveX: 1 };
+      if (!shot && dist < 7) input.moveZ = (dist < 4.5 ? -dir : dir) * 0.8;
+      if (!shot && dist < 3) {
+        input = { ...input, shoot: true, shotPower: 0.3, aimZ: -dir, shotHeight: 0.6 };
+        shot = true;
+      }
+      stepMatch(s, seat(s, input));
+      if (shot && s.puck.owner !== null) break;
+    }
+    return s.score[0] > 0;
+  }
+
+  it('a Legend goalie is harder to pull across than an All-Star, not easier', () => {
+    const seeds = Array.from({ length: 16 }, (_, i) => i);
+    const legend = seeds.filter((seed) => pullAcross(seed, 'legend')).length;
+    const allStar = seeds.filter((seed) => pullAcross(seed, 'allStar')).length;
+    expect(legend).toBeLessThan(allStar);
+    expect(legend).toBeLessThanOrEqual(6);
+  });
+
+  it('a shot released inside the save plane still has to get past the pads', () => {
+    const { s, g } = crease();
+    // Point blank, already closer than the save plane, low and just off the body.
+    Object.assign(s.puck, {
+      owner: null,
+      x: g.x - 0.2,
+      z: g.z + 0.55,
+      y: 0.2,
+      vx: 25,
+      vz: 0,
+      vy: 0,
+      shot: true,
+      lockout: 0,
+    });
+    stepMatch(s);
+    stepMatch(s);
+    expect(saved(s)).toBe(true);
+  });
+
+  it('slides across on a puck dragged over the crease, but not on the move out wide', () => {
+    const { s, g } = crease();
+    const carrier = s.skaters[0];
+    // The away goalie faces −x with the glove toward +z.
+    const carry = (z: number, vz: number) => {
+      Object.assign(carrier, { x: g.x - 2.4, z, vx: 2, vz, angle: Math.PI / 2, cooldown: 10 });
+      carrier.stickSideVel = 0;
+      carrier.stickReachVel = 0;
+      Object.assign(s.puck, { owner: carrier.id, x: carrier.x + 1.3, z, vx: 2, vz });
+    };
+    carry(-1.4, -5);
+    expect(dekeThreat(s, g)).toBe(0);
+    carry(-0.6, 6);
+    expect(dekeThreat(s, g)).toBe(1);
   });
 
   it('ends a shootout attempt on a catch', () => {

@@ -21,7 +21,7 @@ import {
   startCelly,
   stepCelly,
 } from './cellys';
-import { decideAI } from './ai';
+import { decideAI, pokeShielded } from './ai';
 import { DEFAULT_MATCHUP, type Club } from './clubs';
 import { cpuTune, DEFAULT_DIFFICULTY } from './difficulty';
 import { backcheckLaunchCap, backcheckScales, isBreakawayRush, skateVelocity } from './skating';
@@ -1303,32 +1303,55 @@ function contact(s: MatchState, a: Skater, b: Skater, nx: number, nz: number, cl
   if (bLive) return bodyCheck(s, b, a, -nx, -nz);
   incidental(s, a, b, nx, nz, closing);
 }
-function pokeCheck(s: MatchState, p: Skater, sweep = false) {
+/**
+ * A poke is a jab along the left stick. The blade runs out from the body down that line and takes
+ * the puck only if the puck sits in the lane it covers; with the stick neutral it runs along the
+ * blade's own line. A clean poke knocks the puck off the carrier's blade and back toward the poker,
+ * with the carrier a beat slow to recover, so the one who aimed it gets first touch. A miss costs
+ * the whiff cooldown.
+ */
+function pokeCheck(s: MatchState, p: Skater, aimX: number, aimZ: number, sweep = false) {
   if (p.cooldown > 0 || p.downTimer > 0 || p.stumbleTimer > 0 || p.diveTimer > 0) return;
+  const fx = Math.sin(p.angle),
+    fz = Math.cos(p.angle),
+    tip = stickTip(p);
+  let aim = normalized(aimX, aimZ);
+  // Nobody jabs behind their own back: a stick pulled back, or left neutral, pokes down the blade.
+  if (Math.hypot(aimX, aimZ) < 0.3 || aim.x * fx + aim.z * fz < PHYSICS.pokeCone)
+    aim = normalized(tip.x - p.x, tip.z - p.z);
   p.cooldown = sweep ? 0.32 : 0.45;
   p.stickReach += PHYSICS.pokeExtend + (sweep ? PHYSICS.sweepReach : 0);
+  // Throw the blade toward the aim so the jab reads on the rig.
+  const aimSide = (aim.x * fz - aim.z * fx) * STICK.restReach;
+  p.stickSide += clamp(aimSide - p.stickSide, -0.6, 0.6) * 0.5;
   const owner = s.puck.owner !== null ? s.skaters[s.puck.owner] : null;
   if (!owner || owner.team === p.team) return;
   // A frozen puck is under the goalie; there is nothing to poke until they play it.
   if (owner.role === 'G' && (owner.coverTimer ?? 0) > 0) return;
-  const toPuck = normalized(s.puck.x - p.x, s.puck.z - p.z);
-  if (facing(p, toPuck.x, toPuck.z) < 0.22) return;
-  if (distance(stickTip(p), s.puck) > PHYSICS.pokeReach + (sweep ? PHYSICS.sweepReach : 0)) return;
-  const toPoker = normalized(p.x - owner.x, p.z - owner.z);
+  const rx = s.puck.x - p.x,
+    rz = s.puck.z - p.z,
+    along = rx * aim.x + rz * aim.z,
+    across = Math.abs(rx * aim.z - rz * aim.x);
+  const length = PHYSICS.pokeLength + (sweep ? PHYSICS.sweepReach : 0),
+    lane = PHYSICS.pokeReach + (sweep ? PHYSICS.sweepLane : 0);
+  if (along < 0.25 || along > length || across > lane) return;
   // Body between the stick and the puck: you have to wrap around the shield.
-  const shielded =
-    facing(owner, toPoker.x, toPoker.z) < 0.18 &&
-    distance(p, s.puck) > distance(owner, s.puck) + 0.12;
-  if (shielded) return;
+  if (pokeShielded(p, owner, s.puck)) return;
   const pose = activeDeke(owner);
   if (pose && pose.hop > 0.12) return;
-  const v = normalized(s.puck.x - p.x, s.puck.z - p.z);
+  const back = normalized(-rx, -rz),
+    off = normalized(s.puck.x - owner.x, s.puck.z - owner.z),
+    kick = normalized(back.x + off.x * PHYSICS.pokeOff, back.z + off.z * PHYSICS.pokeOff);
   s.puck.owner = null;
-  s.puck.vx = v.x * 5.2;
-  s.puck.vz = v.z * 5.2;
-  s.puck.lockout = 0.22;
+  s.puck.vx = p.vx * 0.5 + owner.vx * 0.3 + kick.x * PHYSICS.pokeKick;
+  s.puck.vz = p.vz * 0.5 + owner.vz * 0.3 + kick.z * PHYSICS.pokeKick;
+  s.puck.lockout = 0.08;
   s.puck.shot = false;
   s.puck.passTo = null;
+  s.puck.lastTouch = p.team;
+  p.cooldown = 0.1;
+  owner.cooldown = Math.max(owner.cooldown, PHYSICS.pokeRecover);
+  clearDeke(owner);
   emit(s, 'hit', 0.2);
   notice(s, 'POKE CHECK');
 }
@@ -2071,8 +2094,8 @@ export function stepMatch(s: MatchState, inputs: SideInputs = [null, null], dt =
           input.shotHeight ?? s.sides[p.team].shotLift,
         );
       if (input.passRelease && s.puck.owner === p.id) passPuck(s, p, input.moveX, input.moveZ);
-      if (input.poke) pokeCheck(s, p);
-      else if (input.pokeHeld) pokeCheck(s, p, true);
+      if (input.poke) pokeCheck(s, p, input.moveX, input.moveZ);
+      else if (input.pokeHeld) pokeCheck(s, p, input.moveX, input.moveZ, true);
     } else {
       if (!ai) continue;
       const tune = cpuTune(s, p);
@@ -2094,7 +2117,7 @@ export function stepMatch(s: MatchState, inputs: SideInputs = [null, null], dt =
       else if (ai.check) launchCheck(s, p, ai.checkAim.x, ai.checkAim.z, ai.checkPower);
       if (ai.shoot && !p.pendingShot) shootPuck(s, p, ai.shotPower, ai.shotAim, ai.shotHeight);
       else if (ai.pass && !p.pendingShot) passPuck(s, p, ai.passDir.x, ai.passDir.z);
-      if (ai.poke) pokeCheck(s, p, ai.pokeSweep);
+      if (ai.poke) pokeCheck(s, p, ai.pokeAim.x, ai.pokeAim.z, ai.pokeSweep);
     }
     updateRush(p, dt);
   }
