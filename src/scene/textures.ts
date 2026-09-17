@@ -13,7 +13,7 @@ export function canvasTexture(
   texture.anisotropy = 8;
   return texture;
 }
-export function makeIceTexture(logo?: CanvasImageSource) {
+export function makeIceTexture() {
   return canvasTexture(2048, 1024, (ctx) => {
     ctx.fillStyle = '#e3edf3';
     ctx.fillRect(0, 0, 2048, 1024);
@@ -100,38 +100,6 @@ export function makeIceTexture(logo?: CanvasImageSource) {
       ctx.fill();
       ctx.stroke();
     }
-    if (logo) {
-      const iw = Number((logo as { width?: number }).width) || 960;
-      const ih = Number((logo as { height?: number }).height) || 640;
-      ctx.save();
-      ctx.globalAlpha = 0.58;
-      ctx.rotate(Math.PI / 2);
-      const width = 10;
-      const height = width * (ih / iw);
-      ctx.drawImage(logo, -width / 2, -height / 2, width, height);
-      ctx.restore();
-    }
-    ctx.fillStyle = '#87a5ad';
-    ctx.textAlign = 'center';
-    ctx.font = '700 0.62px Arial';
-    ctx.fillText('NORTHSTAR ARENA', 0, -9.8);
-    ctx.font = 'italic 900 1.05px Arial';
-    ctx.fillStyle = '#88a6ad';
-    ctx.fillText('HALIFAX', -17, 0.4);
-    ctx.fillText('HALIFAX', 17, 0.4);
-  });
-}
-export function makeBoardTexture() {
-  return canvasTexture(2048, 128, (ctx) => {
-    ctx.fillStyle = '#edf3ec';
-    ctx.fillRect(0, 0, 2048, 128);
-    ctx.textBaseline = 'middle';
-    ctx.textAlign = 'center';
-    ['BENCHED', 'NORTHSTAR', 'HALIFAX', 'REDLINE'].forEach((label, i) => {
-      ctx.fillStyle = i % 2 ? '#384945' : '#26353b';
-      ctx.font = `italic 900 ${i === 3 ? 31 : 42}px Arial`;
-      ctx.fillText(label, i * 512 + 256, 60);
-    });
   });
 }
 export function makeNumberTexture(number: number, color = '#f1f4f8') {

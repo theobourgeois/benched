@@ -1,7 +1,6 @@
-import { memo, Suspense, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
-import { useLoader } from '@react-three/fiber';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
-import { makeBoardTexture, makeIceTexture, SvgTextureLoader } from './textures';
+import { makeIceTexture } from './textures';
 import { RINK } from '../game/config';
 function outline(extra = 0) {
   const points: THREE.Vector2[] = [],
@@ -220,10 +219,9 @@ function Goal({ sign }: { sign: number }) {
     </group>
   );
 }
-export const Arena = memo(function Arena({ iceLogo }: { iceLogo: string }) {
-  const boards = useMemo(makeBoardTexture, []);
-  const iceFallback = useMemo(() => makeIceTexture(), []);
-  useEffect(() => () => iceFallback.dispose(), [iceFallback]);
+export const Arena = memo(function Arena() {
+  const ice = useMemo(() => makeIceTexture(), []);
+  useEffect(() => () => ice.dispose(), [ice]);
   const points = useMemo(() => outline(), []);
   const shape = useMemo(() => new THREE.Shape(points), [points]);
   return (
@@ -236,18 +234,10 @@ export const Arena = memo(function Arena({ iceLogo }: { iceLogo: string }) {
         <extrudeGeometry args={[shape, { depth: 0.25, bevelEnabled: false, steps: 1 }]} />
         <meshStandardMaterial color="#b6c5c5" />
       </mesh>
-      <Suspense fallback={<IceSheet map={iceFallback} />}>
-        <IceSheetWithLogo src={iceLogo} />
-      </Suspense>
+      <IceSheet map={ice} />
       {/* Corner masks cover the rectangular ice texture outside the rounded playing surface. */}
       {[-1, 1].flatMap((x) => [-1, 1].map((z) => <CornerMask key={`${x}:${z}`} x={x} z={z} />))}
       <Rails points={points} />
-      {[-1, 1].map((z) => (
-        <mesh key={z} position={[0, 0.66, z * 12.87]} rotation={[0, z < 0 ? 0 : Math.PI, 0]}>
-          <planeGeometry args={[43, 0.75]} />
-          <meshStandardMaterial map={boards} />
-        </mesh>
-      ))}
       {Array.from({ length: 7 }, (_, row) => (
         <group key={row}>
           {[-1, 1].map((sign) => (
@@ -289,12 +279,6 @@ function IceSheet({ map }: { map: THREE.Texture }) {
       <meshStandardMaterial map={map} roughness={0.28} metalness={0.12} />
     </mesh>
   );
-}
-function IceSheetWithLogo({ src }: { src: string }) {
-  const logo = useLoader(SvgTextureLoader, src);
-  const ice = useMemo(() => makeIceTexture(logo.image), [logo]);
-  useEffect(() => () => ice.dispose(), [ice]);
-  return <IceSheet map={ice} />;
 }
 function CornerMask({ x, z }: { x: number; z: number }) {
   const shape = useMemo(() => {
