@@ -123,8 +123,12 @@ let lastFrame = -1,
 export function stepPhysics(frame: number, dt: number, live: boolean) {
   if (!world || frame === lastFrame) return;
   lastFrame = frame;
-  // Replays, pauses and hitstop hold every body where it is.
-  if (!live) return;
+  // Replays, pauses and hitstop hold every body where it is. With nobody down there is nothing
+  // for the kinematic skater bodies to collide with, so the world is not stepped at all.
+  if (!live || !slots.size) {
+    accumulator = 0;
+    return;
+  }
   accumulator = Math.min(accumulator + dt, STEP * MAX_STEPS);
   while (accumulator >= STEP) {
     world.step();

@@ -1,7 +1,6 @@
 import { memo, useEffect, useMemo, useRef } from 'react';
 import { useFrame, useLoader } from '@react-three/fiber';
 import * as THREE from 'three';
-import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { mySide, runtime, viewMatch, viewTimeScale } from '../app/store';
 import { uniformFor } from '../game/clubs';
@@ -53,7 +52,7 @@ import {
   type StickParts,
 } from './stick';
 
-useLoader.preload(FBXLoader, SKATER_URL);
+useLoader.preload(GLTFLoader, SKATER_URL);
 useLoader.preload(GLTFLoader, STICK_URL);
 useLoader.preload(GLTFLoader, HELMET_PLAYER_URL);
 useLoader.preload(GLTFLoader, HELMET_GOALIE_URL);
@@ -180,8 +179,12 @@ function elbowPole(
     .addScaledVector(bendAway.normalize(), 0.3);
 }
 
+/** Ring colours: the skater you hold, the one the other seat holds, and a pass target. */
+const MARKER_YOURS = new THREE.Color('#e84a4a'),
+  MARKER_THEIRS = new THREE.Color('#4aa8e8'),
+  MARKER_TARGET = new THREE.Color('#d5fa64');
 export const Player = memo(function Player({ id }: { id: number }) {
-  const template = useLoader(FBXLoader, SKATER_URL);
+  const template = useLoader(GLTFLoader, SKATER_URL).scene;
   const playerHelmet = useLoader(GLTFLoader, HELMET_PLAYER_URL);
   const goalieHelmet = useLoader(GLTFLoader, HELMET_GOALIE_URL);
   const stickSource = useLoader(GLTFLoader, STICK_URL);
@@ -652,8 +655,10 @@ export const Player = memo(function Player({ id }: { id: number }) {
       !(import.meta.env.DEV && labHooks.active) &&
       (yours || theirs || (watching.passHeld && watching.passTarget === id));
     const marker = ring.current!.material;
-    if (marker instanceof THREE.MeshBasicMaterial)
-      marker.color.set(yours ? '#e84a4a' : theirs ? '#4aa8e8' : '#d5fa64');
+    if (marker instanceof THREE.MeshBasicMaterial) {
+      const want = yours ? MARKER_YOURS : theirs ? MARKER_THEIRS : MARKER_TARGET;
+      if (!marker.color.equals(want)) marker.color.copy(want);
+    }
   });
   return (
     <group ref={group}>

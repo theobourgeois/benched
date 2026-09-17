@@ -13,7 +13,16 @@ const AnimLab = import.meta.env.DEV
   ? lazy(() => import('./ui/AnimLab').then((m) => ({ default: m.AnimLab })))
   : null;
 if (import.meta.env.DEV) {
-  const hooks = { runtime, publish, beginGame, PHYSICS, STICK, resetFeel: () => {} };
+  const hooks = {
+    runtime,
+    publish,
+    beginGame,
+    PHYSICS,
+    STICK,
+    resetFeel: () => {},
+    /** scripts/export-skater.mjs rebuilds the skater GLB through this. */
+    exportSkater: (url: string) => import('./dev/exportSkater').then((m) => m.exportSkater(url)),
+  };
   Object.assign(window, { __BENCHED__: hooks });
   // Saved feel tweaks are applied over the config tables in development only.
   void import('./dev/feel').then((m) => {

@@ -35,10 +35,13 @@ export function supportsPad(pad: Gamepad, layout: ControllerLayout) {
  * `claimed` holds the pads other seats are already using. Two people on one couch must never end
  * up sharing a controller, so a seat only ever sees pads nobody else is holding.
  */
+const NO_VALUES: number[] = [];
 export function pollGamepads(
   layout: ControllerLayout,
   previousIndex?: number,
   claimed: readonly number[] = [],
+  /** Fill the raw axis and button arrays. Only the controller test screen reads them. */
+  detail = false,
 ) {
   const fail = (state: ConnectionState, detail: string) => ({
     pad: null,
@@ -83,8 +86,8 @@ export function pollGamepads(
           ? 'Browser standard layout'
           : 'Xbox compatibility layout'
         : 'Unmapped controller',
-      axes: Array.from(visible.axes),
-      buttons: Array.from(visible.buttons, (b) => b.value || +b.pressed),
+      axes: detail ? Array.from(visible.axes) : NO_VALUES,
+      buttons: detail ? Array.from(visible.buttons, (b) => b.value || +b.pressed) : NO_VALUES,
     } satisfies ControllerStatus,
   };
 }

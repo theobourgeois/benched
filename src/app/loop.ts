@@ -311,7 +311,8 @@ export class GameLoop {
     if (runtime.controller.padActive) runtime.audio.unlock();
     // Menus consume the pad only after it has been read, or a press lands on the stale frame.
     const menuOwnsInput = navigateWithController(runtime.controller);
-    const blocked = !!document.querySelector('[data-block-game-input]');
+    // Only the dev animation lab sets this, so production never walks the document for it.
+    const blocked = import.meta.env.DEV && !!document.querySelector('[data-block-game-input]');
     const gate = (frame: InputFrame) => {
       if (menuOwnsInput) {
         frame.pause = false;

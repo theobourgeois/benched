@@ -2,8 +2,12 @@ import { clamp } from './math';
 import type { GameEvent, MatchState, Phase, Puck, SideState, Skater, Team } from './types';
 import { TEAMS } from './types';
 
-/** Snapshots per second; playback blends between neighbours, so slow motion stays smooth. */
-export const REPLAY_HZ = 60;
+/**
+ * Snapshots per second; playback blends between neighbours, so slow motion stays smooth. Each
+ * snapshot copies the whole match and lives for twenty seconds, so this is the one number that
+ * sets how much long-lived garbage a match makes.
+ */
+export const REPLAY_HZ = 30;
 /** Seconds of play kept for the instant replay. */
 export const REPLAY_SECONDS = 20;
 /** Instant replay opens this far back from the latest moment. */

@@ -152,9 +152,11 @@ link does. `Room` already knows its seats, mode and whether a match is on.
 - `src/dev/feel.ts` applies saved tweaks from localStorage over the config tables in
   development. If physics feels wrong in dev and right in tests, open the feel tuner (backquote
   during play) and reset.
-- `public/models/skater.fbx` is 53 MB and is fetched as soon as the bundle evaluates. It is the
-  reason the game and the room server deploy to different hosts (see README). Do not add
-  assets over 25 MB.
+- The skater is `public/models/skater.glb`, exported from `assets/skater.fbx` by
+  `npm run model:skater` with the dev server running. The export goes through three's own FBX
+  loader in the browser on purpose: the pose code was fitted to the bone frames that loader
+  produces, and a Blender round trip changes them. Do not add assets over 25 MB, and never
+  edit the GLB by hand.
 - `.wrangler/` is the local room server's state and is ignored. Do not commit it.
 - Shell here is zsh: quote globs (`--include='*.ts'`) or they fail as "no matches found".
 - Comments explain why, in prose, and there are no default exports. Strict TypeScript with

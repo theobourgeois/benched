@@ -301,6 +301,9 @@ function bellyDepth(tip: THREE.Vector3, torso: NonNullable<StickReach['torso']>)
 }
 /** How far a rigid stick may rock onto its heel or toe, and the search step for it. */
 const MAX_ROLL = 0.9;
+/** Roll sweep spacing and refinement steps; see the search in placeRigid. */
+const ROLL_SWEEP = 0.1,
+  ROLL_REFINE = 12;
 
 /** Where the top-hand socket may go. */
 export interface StickReach {
@@ -477,17 +480,20 @@ function placeRigid(
       const body = torso ? soft(-clearance(_socket, torso, belt, deep)) : 0;
       return 80 * reach * reach + 8 * body * body + 0.03 * (r - preferred) ** 2;
     };
+    // Every cost() is a full placement, and this runs for every skater every frame, so the
+    // sampling is as coarse as the cost's basins allow: the sweep finds the basin, and the
+    // ternary search settles it to about a milliradian, a couple of millimetres at the tip.
     let best = Infinity;
-    for (let r = -MAX_ROLL; r <= MAX_ROLL + 1e-9; r += 0.06) {
+    for (let r = -MAX_ROLL; r <= MAX_ROLL + 1e-9; r += ROLL_SWEEP) {
       const value = cost(r);
       if (value < best) {
         best = value;
         roll = r;
       }
     }
-    let lo = Math.max(-MAX_ROLL, roll - 0.06),
-      hi = Math.min(MAX_ROLL, roll + 0.06);
-    for (let i = 0; i < 24; i++) {
+    let lo = Math.max(-MAX_ROLL, roll - ROLL_SWEEP),
+      hi = Math.min(MAX_ROLL, roll + ROLL_SWEEP);
+    for (let i = 0; i < ROLL_REFINE; i++) {
       const a = lo + (hi - lo) / 3,
         b = hi - (hi - lo) / 3;
       if (cost(a) < cost(b)) hi = b;

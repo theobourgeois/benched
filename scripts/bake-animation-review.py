@@ -16,7 +16,7 @@ OUT = ROOT / 'artifacts' / 'animation-review'
 clips = json.loads((OUT / 'poses.json').read_text())
 bpy.ops.object.select_all(action='SELECT')
 bpy.ops.object.delete(use_global=False)
-bpy.ops.import_scene.fbx(filepath=str(ROOT / 'public/models/skater.fbx'))
+bpy.ops.import_scene.fbx(filepath=str(ROOT / 'assets/skater.fbx'))
 armature = next(o for o in bpy.data.objects if o.type == 'ARMATURE')
 armature.animation_data_clear()
 # FBX character uses Y-up. The review project uses Blender's Z-up coordinates.

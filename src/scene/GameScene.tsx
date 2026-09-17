@@ -96,8 +96,8 @@ function Puck() {
       p = s.puck;
     mesh.current!.position.set(p.x, p.y, p.z);
     shadow.current!.position.set(p.x, 0.016, p.z);
-    positions.current.unshift(new THREE.Vector3(p.x, p.y, p.z));
-    positions.current.pop();
+    // The oldest vector is reused for the newest position, so the trail never allocates.
+    positions.current.unshift(positions.current.pop()!.set(p.x, p.y, p.z));
     const fast =
       Math.hypot(p.vx, p.vz) > 12 &&
       p.owner === null &&

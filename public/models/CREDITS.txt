@@ -1,6 +1,6 @@
 BENCHED — Model credits
 
-skater.fbx
+skater.glb (exported from assets/skater.fbx by scripts/export-skater.mjs)
 Mixamo character "Ch01" (non-PBR), T-pose, Mixamo humanoid rig (mixamorig12).
 https://www.mixamo.com/
 Characters and animations may be used royalty-free in games.

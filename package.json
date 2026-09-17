@@ -11,6 +11,7 @@
     "test": "npm run lint && vitest run",
     "test:e2e": "playwright test",
     "data:nhl": "node scripts/fetch-nhl.ts",
+    "model:skater": "node scripts/export-skater.mjs",
     "format": "prettier --write src tests *.ts *.json index.html README.md",
     "format:check": "prettier --check src tests *.ts *.json index.html README.md",
     "rooms": "wrangler dev --port 8787 --local",

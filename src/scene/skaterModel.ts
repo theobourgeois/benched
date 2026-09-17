@@ -6,8 +6,12 @@ import { makeNumberTexture } from './textures';
 import { solveTwoBone } from './animationMath';
 import { fitHockeyEquipment, SKATE_LIFT } from './hockeyEquipment';
 
-/** Mixamo-rigged character (see public/models/CREDITS.txt). mixamorig / mixamorig12 both work. */
-export const SKATER_URL = `${import.meta.env.BASE_URL}models/skater.fbx`;
+/**
+ * Mixamo-rigged character (see public/models/CREDITS.txt), exported from assets/skater.fbx by
+ * scripts/export-skater.py with only its diffuse texture and in Mixamo's centimetres. mixamorig
+ * and mixamorig12 bone prefixes both work.
+ */
+export const SKATER_URL = `${import.meta.env.BASE_URL}models/skater.glb`;
 export const HELMET_PLAYER_URL = `${import.meta.env.BASE_URL}models/helmet-player.glb`;
 export const HELMET_GOALIE_URL = `${import.meta.env.BASE_URL}models/helmet-goalie.glb`;
 const HEIGHT = 2;

@@ -19,38 +19,78 @@ function outline(extra = 0) {
   }
   return points;
 }
-function Rail({
-  a,
-  b,
-  y,
-  height,
-  width,
-  color,
-  transparent = false,
-}: {
-  a: THREE.Vector2;
-  b: THREE.Vector2;
-  y: number;
-  height: number;
-  width: number;
-  color: string;
-  transparent?: boolean;
-}) {
+/** The rails around the boards, bottom to top: kickplate, dasher, cap rail and the glass. */
+const RAILS = [
+  { y: 0.12, height: 0.23, width: 0.26, color: '#debd43', transparent: false },
+  { y: 0.55, height: 1.1, width: 0.22, color: '#e1e9e5', transparent: false },
+  { y: 1.13, height: 0.1, width: 0.29, color: '#4b6b70', transparent: false },
+  { y: 1.85, height: 1.35, width: 0.05, color: '#9bd5dc', transparent: true },
+];
+/** Every third outline point carries a glass stanchion. */
+const STANCHION_EVERY = 3;
+/**
+ * The boards are one instanced mesh per rail rather than a mesh per segment, so the whole
+ * dasher system is five draw calls. Nothing here moves, so the matrices are set once.
+ */
+function Rails({ points }: { points: THREE.Vector2[] }) {
+  const rails = useRef<(THREE.InstancedMesh | null)[]>([]),
+    stanchions = useRef<THREE.InstancedMesh>(null);
+  const posts = useMemo(() => points.filter((_, i) => i % STANCHION_EVERY === 0), [points]);
+  useLayoutEffect(() => {
+    const dummy = new THREE.Object3D();
+    RAILS.forEach((rail, r) => {
+      const mesh = rails.current[r];
+      if (!mesh) return;
+      points.forEach((a, i) => {
+        const b = points[(i + 1) % points.length];
+        dummy.position.set((a.x + b.x) / 2, rail.y, (a.y + b.y) / 2);
+        dummy.rotation.set(0, -Math.atan2(b.y - a.y, b.x - a.x), 0);
+        dummy.scale.set(a.distanceTo(b) + 0.06, 1, 1);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(i, dummy.matrix);
+      });
+      mesh.instanceMatrix.needsUpdate = true;
+      mesh.computeBoundingSphere();
+    });
+    const post = stanchions.current;
+    if (post) {
+      dummy.rotation.set(0, 0, 0);
+      dummy.scale.set(1, 1, 1);
+      posts.forEach((a, i) => {
+        dummy.position.set(a.x, 1.8, a.y);
+        dummy.updateMatrix();
+        post.setMatrixAt(i, dummy.matrix);
+      });
+      post.instanceMatrix.needsUpdate = true;
+      post.computeBoundingSphere();
+    }
+  }, [points, posts]);
   return (
-    <mesh
-      position={[(a.x + b.x) / 2, y, (a.y + b.y) / 2]}
-      rotation={[0, -Math.atan2(b.y - a.y, b.x - a.x), 0]}
-      receiveShadow
-    >
-      <boxGeometry args={[a.distanceTo(b) + 0.06, height, width]} />
-      <meshStandardMaterial
-        color={color}
-        roughness={transparent ? 0.15 : 0.6}
-        transparent={transparent}
-        opacity={transparent ? 0.12 : 1}
-        depthWrite={!transparent}
-      />
-    </mesh>
+    <>
+      {RAILS.map((rail, r) => (
+        <instancedMesh
+          key={r}
+          ref={(mesh) => {
+            rails.current[r] = mesh;
+          }}
+          args={[undefined, undefined, points.length]}
+          receiveShadow
+        >
+          <boxGeometry args={[1, rail.height, rail.width]} />
+          <meshStandardMaterial
+            color={rail.color}
+            roughness={rail.transparent ? 0.15 : 0.6}
+            transparent={rail.transparent}
+            opacity={rail.transparent ? 0.12 : 1}
+            depthWrite={!rail.transparent}
+          />
+        </instancedMesh>
+      ))}
+      <instancedMesh ref={stanchions} args={[undefined, undefined, posts.length]}>
+        <boxGeometry args={[0.045, 1.45, 0.045]} />
+        <meshStandardMaterial color="#72939a" />
+      </instancedMesh>
+    </>
   );
 }
 function Crowd() {
@@ -183,6 +223,7 @@ function Goal({ sign }: { sign: number }) {
 export const Arena = memo(function Arena({ iceLogo }: { iceLogo: string }) {
   const boards = useMemo(makeBoardTexture, []);
   const iceFallback = useMemo(() => makeIceTexture(), []);
+  useEffect(() => () => iceFallback.dispose(), [iceFallback]);
   const points = useMemo(() => outline(), []);
   const shape = useMemo(() => new THREE.Shape(points), [points]);
   return (
@@ -200,23 +241,7 @@ export const Arena = memo(function Arena({ iceLogo }: { iceLogo: string }) {
       </Suspense>
       {/* Corner masks cover the rectangular ice texture outside the rounded playing surface. */}
       {[-1, 1].flatMap((x) => [-1, 1].map((z) => <CornerMask key={`${x}:${z}`} x={x} z={z} />))}
-      {points.map((a, i) => {
-        const b = points[(i + 1) % points.length];
-        return (
-          <group key={i}>
-            <Rail a={a} b={b} y={0.55} height={1.1} width={0.22} color="#e1e9e5" />
-            <Rail a={a} b={b} y={0.12} height={0.23} width={0.26} color="#debd43" />
-            <Rail a={a} b={b} y={1.13} height={0.1} width={0.29} color="#4b6b70" />
-            <Rail a={a} b={b} y={1.85} height={1.35} width={0.05} color="#9bd5dc" transparent />
-            {i % 3 === 0 && (
-              <mesh position={[a.x, 1.8, a.y]}>
-                <boxGeometry args={[0.045, 1.45, 0.045]} />
-                <meshStandardMaterial color="#72939a" />
-              </mesh>
-            )}
-          </group>
-        );
-      })}
+      <Rails points={points} />
       {[-1, 1].map((z) => (
         <mesh key={z} position={[0, 0.66, z * 12.87]} rotation={[0, z < 0 ? 0 : Math.PI, 0]}>
           <planeGeometry args={[43, 0.75]} />

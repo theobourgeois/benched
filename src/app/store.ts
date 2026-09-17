@@ -73,8 +73,8 @@ function loadSettings(): Settings {
 }
 if (typeof window !== 'undefined') {
   const unlock = () => runtime.audio.unlock();
-  window.addEventListener('pointerdown', unlock);
-  window.addEventListener('keydown', unlock);
+  window.addEventListener('pointerdown', unlock, { once: true });
+  window.addEventListener('keydown', unlock, { once: true });
 }
 let revision = 0;
 const listeners = new Set<() => void>();

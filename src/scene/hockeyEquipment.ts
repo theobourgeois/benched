@@ -8,6 +8,21 @@ export const SKATE_LIFT = 0.055;
 const _up = new THREE.Vector3(0, 1, 0),
   _axis = new THREE.Vector3();
 
+/**
+ * Every skater wears the same gear, so each piece's shape is built once and shared by all twelve
+ * rigs; a match then uploads a couple of dozen buffers rather than a few hundred. They are kept
+ * for the life of the page, which is a few kilobytes.
+ */
+const shared = new Map<string, THREE.BufferGeometry>();
+function geometry(key: string, build: () => THREE.BufferGeometry) {
+  let found = shared.get(key);
+  if (!found) {
+    found = build();
+    shared.set(key, found);
+  }
+  return found;
+}
+
 /** Lightweight fitted equipment follows the original rig, including its animated finger joints. */
 export function fitHockeyEquipment(
   bones: Record<BoneName, THREE.Bone>,
@@ -24,7 +39,6 @@ export function fitHockeyEquipment(
     metalness: 0.8,
     roughness: 0.24,
   });
-  const geometries: THREE.BufferGeometry[] = [];
   const pads: Partial<Record<Side, THREE.Group>> = {};
   function pad(
     parent: THREE.Object3D,
@@ -33,15 +47,18 @@ export function fitHockeyEquipment(
     material: THREE.Material,
     radius = 0.012,
   ) {
-    const geometry = new RoundedBoxGeometry(
-      size[0] / scale,
-      size[1] / scale,
-      size[2] / scale,
-      2,
-      radius / scale,
+    const box = geometry(
+      `pad:${size.join(',')}:${radius}:${scale}`,
+      () =>
+        new RoundedBoxGeometry(
+          size[0] / scale,
+          size[1] / scale,
+          size[2] / scale,
+          2,
+          radius / scale,
+        ),
     );
-    geometries.push(geometry);
-    const mesh = new THREE.Mesh(geometry, material);
+    const mesh = new THREE.Mesh(box, material);
     mesh.position.set(position[0] / scale, position[1] / scale, position[2] / scale);
     mesh.castShadow = true;
     parent.add(mesh);
@@ -52,8 +69,10 @@ export function fitHockeyEquipment(
     // The cuff rides the forearm, flaring toward the elbow, so wrist deviation cannot swing it off
     // the arm like a loose plate.
     const wrist = hand.position;
-    const cuffGeometry = new THREE.CylinderGeometry(0.045 / scale, 0.055 / scale, 0.11 / scale, 16);
-    geometries.push(cuffGeometry);
+    const cuffGeometry = geometry(
+      `cuff:${scale}`,
+      () => new THREE.CylinderGeometry(0.045 / scale, 0.055 / scale, 0.11 / scale, 16),
+    );
     const cuff = new THREE.Mesh(cuffGeometry, shell);
     cuff.castShadow = true;
     _axis.copy(wrist).normalize();
@@ -79,13 +98,16 @@ export function fitHockeyEquipment(
       // Arm pads and shoulder caps: the silhouette a goalie in gear has over a skater.
       const upper = bones[`upperArm${side}`],
         elbow = bones[`forearm${side}`].position;
-      const armGeometry = new THREE.CylinderGeometry(
-        0.085 / scale,
-        0.072 / scale,
-        (elbow.length() * scale * 0.78) / scale,
-        14,
+      const armGeometry = geometry(
+        `arm:${elbow.length()}:${scale}`,
+        () =>
+          new THREE.CylinderGeometry(
+            0.085 / scale,
+            0.072 / scale,
+            (elbow.length() * scale * 0.78) / scale,
+            14,
+          ),
       );
-      geometries.push(armGeometry);
       const arm = new THREE.Mesh(armGeometry, padding);
       arm.castShadow = true;
       _axis.copy(elbow).normalize();
@@ -104,22 +126,23 @@ export function fitHockeyEquipment(
         outline.quadraticCurveTo(-0.025, 0.19, -0.05, 0.145);
         outline.quadraticCurveTo(-0.14, 0.13, -0.13, 0.06);
         outline.quadraticCurveTo(-0.13, 0, -0.05, -0.035);
-        const geometry = new THREE.ExtrudeGeometry(outline, {
-          depth: 0.04,
-          bevelEnabled: true,
-          bevelSize: 0.012,
-          bevelThickness: 0.012,
-          bevelSegments: 3,
-          curveSegments: 12,
+        const mittGeometry = geometry(`mitt:${scale}`, () => {
+          const built = new THREE.ExtrudeGeometry(outline, {
+            depth: 0.04,
+            bevelEnabled: true,
+            bevelSize: 0.012,
+            bevelThickness: 0.012,
+            bevelSegments: 3,
+            curveSegments: 12,
+          });
+          built.translate(0, 0, -0.02);
+          built.scale(1 / scale, 1 / scale, 1 / scale);
+          return built;
         });
-        geometry.translate(0, 0, -0.02);
-        geometry.scale(1 / scale, 1 / scale, 1 / scale);
-        geometries.push(geometry);
-        const mitt = new THREE.Mesh(geometry, shell);
+        const mitt = new THREE.Mesh(mittGeometry, shell);
         mitt.castShadow = true;
         hand.add(mitt);
-        const pocketGeometry = new THREE.SphereGeometry(1, 20, 12);
-        geometries.push(pocketGeometry);
+        const pocketGeometry = geometry('pocket', () => new THREE.SphereGeometry(1, 20, 12));
         const pocket = new THREE.Mesh(pocketGeometry, padding);
         pocket.scale.set(0.075 / scale, 0.078 / scale, 0.012 / scale);
         pocket.position.set(0, 0.09 / scale, 0.032 / scale);
@@ -150,8 +173,7 @@ export function fitHockeyEquipment(
   }
   return {
     pads,
-    dispose() {
-      for (const geometry of geometries) geometry.dispose();
-    },
+    /** The shapes are shared and kept; the materials are the caller's to dispose. */
+    dispose() {},
   };
 }

@@ -97,7 +97,7 @@ export class Controller {
    */
   claimed: readonly number[] = [];
   refresh = () => {
-    this.status = pollGamepads(this.layout, this.lastPad?.index, this.claimed).status;
+    this.status = pollGamepads(this.layout, this.lastPad?.index, this.claimed, true).status;
   };
   onDisconnect?: () => void;
   private keyDown = (e: KeyboardEvent) => {

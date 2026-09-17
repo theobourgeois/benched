@@ -68,10 +68,9 @@ npm run rooms:deploy   # deploy them to your own Cloudflare account
 
 ## Deploying
 
-The game and the rooms are hosted separately, and it is the skater model that splits them: at
-53 MB it is over the 25 MiB per-file limit on Cloudflare's static hosting, and well under the
-100 MB GitHub allows. Most of that size is textures embedded in the FBX; converting the model
-would let both live on one origin.
+The game and the rooms are hosted separately. The split dates from when the skater model was a
+53 MB FBX, over Cloudflare's 25 MiB per-file limit for static hosting; it is a 3 MB GLB now, so
+nothing stops both from living on one Cloudflare origin if that is ever simpler.
 
 - **The game** goes to GitHub Pages. Pushing `main` builds it and publishes it — see
   `.github/workflows/pages.yml`. A project page is served from a subdirectory, so the workflow
@@ -190,6 +189,7 @@ workers/
   room.ts          The room: a Durable Object that seats two players and relays bytes
 scripts/
   fetch-nhl.ts     Refreshes the NHL snapshot and logos (npm run data:nhl)
+  export-skater.mjs  Rebuilds the skater GLB from assets/skater.fbx (npm run model:skater)
   check-imports.mjs  Enforces which folders may import which (npm run lint)
 ```
 
@@ -199,7 +199,7 @@ Gameplay physics is purpose-built. Human and CPU skaters share bounded forward a
 
 See [the skating and contact playtest notes](docs/skating-playtest.md) for reproduced problems, before/after measurements, and validation scope.
 
-Skaters share the rigged Mixamo character `public/models/skater.fbx` (see [model credits](public/models/CREDITS.txt)). Hockey motion tracks drive its existing skeleton, with calibrated limb IK, a fixed-length stick, fitted gloves/skate runners, and physics ragdolls. See the [animation rework and review workflow](docs/animation-rework.md). The rink, crowd, textures and particles are generated in code. NHL rosters, ratings and logos are a local snapshot in `src/data/leagues` and `public/logos`, refreshed with `npm run data:nhl`. Puck strikes and skating use locally bundled field recordings; arena signals and impact accents are synthesized. See [sound credits and licenses](public/audio/CREDITS.txt). Barlow fonts are bundled locally under their SIL Open Font Licenses in `public/fonts`. Runtime has no remote asset or font requests.
+Skaters share the rigged Mixamo character `public/models/skater.glb`, exported from `assets/skater.fbx` with `npm run model:skater` (see [model credits](public/models/CREDITS.txt)). Hockey motion tracks drive its existing skeleton, with calibrated limb IK, a fixed-length stick, fitted gloves/skate runners, and physics ragdolls. See the [animation rework and review workflow](docs/animation-rework.md). The rink, crowd, textures and particles are generated in code. NHL rosters, ratings and logos are a local snapshot in `src/data/leagues` and `public/logos`, refreshed with `npm run data:nhl`. Puck strikes and skating use locally bundled field recordings; arena signals and impact accents are synthesized. See [sound credits and licenses](public/audio/CREDITS.txt). Barlow fonts are bundled locally under their SIL Open Font Licenses in `public/fonts`. Runtime has no remote asset or font requests.
 
 ## Validation
 

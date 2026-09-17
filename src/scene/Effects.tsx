@@ -14,6 +14,8 @@ interface Particle {
   maxLife: number;
 }
 /** A fixed particle pool keeps skate spray and impact bursts allocation-free during play. */
+/** Calls that kick up ice. */
+const SPRAYED = new Set(['shot', 'hit', 'save', 'post']);
 export function IceSpray() {
   const mesh = useRef<THREE.InstancedMesh>(null),
     cursor = useRef(0),
@@ -32,7 +34,8 @@ export function IceSpray() {
     })),
   );
   const dummy = useRef(new THREE.Object3D()),
-    spawnTime = useRef(0);
+    spawnTime = useRef(0),
+    wasAlive = useRef(false);
   const spawn = (x: number, z: number, vx: number, vz: number, force: number) => {
     const p = pool.current[cursor.current++ % pool.current.length];
     p.x = x;
@@ -59,7 +62,7 @@ export function IceSpray() {
     }
     for (const event of s.events)
       if (event.id > lastEvent.current) {
-        if (['shot', 'hit', 'save', 'post'].includes(event.type)) {
+        if (SPRAYED.has(event.type)) {
           const burst = event.type === 'hit' ? (event.power >= 0.5 ? 32 : 18) : 12;
           const force = event.type === 'hit' ? 6 + event.power * 8 : 6;
           const x = event.x ?? s.puck.x,
@@ -68,6 +71,10 @@ export function IceSpray() {
         }
         lastEvent.current = event.id;
       }
+    // A dead pool has nothing to move; the last upload already shrank every particle to nothing.
+    const alive = pool.current.some((p) => p.life > 0);
+    if (!alive && !wasAlive.current) return;
+    wasAlive.current = alive;
     pool.current.forEach((p, i) => {
       if (s.phase !== 'paused') {
         p.life = Math.max(0, p.life - dt);
