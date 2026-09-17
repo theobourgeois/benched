@@ -45,6 +45,24 @@ export function useDevice() {
 
 const dispatch = (action: NavAction) => layers.at(-1)?.current(action);
 
+/**
+ * Seat two's presses, for the few screens that want them (a second player joining the matchup).
+ * A separate stack rather than a flag on `useNav`: every other screen belongs to seat one, and
+ * a couch guest thumbing their pad should not be able to walk it through the menus.
+ */
+const seatTwoLayers: { current: NavHandler }[] = [];
+export function useSeatTwoNav(handler: NavHandler) {
+  const latest = useRef(handler);
+  latest.current = handler;
+  useEffect(() => {
+    const layer = { current: (action: NavAction) => latest.current(action) };
+    seatTwoLayers.push(layer);
+    return () => {
+      seatTwoLayers.splice(seatTwoLayers.indexOf(layer), 1);
+    };
+  }, []);
+}
+
 /** Wraps a list index; skips entries the caller marks unavailable. */
 export function step(index: number, dir: number, count: number, skip?: (i: number) => boolean) {
   let next = index;
@@ -61,6 +79,13 @@ export function navigateWithController(controller: Controller) {
   if (!navActive()) return false;
   for (const button of MENU_BUTTONS) if (controller.ui[button]) dispatch(button);
   return true;
+}
+
+/** Seat two's half of the menus. Only heard while the screen on top also listens for it. */
+export function navigateSeatTwo(controller: Controller) {
+  const top = seatTwoLayers.at(-1);
+  if (!top || !navActive()) return;
+  for (const button of MENU_BUTTONS) if (controller.ui[button]) top.current(button);
 }
 
 const KEYS: Record<string, NavAction> = {

@@ -7,7 +7,7 @@ import type { InputFrame, MatchState, Phase, SideInputs, Team } from '../game/ty
 import type { Controller } from '../input/controller';
 import { screenInputToRink } from '../input/coordinates';
 import { mergeEdges, noEdges } from '../input/frames';
-import { navigateWithController } from '../input/menuNavigation';
+import { navigateSeatTwo, navigateWithController } from '../input/menuNavigation';
 import { labHooks } from '../scene/animationReview';
 import { askToLeave } from './online';
 import {
@@ -315,6 +315,8 @@ export class GameLoop {
     if (runtime.controller.padActive) runtime.audio.unlock();
     // Menus consume the pad only after it has been read, or a press lands on the stale frame.
     const menuOwnsInput = navigateWithController(runtime.controller);
+    // A couch guest joins from their own pad. Online, seat two is nobody.
+    if (menuOwnsInput && !net) navigateSeatTwo(runtime.controllerTwo);
     // Only the dev animation lab sets this, so production never walks the document for it.
     const blocked = import.meta.env.DEV && !!document.querySelector('[data-block-game-input]');
     const gate = (frame: InputFrame) => {

@@ -1,5 +1,5 @@
-import { Check, Copy, Gamepad2, Loader2 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { Check, ChevronLeft, ChevronRight, Copy, Gamepad2, Loader2 } from 'lucide-react';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import {
   clubByKey,
   cycleClub,
@@ -66,7 +66,14 @@ function loadQuickMode(): QuickMode {
     return 'any';
   }
 }
-const quickModeLabel = (mode: QuickMode) => (mode === 'any' ? 'Any' : modeInfo(mode).format);
+const quickModeLabel = (mode: QuickMode) =>
+  mode === 'any' ? 'Any mode' : mode === 'shootout' ? 'Shootout' : modeInfo(mode).format;
+
+/** The landing's fixed rows; open games follow them. */
+const ROW_QUICK = 0;
+const ROW_PRIVATE = 1;
+const ROW_CODE = 2;
+const FIXED_ROWS = 3;
 
 export function OnlineScreen({ onBack, join }: { onBack: () => void; join?: string }) {
   const { net, quickJoin } = useGame();
@@ -108,9 +115,10 @@ export function OnlineScreen({ onBack, join }: { onBack: () => void; join?: stri
 }
 
 /**
- * Before a room. Quick play first: the oldest open game, or a warm-up while you wait to be one.
- * Under it, the open games by name for anyone who would rather pick. A private game and a typed
- * code are still here for playing with somebody in particular.
+ * Before a room: a list, like the main menu. Quick play first (the oldest open game, or a warm-up
+ * while you wait to be one), with its format as a value you step on the row. Then a private game
+ * or a typed code for playing with somebody in particular, and the open games by name under
+ * them for anyone who would rather pick.
  */
 function Landing({
   code,
@@ -132,7 +140,7 @@ function Landing({
   const [finding, setFinding] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const rooms = directory?.rooms ?? [];
-  const count = rooms.length + 1;
+  const count = FIXED_ROWS + rooms.length;
   const at = Math.min(index, count - 1);
 
   const go = async (room?: string) => {
@@ -143,11 +151,15 @@ function Landing({
     setFinding(false);
     if (!went) setNotice('That game filled up. Pick another, or quick play.');
   };
-  const select = () => (at === 0 ? void go() : void go(rooms[at - 1].code));
   const createPrivate = () => onJoin(roomCode());
   const join = () => code.length === 4 && onJoin(code);
-  const cycleMode = () => {
-    const next = QUICK_MODES[(QUICK_MODES.indexOf(mode) + 1) % QUICK_MODES.length];
+  const typeCode = () => {
+    setIndex(ROW_CODE);
+    field.current?.focus();
+  };
+  const stepMode = (dir: 1 | -1) => {
+    const next =
+      QUICK_MODES[(QUICK_MODES.indexOf(mode) + dir + QUICK_MODES.length) % QUICK_MODES.length];
     setMode(next);
     try {
       localStorage.setItem(QUICK_MODE_KEY, next);
@@ -155,51 +167,98 @@ function Landing({
       // Nothing to remember it with; the pick still holds for the screen.
     }
   };
+  const select = (row = at) => {
+    if (row === ROW_QUICK) return void go();
+    if (row === ROW_PRIVATE) return createPrivate();
+    if (row === ROW_CODE) return code.length === 4 ? join() : typeCode();
+    void go(rooms[row - FIXED_ROWS].code);
+  };
   useNav((a) => {
     if (a === 'back') return onBack();
     if (a === 'confirm') return select();
-    if (a === 'x') return cycleMode();
-    if (a === 'y') return createPrivate();
-    if (a === 'lb') return field.current?.focus();
+    if ((a === 'left' || a === 'right') && at === ROW_QUICK) return stepMode(a === 'left' ? -1 : 1);
     if (a === 'up' || a === 'down') setIndex(step(at, a === 'up' ? -1 : 1, count));
   });
+  // Typing in the field is outside the menu layer; the arrows and Escape hand the pad back.
+  const fieldKeys = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') return join();
+    if (e.key === 'Escape' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      field.current?.blur();
+      if (e.key !== 'Escape') setIndex(step(ROW_CODE, e.key === 'ArrowUp' ? -1 : 1, count));
+    }
+  };
+
   const live = directory?.connected ?? false;
+  const status = !live
+    ? 'Connecting…'
+    : rooms.length
+      ? `${directory!.browsing} online · ${rooms.length} waiting · ${directory!.playing} playing`
+      : `${directory!.browsing} online · ${directory!.playing} playing · nobody waiting, you warm up against the AI`;
   return (
     <div className="screen online-screen">
       <div className="stage-frame narrow">
-        <TitleBar crumb="Main Menu" title="Play Online">
-          <button
-            className="cpu-chip"
-            onClick={cycleMode}
-            aria-label={`Mode: ${quickModeLabel(mode)}`}
-          >
-            <Glyph k="x" />
-            <span>Mode</span>
-            <strong>{quickModeLabel(mode)}</strong>
-          </button>
-        </TitleBar>
+        <TitleBar crumb="Main Menu" title="Online" />
         <div className="plate online-plate">
-          <p className="online-count" role="status">
-            {directory && live ? (
-              <>
-                <b>{directory.browsing}</b> here · <b>{directory.waiting}</b> waiting ·{' '}
-                <b>{directory.playing}</b> playing
-              </>
-            ) : (
-              'Reaching the directory…'
-            )}
-          </p>
-          <nav className="menu-list online-list" aria-label="Games">
-            <MenuItem focused={at === 0} onFocus={() => setIndex(0)} onSelect={select}>
-              {finding ? 'Finding a game…' : 'Quick play'}
-              {finding && <Loader2 className="spin" size={20} aria-hidden="true" />}
+          <nav className="menu-list online-list" aria-label="Online">
+            <div className="menu-row">
+              <MenuItem
+                focused={at === ROW_QUICK}
+                onFocus={() => setIndex(ROW_QUICK)}
+                onSelect={() => select(ROW_QUICK)}
+              >
+                {finding ? 'Finding a game…' : 'Quick play'}
+                {finding && <Loader2 className="spin" size={20} aria-hidden="true" />}
+              </MenuItem>
+              <span className="row-value" data-focused={at === ROW_QUICK || undefined}>
+                <button tabIndex={-1} aria-label="Previous mode" onClick={() => stepMode(-1)}>
+                  <ChevronLeft size={20} />
+                </button>
+                <strong aria-label={`Mode: ${quickModeLabel(mode)}`}>{quickModeLabel(mode)}</strong>
+                <button tabIndex={-1} aria-label="Next mode" onClick={() => stepMode(1)}>
+                  <ChevronRight size={20} />
+                </button>
+              </span>
+            </div>
+            <MenuItem
+              focused={at === ROW_PRIVATE}
+              onFocus={() => setIndex(ROW_PRIVATE)}
+              onSelect={() => select(ROW_PRIVATE)}
+            >
+              Create private game
             </MenuItem>
+            <div className="menu-row">
+              <MenuItem
+                focused={at === ROW_CODE}
+                onFocus={() => setIndex(ROW_CODE)}
+                onSelect={() => select(ROW_CODE)}
+              >
+                Join with a code
+              </MenuItem>
+              <span className="row-value" data-focused={at === ROW_CODE || undefined}>
+                <input
+                  ref={field}
+                  className="code-field"
+                  value={code}
+                  inputMode="text"
+                  autoComplete="off"
+                  spellCheck={false}
+                  maxLength={4}
+                  placeholder="CODE"
+                  aria-label="Room code"
+                  onFocus={() => setIndex(ROW_CODE)}
+                  onChange={(e) => setCode(normaliseCode(e.target.value))}
+                  onKeyDown={fieldKeys}
+                />
+              </span>
+            </div>
+            {rooms.length > 0 && <h2 className="online-heading">Open games</h2>}
             {rooms.map((room, i) => (
               <MenuItem
                 key={room.code}
-                focused={at === i + 1}
-                onFocus={() => setIndex(i + 1)}
-                onSelect={() => void go(room.code)}
+                focused={at === FIXED_ROWS + i}
+                onFocus={() => setIndex(FIXED_ROWS + i)}
+                onSelect={() => select(FIXED_ROWS + i)}
                 className="online-room-item"
               >
                 <span>{room.host}</span>
@@ -209,46 +268,18 @@ function Landing({
               </MenuItem>
             ))}
           </nav>
-          {rooms.length === 0 && (
-            <p className="online-lede">
-              Nobody is waiting right now. Quick play puts you on the ice against the AI while you
-              wait, and asks before anyone joins.
-            </p>
-          )}
+          <p className="online-count" role="status">
+            {status}
+          </p>
           {notice && <p className="room-notice">{notice}</p>}
-          <div className="online-join">
-            <label htmlFor="room-code">Join with a code</label>
-            <div>
-              <input
-                id="room-code"
-                ref={field}
-                className="code-field"
-                value={code}
-                inputMode="text"
-                autoComplete="off"
-                spellCheck={false}
-                maxLength={4}
-                placeholder="7K2M"
-                aria-label="Room code"
-                onChange={(e) => setCode(normaliseCode(e.target.value))}
-                onKeyDown={(e) => e.key === 'Enter' && join()}
-              />
-              <button className="ghost-button" onClick={join} disabled={code.length !== 4}>
-                Join
-              </button>
-              <button className="ghost-button" onClick={createPrivate}>
-                Create private game
-              </button>
-            </div>
-          </div>
         </div>
       </div>
       <Prompts
         items={[
-          { k: 'confirm', label: at === 0 ? 'Quick play' : 'Join', onClick: select },
-          { k: 'x', label: 'Mode', onClick: cycleMode },
-          { k: 'y', label: 'Private game', onClick: createPrivate },
-          { k: 'lb', label: 'Enter a code', onClick: () => field.current?.focus() },
+          { k: 'confirm', label: 'Select', onClick: () => select() },
+          ...(at === ROW_QUICK
+            ? [{ k: 'leftright' as const, label: 'Mode', onClick: () => stepMode(1) }]
+            : []),
           { k: 'back', label: 'Back', onClick: onBack },
         ]}
       />

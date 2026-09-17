@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronUp, Gamepad2, Keyboard } from 'lucide-react';
+import { ChevronDown, ChevronUp, Gamepad2, Keyboard, X } from 'lucide-react';
 import { useState, type CSSProperties, type Dispatch, type SetStateAction } from 'react';
 import {
   cycleClub,
@@ -11,18 +11,24 @@ import {
   type Club,
 } from '../game/clubs';
 import { DIFFICULTIES, difficultyInfo } from '../game/difficulty';
-import { modeInfo } from '../game/modes';
+import { MODES, modeInfo } from '../game/modes';
 import { beginGame, updateSettings, useGame } from '../app/store';
 import type { GameMode, Jersey, Team } from '../game/types';
-import { useDevice, useNav } from '../input/menuNavigation';
+import { useDevice, useNav, useSeatTwoNav } from '../input/menuNavigation';
 import { Glyph, JerseyIcon, Prompts, TeamLogo, TitleBar } from './kit';
 
 /** Pick a club, then ready up. Once ready, up and down swap your sweater. */
 type Stage = 'team' | 'ready';
 const SIDE = ['home', 'away'] as const;
+/** What the bumpers step through. Free skate is its own menu entry, not a format. */
+const FORMATS = MODES.filter((m) => !m.practice);
+// Written in sentence case and uppercased by CSS, so the tabs read as '3 on 3' to a screen reader.
+const formatLabel = (mode: GameMode) =>
+  mode === 'shootout' ? 'Shootout' : modeInfo(mode).format.toLowerCase();
 
 export function TeamSelect({
   mode,
+  setMode,
   teams,
   setTeams,
   side,
@@ -30,9 +36,11 @@ export function TeamSelect({
   jersey,
   setJersey,
   guests = false,
+  setGuests,
   onBack,
 }: {
   mode: GameMode;
+  setMode: (mode: GameMode) => void;
   teams: [Club, Club];
   setTeams: Dispatch<SetStateAction<[Club, Club]>>;
   side: Team;
@@ -41,6 +49,7 @@ export function TeamSelect({
   setJersey: Dispatch<SetStateAction<Jersey>>;
   /** A second person is taking the other bench on this screen. */
   guests?: boolean;
+  setGuests: (guests: boolean) => void;
   onBack: () => void;
 }) {
   const { settings, controllerTwo } = useGame();
@@ -87,12 +96,27 @@ export function TeamSelect({
   const play = () => ready && beginGame(side, mode, teams, jerseys, guests);
   const advance = () => (stage === 'ready' ? play() : ready && setStage('ready'));
   const unready = () => setStage('team');
+  const stepFormat = (dir: 1 | -1) => {
+    const i = FORMATS.findIndex((m) => m.id === mode);
+    setMode(FORMATS[(i + dir + FORMATS.length) % FORMATS.length].id);
+  };
+  // Practice is one skater's rink, so there is no second bench to take.
+  const join = () => !info.practice && setGuests(true);
+  const drop = () => setGuests(false);
+
+  // Seat two only ever joins or leaves. The matchup itself is seat one's to drive.
+  useSeatTwoNav((a) => {
+    if (a === 'confirm' || a === 'start') join();
+    else if (a === 'back') drop();
+  });
 
   useNav((a) => {
     if (a === 'back') return stage === 'ready' ? unready() : onBack();
     if (a === 'confirm') return advance();
     if (a === 'start') return play();
     if (a === 'x') return guests ? undefined : nextDifficulty();
+    if (a === 'lb' || a === 'rb')
+      return info.practice ? undefined : stepFormat(a === 'lb' ? -1 : 1);
     if (stage === 'ready') {
       if (a === 'up' || a === 'down') flip();
       return;
@@ -116,32 +140,73 @@ export function TeamSelect({
   return (
     <div className="screen team-select" data-stage={stage}>
       <div className="stage-frame">
-        <TitleBar crumb={info.eyebrow} title={info.practice ? 'Select Team' : 'Select Teams'}>
-          {guests ? (
-            // Both benches skate All-Star with two people on, so there is no difficulty to set.
-            <span
-              className="cpu-chip"
-              data-waiting={!secondPad || undefined}
-              aria-label={
-                secondPad ? 'Player two controller ready' : 'Waiting for a second controller'
-              }
-            >
-              <Gamepad2 size={14} aria-hidden="true" />
-              <span>P2</span>
-              <strong>{secondPad ? 'Ready' : 'Connect'}</strong>
-            </span>
-          ) : (
-            <button
-              className="cpu-chip"
-              onClick={nextDifficulty}
-              aria-label={`CPU difficulty: ${difficulty.label}`}
-            >
-              <Glyph k="x" />
-              <span>CPU</span>
-              <strong>{difficulty.label}</strong>
-            </button>
-          )}
+        <TitleBar
+          crumb={info.practice ? 'Free Skate' : 'Play Now'}
+          title={info.practice ? 'Select Team' : 'Select Teams'}
+        >
+          <div className="title-chips">
+            {!guests && (
+              <button
+                className="cpu-chip"
+                onClick={nextDifficulty}
+                aria-label={`CPU difficulty: ${difficulty.label}`}
+              >
+                <Glyph k="x" />
+                <span>CPU</span>
+                <strong>{difficulty.label}</strong>
+              </button>
+            )}
+            {guests ? (
+              // Both benches skate All-Star with two people on, so there is no difficulty to set.
+              <button
+                className="cpu-chip"
+                data-waiting={!secondPad || undefined}
+                onClick={drop}
+                aria-label={
+                  secondPad
+                    ? 'Player two ready. Remove player two'
+                    : 'Waiting for a second controller. Remove player two'
+                }
+              >
+                <Gamepad2 size={14} aria-hidden="true" />
+                <span>P2</span>
+                <strong>{secondPad ? 'Ready' : 'Connect'}</strong>
+                <X size={15} aria-hidden="true" />
+              </button>
+            ) : (
+              !info.practice && (
+                <button className="cpu-chip join-chip" onClick={join} aria-label="Add player two">
+                  <Glyph k="confirm" device="pad" />
+                  <span>P2</span>
+                  <strong>Join</strong>
+                </button>
+              )
+            )}
+          </div>
         </TitleBar>
+        {!info.practice && (
+          <div className="format-strip">
+            <button tabIndex={-1} aria-label="Previous format" onClick={() => stepFormat(-1)}>
+              <Glyph k="lb" />
+            </button>
+            <div className="format-tabs" role="tablist" aria-label="Format">
+              {FORMATS.map((m) => (
+                <button
+                  key={m.id}
+                  role="tab"
+                  aria-selected={m.id === mode}
+                  onClick={() => setMode(m.id)}
+                >
+                  {formatLabel(m.id)}
+                </button>
+              ))}
+            </div>
+            <button tabIndex={-1} aria-label="Next format" onClick={() => stepFormat(1)}>
+              <Glyph k="rb" />
+            </button>
+            <span className="format-duration">{info.duration}</span>
+          </div>
+        )}
         <div className="plate matchup">
           {([1, 0] as Team[]).map((t) => (
             <TeamPanel
@@ -189,6 +254,7 @@ export function TeamSelect({
                 { k: 'confirm', label: 'Ready', onClick: advance },
                 { k: 'leftright', label: 'Side' },
                 { k: 'updown', label: 'Team' },
+                ...(info.practice ? [] : [{ k: 'bumpers' as const, label: 'Format' }]),
                 { k: 'y', label: 'Random', onClick: random },
                 { k: 'back', label: 'Back', onClick: onBack },
               ]

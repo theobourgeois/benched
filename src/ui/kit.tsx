@@ -4,7 +4,7 @@ import type { Club, Uniform } from '../game/clubs';
 import { useGame } from '../app/store';
 import { useDevice, type Device, type NavAction } from '../input/menuNavigation';
 
-export type PromptKey = NavAction | 'updown' | 'leftright';
+export type PromptKey = NavAction | 'updown' | 'leftright' | 'bumpers';
 const PAD: Record<PromptKey, string> = {
   confirm: 'A',
   back: 'B',
@@ -21,6 +21,7 @@ const PAD: Record<PromptKey, string> = {
   right: '→',
   updown: '↕',
   leftright: '↔',
+  bumpers: 'LB RB',
 };
 const KEYS: Record<PromptKey, string> = {
   confirm: 'Enter',
@@ -38,6 +39,7 @@ const KEYS: Record<PromptKey, string> = {
   right: '→',
   updown: '↑↓',
   leftright: '←→',
+  bumpers: 'Q E',
 };
 /** Face buttons wear their Xbox colors. */
 const FACE: Record<string, string> = { A: 'a', B: 'b', X: 'x', Y: 'y' };

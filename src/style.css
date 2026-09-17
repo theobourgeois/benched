@@ -445,6 +445,65 @@ a {
   font-size: 21px;
   font-weight: 800;
 }
+/* The chips on the right of a title bar: CPU difficulty, and the second player's seat. */
+.title-chips {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.join-chip strong {
+  color: #5e7690;
+}
+.join-chip:hover strong {
+  color: var(--gloss-ink);
+}
+.cpu-chip svg {
+  color: #5e7690;
+}
+/* The format under the matchup's title: bumpers step it, like tabs on a console. */
+.format-strip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 48px;
+  padding: 0 20px;
+  background: rgba(6, 16, 28, 0.7);
+  border-bottom: 1px solid var(--line);
+}
+.format-strip > button {
+  display: flex;
+  padding: 4px;
+}
+.format-tabs {
+  display: flex;
+  align-self: stretch;
+}
+.format-tabs button {
+  padding: 0 16px;
+  font-family: var(--display);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: #7890a8;
+  transition: color 0.12s;
+}
+.format-tabs button:hover {
+  color: #d8e4ef;
+}
+.format-tabs button[aria-selected='true'] {
+  color: var(--ice);
+  box-shadow: inset 0 -3px 0 var(--accent);
+}
+.format-duration {
+  margin-left: auto;
+  font-family: var(--display);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: #8fa6bd;
+}
 /* Seat two has no controller yet, so the match cannot start. */
 .cpu-chip[data-waiting] strong {
   color: #b8541f;
@@ -2448,6 +2507,16 @@ a {
   .cpu-chip span {
     display: none;
   }
+  .format-strip {
+    padding: 0 8px;
+  }
+  .format-tabs button {
+    padding: 0 9px;
+    font-size: 16px;
+  }
+  .format-duration {
+    display: none;
+  }
   .cpu-chip strong {
     font-size: 18px;
     white-space: nowrap;
@@ -2554,29 +2623,13 @@ a {
 /* Online: the landing, and the room two people wait in. */
 .online-plate {
   display: grid;
-  gap: 20px;
-  padding: 26px 24px;
+  gap: 14px;
+  padding: 0 24px 18px;
 }
 .online-lede {
   max-width: 52ch;
   color: #c9d7e6;
   line-height: 1.45;
-}
-.online-join {
-  display: grid;
-  gap: 9px;
-  padding-top: 18px;
-  border-top: 1px solid var(--line);
-}
-.online-join label {
-  font-family: var(--display);
-  font-size: 15px;
-  text-transform: uppercase;
-  color: #8fa6bd;
-}
-.online-join > div {
-  display: flex;
-  gap: 10px;
 }
 .code-field {
   width: 7ch;
@@ -2727,8 +2780,7 @@ a {
 }
 .online-list {
   margin: 0 -24px;
-  padding: 0;
-  border-top: 1px solid var(--line);
+  padding: 8px 0;
   border-bottom: 1px solid var(--line);
 }
 .online-list .menu-item > span {
@@ -2738,6 +2790,62 @@ a {
 }
 .online-room-item {
   font-size: 20px;
+}
+/* A list row with a value on its right: the quick play format, or the code being typed. The
+   value sits over the bar rather than inside it, so its own buttons and field stay real controls. */
+.menu-row {
+  position: relative;
+}
+.row-value {
+  position: absolute;
+  top: 0;
+  right: 48px;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--display);
+  text-transform: uppercase;
+  color: #bccbda;
+  pointer-events: none;
+}
+.row-value[data-focused] {
+  color: var(--gloss-ink);
+}
+.row-value > * {
+  pointer-events: auto;
+}
+.row-value button {
+  display: flex;
+  color: inherit;
+  opacity: 0.7;
+}
+.row-value button:hover {
+  opacity: 1;
+}
+.row-value strong {
+  min-width: 7.5ch;
+  font-size: 20px;
+  font-weight: 800;
+  text-align: center;
+}
+.row-value .code-field {
+  width: 8ch;
+  padding: 4px 6px 4px 10px;
+  font-size: 20px;
+  letter-spacing: 3px;
+}
+.online-heading {
+  margin: 0;
+  padding: 14px 24px 6px;
+  font-family: var(--display);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: #8fa6bd;
+  border-top: 1px solid var(--line);
 }
 .online-room-item small {
   font-size: 13px;

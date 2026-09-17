@@ -27,14 +27,15 @@ function inviteCode() {
   return code.length === 4 ? code : '';
 }
 
-type Entry = GameMode | 'twoPlayer' | 'online' | 'settings' | 'controls' | 'lab';
+/**
+ * Where you play from, not what you play. The format (5 on 5, 3 on 3, 1 on 1, shootout) and
+ * whether a second person is on the couch are chosen on the matchup, so every format works for
+ * one player or two without the list growing a row per combination.
+ */
+type Entry = 'play' | 'online' | 'freeSkate' | 'settings' | 'controls' | 'lab';
 const ENTRIES: { id: Entry; label: string }[] = [
-  { id: 'exhibition', label: 'Play Now' },
-  { id: 'twoPlayer', label: '2 Players' },
+  { id: 'play', label: 'Play Now' },
   { id: 'online', label: 'Online' },
-  { id: 'threeOnThree', label: '3 on 3' },
-  { id: 'oneOnOne', label: '1 on 1' },
-  { id: 'shootout', label: 'Shootout' },
   { id: 'freeSkate', label: 'Free Skate' },
   { id: 'settings', label: 'Settings' },
   { id: 'controls', label: 'Controls' },
@@ -51,7 +52,9 @@ export function Menu() {
     invite || (runtime.net && !runtime.net.setup) ? 'online' : 'main',
   );
   const [index, setIndex] = useState(0);
-  const [mode, setMode] = useState<GameMode>('exhibition');
+  /** The last match format picked, kept across trips to the menu like the teams are. */
+  const [format, setFormat] = useState<GameMode>('exhibition');
+  const [practice, setPractice] = useState(false);
   /** A second person on the other bench, sharing the screen. */
   const [guests, setGuests] = useState(false);
   // The matchup outlives the screens, so backing out to change modes keeps your picks.
@@ -65,8 +68,7 @@ export function Menu() {
       if (import.meta.env.DEV) void import('../dev/lab').then((m) => m.openLab());
       return;
     }
-    setGuests(id === 'twoPlayer');
-    setMode(id === 'twoPlayer' ? 'exhibition' : id);
+    setPractice(id === 'freeSkate');
     setScreen('teams');
   };
   const home = () => setScreen('main');
@@ -75,14 +77,16 @@ export function Menu() {
       {screen === 'main' && <MainMenu index={index} setIndex={setIndex} onPick={pick} />}
       {screen === 'teams' && (
         <TeamSelect
-          mode={mode}
+          mode={practice ? 'freeSkate' : format}
+          setMode={setFormat}
           teams={teams}
           setTeams={setTeams}
           side={side}
           setSide={setSide}
           jersey={jersey}
           setJersey={setJersey}
-          guests={guests}
+          guests={guests && !practice}
+          setGuests={setGuests}
           onBack={home}
         />
       )}

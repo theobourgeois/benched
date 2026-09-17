@@ -13,9 +13,10 @@ async function changeState(page: Page, code: string) {
   );
 }
 const live = (page: Page) => page.locator('.hud[data-phase="playing"]');
-/** Main menu entry, then ready up and drop the puck. */
-async function play(page: Page, entry = 'Play Now') {
-  await page.getByRole('button', { name: entry, exact: true }).click();
+/** Play Now in a format, then ready up and drop the puck. */
+async function play(page: Page, format?: string) {
+  await page.getByRole('button', { name: 'Play Now', exact: true }).click();
+  if (format) await page.getByRole('tab', { name: format, exact: true }).click();
   await page.getByRole('button', { name: 'Ready', exact: true }).click();
   await page.getByRole('button', { name: 'Play game', exact: true }).click();
 }
@@ -389,7 +390,7 @@ test('controller test discovers a paired Xbox with no mapping label and does not
   );
 });
 
-test('3-on-3 and shootout can be selected from the menu', async ({ page }) => {
+test('3-on-3 and shootout can be selected on the matchup', async ({ page }) => {
   await page.goto('/');
   await play(page, '3 on 3');
   await expect(live(page)).toBeVisible({ timeout: 30000 });
@@ -599,13 +600,20 @@ test('two pads take a bench each and drive their own skater', async ({ page }) =
     )
     .toBe('[true,true]');
 
-  await page.getByRole('button', { name: '2 Players', exact: true }).click();
+  await page.getByRole('button', { name: 'Play Now', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Select Teams' })).toBeVisible();
+  // The second person joins from their own pad, and can play any format.
+  await page.getByRole('tab', { name: '3 on 3', exact: true }).click();
+  await page.evaluate('window.pads[1].buttons[0].pressed=true');
+  await page.waitForTimeout(90);
+  await page.evaluate('window.pads[1].buttons[0].pressed=false');
+  await expect(page.getByRole('button', { name: /Player two ready/ })).toBeVisible();
   await page.getByRole('button', { name: 'Ready', exact: true }).click();
   await page.getByRole('button', { name: 'Play game', exact: true }).click();
   await expect(live(page)).toBeVisible({ timeout: 30000 });
 
   const started = await state(page);
+  expect(started.mode).toBe('threeOnThree');
   expect(started.sides.map((side: { human: boolean }) => side.human)).toEqual([true, true]);
   // Two cards on the ice, one per bench.
   await expect(page.locator('.player-card')).toHaveCount(2);
@@ -644,7 +652,15 @@ test('two-player waits for a second pad and says why', async ({ page }) => {
     Object.defineProperty(navigator, 'getGamepads', { value: () => [w.pad] });
   });
   await page.goto('/');
-  await page.getByRole('button', { name: '2 Players', exact: true }).click();
+  await page.getByRole('button', { name: 'Play Now', exact: true }).click();
+  // Seat one's pad pressing A readies seat one; it never adds a second player.
+  await page.evaluate('window.pad.buttons[0].pressed=true');
+  await page.waitForTimeout(90);
+  await page.evaluate('window.pad.buttons[0].pressed=false');
+  await expect(page.locator('.team-select')).toHaveAttribute('data-stage', 'ready');
+  await expect(page.getByRole('button', { name: 'Add player two' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Add player two' }).click();
   // One pad is seat one's. Seat two must not quietly share it.
   await expect
     .poll(() => page.evaluate('window.__BENCHED__.runtime.controllerTwo.status.connected'))
