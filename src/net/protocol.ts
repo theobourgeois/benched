@@ -29,16 +29,27 @@ export const ROOM_CAPACITY = 2;
 
 /**
  * How long the room keeps somebody's seat after their socket drops. A socket that reconnects
- * keeps its id, so a brief drop (a proxy timing out an idle line, a laptop changing networks)
- * is invisible to the other person; only staying gone this long counts as leaving.
+ * keeps its id, so a drop (a proxy timing out a line, a laptop changing networks, the room
+ * server restarting) is a wait rather than the end. Mid-match the game holds while the seat is
+ * empty, so this is also how long the other person can be left waiting before the match is
+ * called off. Long enough for a router to come back; short enough that nobody sits there.
  */
-export const RECONNECT_GRACE_MS = 10_000;
+export const RECONNECT_GRACE_MS = 60_000;
 /**
- * How often a client says something on the room socket when it has nothing to say. During a
- * match on a direct line the socket would otherwise carry nothing at all, and an idle line is
- * what proxies close.
+ * How often a client pings the room. The answer is how it knows the line is alive: a socket can
+ * look open to the browser long after the network under it has gone (a Wi-Fi roam, a sleeping
+ * laptop), and nothing but silence ever says so. The traffic also keeps proxies from closing
+ * an idle line during a match on a direct link.
  */
-export const KEEPALIVE_MS = 20_000;
+export const KEEPALIVE_MS = 5_000;
+/** A ping left unanswered this long means the socket is dead whatever the browser thinks. */
+export const SILENCE_MS = 10_000;
+/**
+ * The room closes a socket it has heard nothing on for this long. A browser throttles a hidden
+ * tab's timers to once a minute, so it has to be well past that or a player who switched
+ * windows would be thrown off.
+ */
+export const IDLE_CLOSE_MS = 90_000;
 
 export interface Player {
   id: string;
@@ -50,6 +61,8 @@ export interface Player {
   ready: boolean;
   /** The host runs the simulation; the room names the first person in as host. */
   host: boolean;
+  /** Their socket dropped and the room is holding the seat to see if they come back. */
+  away: boolean;
 }
 
 /** Modes two people can play against each other. Free skate is practice, so it stays local. */
@@ -97,7 +110,11 @@ export type ClientMessage =
   | { t: 'leave' };
 
 export type ServerMessage =
-  | { t: 'room'; you: string; players: Player[]; mode: GameMode }
+  /**
+   * Who is here. `playing` says whether the room still has a match on, so a client that was away
+   * can tell whether the one on its screen was called off while it was gone.
+   */
+  | { t: 'room'; you: string; players: Player[]; mode: GameMode; playing: boolean }
   | { t: 'full' }
   | { t: 'start'; setup: MatchSetup }
   | { t: 'signal'; from: string; data: Signal }

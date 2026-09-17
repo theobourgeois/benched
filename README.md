@@ -53,10 +53,14 @@ cannot reach each other directly fall back to the room relaying. The FPS counter
 trip and which of the two roads is in use.
 
 Rooms are a Cloudflare Worker (`workers/room.ts`) backed by a Durable Object. It holds who is in
-the room and relays bytes between them; it never simulates hockey. The room socket is kept
-warm with a ping every twenty seconds, and a socket that drops reconnects to the same seat: the
-room holds it for ten seconds before telling the other person you left, so a match survives a
-proxy closing an idle line.
+the room and relays bytes between them; it never simulates hockey. Each client pings the room
+every five seconds and redials if a ping goes unanswered, because a socket can look open long
+after the network under it has died. A socket that drops reconnects to the same seat, and the
+room holds that seat for a minute. While somebody's line is down and nothing is getting through
+directly either, the host holds the match (clock and skaters) and both screens say who is being
+waited on. If they stay gone the match is called off and both go back to the lobby, where they
+can rejoin with the same code. The room writes down who is in it, so a deploy or platform
+restart mid-match hands everyone the same seats when their sockets come back.
 
 ```sh
 npm run rooms          # rooms on localhost:8787, for development

@@ -18,6 +18,8 @@ import {
   bodyOf,
   KEEPALIVE_MS,
   ONLINE_MODES,
+  RECONNECT_GRACE_MS,
+  SILENCE_MS,
   tagOf,
   tagged,
   WIRE_INPUT,
@@ -44,7 +46,9 @@ import {
 /**
  * `connecting` covers the first connection and any reconnection after it: the socket
  * reconnects on its own and keeps its id, so the room hands the same seat back. `closed` is
- * final: we hung up, or the room turned us away.
+ * final: we hung up, or the room turned us away. A match that was called off (the other person
+ * stayed gone) puts the session back in `lobby` while the match is still on screen; the overlay
+ * says so and offers the way back.
  */
 export type NetStatus = 'connecting' | 'lobby' | 'playing' | 'closed';
 
@@ -54,6 +58,16 @@ export type NetStatus = 'connecting' | 'lobby' | 'playing' | 'closed';
  * arriving after a stall.
  */
 const JITTER_TARGET = 2;
+/**
+ * Play heard from the other browser within this long counts as a live line, whatever the room
+ * says about their socket: the direct link can carry a match through the room's socket dropping.
+ */
+const HEARD_MS = 1000;
+/** Host: the first wait before offering a fresh direct line, and the longest it backs off to. */
+const LINK_RETRY_MS = 8_000;
+const LINK_RETRY_MAX_MS = 60_000;
+/** A handshake or a stalled line gets this long to settle before it is replaced. */
+const LINK_SETTLE_MS = 12_000;
 /** Input frames a second from the guest. The host steps at 120 and holds the last one between. */
 export const INPUT_HZ = 60;
 export { SNAPSHOT_HZ };
@@ -88,8 +102,25 @@ export class NetSession {
   readonly stats: NetStats = { rtt: 0, rate: 0, delay: 0, starved: 0, direct: false };
 
   private socket: PartySocket;
-  /** Says something on the room socket now and then, so it never looks idle to a proxy. */
-  private keepalive: ReturnType<typeof setInterval>;
+  /** Pings the room, checks the answers came back, and looks after the direct line. */
+  private watchdog: ReturnType<typeof setInterval>;
+  /** When the last ping went out, and when the room last said anything at all. */
+  private pingSent = 0;
+  private heardAt = 0;
+  /** When play last arrived from the other browser, by either road. */
+  private peerAt = 0;
+  /** When the other person's seat went empty, for the countdown. Zero while they are here. */
+  private awaySince = 0;
+  private lastOffer = 0;
+  private offerDelay = LINK_RETRY_MS;
+  private readonly online = () => {
+    // The network is back; do not wait out the reconnect backoff.
+    if (this.status !== 'closed' && this.socket.readyState !== 1) this.socket.reconnect();
+  };
+  private readonly visible = () => {
+    // A hidden tab's timers were throttled, so check the line now rather than a minute from now.
+    if (!document.hidden) this.tick();
+  };
   /** The line straight to the other browser, when there is one. */
   private readonly link = new DirectLink((data) => this.send({ t: 'signal', data }));
   /** Host: who the line was last offered to, so a returning guest is offered a new one. */
@@ -133,7 +164,10 @@ export class NetSession {
     this.socket.binaryType = 'arraybuffer';
     this.socket.addEventListener('open', () => {
       if (this.status === 'closed') return;
-      this.status = this.setup ? 'playing' : 'lobby';
+      // Stays `connecting` until the room says who is here, so a match it called off while we
+      // were gone is never shown as still on.
+      this.pingSent = 0;
+      this.heardAt = performance.now();
       this.send({ t: 'hello', name });
       this.changed();
     });
@@ -143,13 +177,66 @@ export class NetSession {
       if (this.status !== 'closed') this.status = 'connecting';
       this.changed();
     });
-    this.keepalive = setInterval(() => this.send({ t: 'ping' }), KEEPALIVE_MS);
-    this.socket.addEventListener('message', (event: MessageEvent) => this.receive(event.data));
+    this.watchdog = setInterval(() => this.tick(), KEEPALIVE_MS);
+    this.socket.addEventListener('message', (event: MessageEvent) => {
+      this.heardAt = performance.now();
+      this.receive(event.data);
+    });
     this.link.onMessage = (data) => this.receive(data);
     this.link.onChange = () => {
       this.stats.direct = this.link.open;
+      this.tendLink(performance.now());
       this.changed();
     };
+    window.addEventListener('online', this.online);
+    document.addEventListener('visibilitychange', this.visible);
+  }
+
+  /**
+   * Every few seconds: ping the room, and if the last ping went unanswered, the socket is dead
+   * however open it looks, so drop it and dial again. Judged against the ping rather than the
+   * clock, so a hidden tab whose timers were held back is not mistaken for a dead line.
+   */
+  private tick() {
+    if (this.status === 'closed') return;
+    const now = performance.now();
+    if (this.socket.readyState === 1) {
+      const unanswered = this.pingSent > 0 && this.heardAt < this.pingSent;
+      if (unanswered && now - this.pingSent > SILENCE_MS) {
+        this.pingSent = 0;
+        this.socket.reconnect();
+      } else if (!unanswered) {
+        this.pingSent = now;
+        this.send({ t: 'ping' });
+      }
+    }
+    this.tendLink(now);
+  }
+
+  /**
+   * Host: keep a direct line to the other person. Offered as soon as they are in, and again
+   * whenever it is down and not about to come back, backing off while offers go unanswered.
+   */
+  private tendLink(now: number) {
+    if (!this.isHost || !this.link.supported || this.status === 'closed') return;
+    const other = this.opponent;
+    if (!other || other.away || this.socket.readyState !== 1) return;
+    if (other.id !== this.offeredTo) {
+      this.offeredTo = other.id;
+      // A new person has a new clock; nothing they send is stale against the old one's.
+      this.newestInput = -1;
+      this.lastOffer = 0;
+      this.offerDelay = LINK_RETRY_MS;
+    }
+    if (this.link.open) {
+      this.offerDelay = LINK_RETRY_MS;
+      return;
+    }
+    if (this.link.settling && now - this.link.changedAt < LINK_SETTLE_MS) return;
+    if (this.lastOffer && now - this.lastOffer < this.offerDelay) return;
+    if (this.lastOffer) this.offerDelay = Math.min(this.offerDelay * 2, LINK_RETRY_MAX_MS);
+    this.lastOffer = now;
+    void this.link.offer();
   }
 
   /** Everyone in the room, and which of them is us. */
@@ -167,12 +254,32 @@ export class NetSession {
     return this.me?.team ?? 0;
   }
   get everyoneReady() {
-    return this.players.length === 2 && this.players.every((p) => p.ready);
+    return this.players.length === 2 && this.players.every((p) => p.ready && !p.away);
+  }
+  /** Whether the room socket is up. Play may still be getting through without it. */
+  get connected() {
+    return this.status !== 'connecting' && this.status !== 'closed';
+  }
+  /**
+   * A match is on screen but somebody's line is down and nothing is getting through another way:
+   * our socket is reconnecting, or the room says theirs is. The host holds the simulation while
+   * this is true, so nobody plays against an empty bench.
+   */
+  get interrupted() {
+    if (!this.setup || this.status === 'closed') return false;
+    const cut = this.status === 'connecting' || !!this.opponent?.away;
+    return cut && !(this.link.open && performance.now() - this.peerAt < HEARD_MS);
+  }
+  /** Milliseconds left before the room gives up on the other person's seat, or null. */
+  get awayRemaining() {
+    if (!this.awaySince) return null;
+    return Math.max(0, RECONNECT_GRACE_MS - (performance.now() - this.awaySince));
   }
 
   private receive(data: string | ArrayBuffer) {
     if (typeof data !== 'string') {
       if (data.byteLength < 2) return;
+      this.peerAt = performance.now();
       const tag = tagOf(data);
       // The host is told what the other person is doing; the guest is told what happened.
       if (tag === WIRE_INPUT && this.isHost) this.queueInput(bodyOf(data));
@@ -190,18 +297,16 @@ export class NetSession {
         this.you = message.you;
         this.players = message.players;
         this.mode = message.mode;
-        if (this.status === 'connecting') this.status = this.setup ? 'playing' : 'lobby';
-        // Somebody new across the table means the last one's leaving is old news.
-        if (this.status === 'lobby' && this.opponent) this.notice = null;
-        // The host offers the other person a line as soon as they are in, and a fresh one if
-        // they drop and come back as somebody new.
         const other = this.opponent;
-        if (this.isHost && other && other.id !== this.offeredTo) {
-          this.offeredTo = other.id;
-          // A new person has a new clock; nothing they send is stale against the old one's.
-          this.newestInput = -1;
-          void this.link.offer();
-        }
+        this.awaySince = other?.away ? this.awaySince || performance.now() : 0;
+        if (this.setup && !message.playing) {
+          // The room called the match off while we were away from it.
+          if (this.status !== 'lobby')
+            this.endMatch('The game was called off while you were away.');
+        } else if (this.status === 'connecting') this.status = this.setup ? 'playing' : 'lobby';
+        // Somebody new across the table means the last one's leaving is old news.
+        if (this.status === 'lobby' && other && !this.setup) this.notice = null;
+        this.tendLink(performance.now());
         break;
       }
       case 'signal':
@@ -220,14 +325,32 @@ export class NetSession {
         if (this.setup && this.status === 'playing') return;
         this.setup = message.setup;
         this.status = 'playing';
+        this.notice = null;
         this.resetView();
         this.onStart?.(message.setup);
         break;
       case 'gone':
-        this.notice = 'Your opponent left.';
+        this.awaySince = 0;
+        if (this.setup) this.endMatch('Your opponent left the game.');
+        else this.notice = 'Your opponent left.';
         break;
     }
     this.changed();
+  }
+
+  /**
+   * The room called the match off. The match stays on screen under an overlay until the player
+   * picks where to go, but nothing more is played or drawn of it, and the room is a lobby again.
+   */
+  private endMatch(notice: string) {
+    this.setup = null;
+    this.status = 'lobby';
+    this.notice = notice;
+    this.awaySince = 0;
+    this.link.close();
+    this.offeredTo = '';
+    this.stats.direct = false;
+    this.resetView();
   }
 
   /** A new match is a new timeline: nothing heard about the old one applies to it. */
@@ -307,6 +430,15 @@ export class NetSession {
   }
 
   /**
+   * Host: forget what the guest was doing before the game held. Their stick from before the drop
+   * is not what they are doing now, and a queue of it would be played out in a rush on resume.
+   */
+  clearGuestInput() {
+    this.queue = [];
+    this.held = EMPTY_INPUT;
+  }
+
+  /**
    * Guest: what we are trying to do. Called every frame drawn; goes out at a steady rate, with
    * every press made in between folded into the next frame sent. True when one went out, which
    * is the caller's cue that those presses have been delivered.
@@ -374,7 +506,9 @@ export class NetSession {
   close() {
     if (this.status === 'closed') return;
     this.status = 'closed';
-    clearInterval(this.keepalive);
+    clearInterval(this.watchdog);
+    window.removeEventListener('online', this.online);
+    document.removeEventListener('visibilitychange', this.visible);
     // Said out loud, so the room lets the seat go now rather than waiting to see if we return.
     this.send({ t: 'leave' });
     this.link.close();

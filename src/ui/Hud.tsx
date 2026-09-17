@@ -12,7 +12,8 @@ import {
   runtime,
   useGame,
 } from '../app/store';
-import { askToLeave, leaveOnline } from '../app/online';
+import { askToLeave, leaveOnline, returnToLobby } from '../app/online';
+import type { NetSession } from '../net/session';
 import { cameraUsesAttackUp, type MatchState, type Team } from '../game/types';
 
 /**
@@ -133,33 +134,77 @@ function ScoreBug({ s }: { s: MatchState }) {
 }
 
 /**
- * Online there is nothing to pause, so this covers the two things that still need saying: the
- * other person has gone, or you pressed the button that used to pause and probably meant to
- * leave. It never stops the simulation, because the other end is still playing it.
+ * Online there is nothing to pause, so this covers what still needs saying: a line is down and
+ * the game is holding for it, the room called the match off, or you pressed the button that
+ * used to pause and probably meant to leave. It never stops the simulation itself; the host's
+ * loop holds on its own while a line is down, because the other end sees the same thing.
  */
 function OnlineOverlay() {
   const { net, leaving } = useGame();
-  const gone = net?.notice;
+  if (!net) return null;
+  const ended = net.status === 'lobby';
+  const cut = !ended && net.interrupted;
+  // Mounted only while it shows: a menu layer owns the pad and the keys, so one sitting hidden
+  // over the ice would swallow the stick and the pause button for the whole match.
+  if (!ended && !cut && !leaving) return null;
+  return <OnlineDialog net={net} ended={ended} cut={cut} />;
+}
+
+function OnlineDialog({ net, ended, cut }: { net: NetSession; ended: boolean; cut: boolean }) {
   const [index, setIndex] = useState(0);
-  const items = gone
-    ? [{ label: 'Quit to Menu', run: leaveOnline }]
-    : [
-        { label: 'Back to the game', run: () => askToLeave(false) },
-        { label: 'Leave game', run: leaveOnline },
-      ];
+  const reconnecting = cut && !net.connected;
+  const waiting = cut && net.connected;
+  const items = ended
+    ? [
+        { label: 'Back to lobby', run: returnToLobby },
+        { label: 'Quit to Menu', run: leaveOnline },
+      ]
+    : reconnecting || waiting
+      ? [{ label: 'Leave game', run: leaveOnline }]
+      : [
+          { label: 'Back to the game', run: () => askToLeave(false) },
+          { label: 'Leave game', run: leaveOnline },
+        ];
+  const at = Math.min(index, items.length - 1);
+  const asking = !ended && !reconnecting && !waiting;
   useNav((a) => {
-    if (!gone && a === 'back') return askToLeave(false);
-    if (a === 'up' || a === 'down') setIndex(step(index, a === 'up' ? -1 : 1, items.length));
-    if (a === 'confirm') items[index].run();
+    if (asking && a === 'back') return askToLeave(false);
+    if (a === 'up' || a === 'down') setIndex(step(at, a === 'up' ? -1 : 1, items.length));
+    if (a === 'confirm') items[at].run();
   });
-  if (!gone && !leaving) return null;
+  const them = net.opponent?.name ?? 'the other player';
+  const remaining = net.awayRemaining;
+  const title = ended
+    ? 'Game over'
+    : reconnecting
+      ? 'Reconnecting'
+      : waiting
+        ? 'Connection lost'
+        : 'Leave game?';
   return (
     <div className="screen online-overlay" role="dialog" aria-modal="true" aria-label="Online game">
       <div className="stage-frame narrow">
         <div className="plate">
-          <TitleBar crumb="Online" title={gone ? 'Opponent left' : 'Leave game?'} />
-          {gone && <p className="room-notice">{gone}</p>}
-          {!gone && (
+          <TitleBar crumb="Online" title={title} />
+          {ended && (
+            <p className="room-notice">
+              {net.notice ?? 'The game was called off.'} The room is still open: back in the lobby
+              they can rejoin with code <strong>{net.room}</strong>.
+            </p>
+          )}
+          {reconnecting && (
+            <p className="online-lede" role="status">
+              Lost the line to the game. Trying again — the game is on hold, and your seat is kept
+              while you are away.
+            </p>
+          )}
+          {waiting && (
+            <p className="online-lede" role="status">
+              Waiting for {them} to come back. The game is on hold
+              {remaining !== null && ` — ${Math.ceil(remaining / 1000)}s before it is called off`}.
+            </p>
+          )}
+          {asking && (
             <p className="online-lede">
               There is no pause online — the other person is still playing. You can leave, and they
               will be told.
@@ -169,7 +214,7 @@ function OnlineOverlay() {
             {items.map((item, i) => (
               <MenuItem
                 key={item.label}
-                focused={i === index}
+                focused={i === at}
                 onFocus={() => setIndex(i)}
                 onSelect={item.run}
               >

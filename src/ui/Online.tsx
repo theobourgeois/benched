@@ -299,12 +299,17 @@ function Seat({
 }) {
   if (!player) return null;
   return (
-    <div className="seat" data-ready={player.ready || undefined} data-mine={you || undefined}>
+    <div
+      className="seat"
+      data-ready={player.ready || undefined}
+      data-mine={you || undefined}
+      data-away={player.away || undefined}
+    >
       <TeamLogo club={side} className="seat-logo" />
       <strong>{side.city}</strong>
       <span className="seat-club">{side.name}</span>
       <span className="seat-tag">
-        {player.ready ? 'Ready' : you ? 'You' : player.name}
+        {player.away ? 'Reconnecting…' : player.ready ? 'Ready' : you ? 'You' : player.name}
         {player.host && ' · Host'}
       </span>
       <span className="seat-side">

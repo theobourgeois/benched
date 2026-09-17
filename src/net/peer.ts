@@ -12,6 +12,11 @@ import type { SessionDescription, Signal } from './protocol';
  *
  * It does not always open. Two networks that cannot see each other without a relay of their
  * own fall back to the room, which is what they had before, and nothing is lost.
+ *
+ * It does not always stay open either. A line that stalls (`disconnected`) usually recovers on
+ * its own within seconds, so it is kept, but play goes by the room until it does; sent into a
+ * stalled line it would vanish without a trace. A line that fails is closed, and the host
+ * offers a new one.
  */
 
 const ICE_SERVERS: RTCIceServer[] = [{ urls: 'stun:stun.l.google.com:19302' }];
@@ -28,11 +33,19 @@ export class DirectLink {
   private channel: RTCDataChannel | null = null;
   /** Candidates that arrived before the description they belong to. */
   private waiting: Signal[] = [];
+  /** When the line last changed state, so a handshake or a stall is given time to settle. */
+  changedAt = 0;
 
   constructor(private readonly signal: (s: Signal) => void) {}
 
+  /** Whether play can go this way right now. */
   get open() {
-    return this.channel?.readyState === 'open';
+    return this.channel?.readyState === 'open' && this.pc?.connectionState !== 'disconnected';
+  }
+  /** A handshake under way, or a stall that may yet recover: not worth replacing yet. */
+  get settling() {
+    const state = this.pc?.connectionState;
+    return state === 'new' || state === 'connecting' || state === 'disconnected';
   }
 
   /** Host: offer a line. Called when the other person arrives, and again if they come back. */
@@ -105,12 +118,13 @@ export class DirectLink {
     };
     pc.onconnectionstatechange = () => {
       if (this.pc !== pc) return;
-      if (['failed', 'closed', 'disconnected'].includes(pc.connectionState)) {
-        this.channel = null;
-        this.onChange?.();
-      }
+      this.changedAt = performance.now();
+      // Failed is final for this connection; drop it so the next offer starts clean.
+      if (pc.connectionState === 'failed' || pc.connectionState === 'closed') this.close();
+      this.onChange?.();
     };
     this.pc = pc;
+    this.changedAt = performance.now();
     return pc;
   }
 

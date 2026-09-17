@@ -60,6 +60,8 @@ export class GameLoop {
   private replayedGoal: string | null = null;
   private freeze = 0;
   private pulses: number[] = [];
+  /** Host: the match was held for a dropped line on the last frame. */
+  private held = false;
   /**
    * Called with every replay frame as it is recorded, so the scene can attach what only it
    * knows about that moment (a ragdoll's pose) for the replay to show.
@@ -329,6 +331,13 @@ export class GameLoop {
         ? mergeEdges(this.pending[guest], gate(guestFrame))
         : null;
     if (net && !net.isHost) {
+      // The pause button asks about leaving here too. It is this person's question, so it never
+      // crosses to the host as input.
+      const own = this.pending[runtime.myTeam];
+      if (own?.pause) {
+        own.pause = false;
+        askToLeave(!runtime.leaving);
+      }
       // A guest runs no simulation. It says what it is trying to do and draws what it is told,
       // so there is no second version of the match to disagree with the host's.
       // Presses are kept until a frame actually goes out, so none is lost between sends.
@@ -355,6 +364,20 @@ export class GameLoop {
         this.accumulator = 0;
         return;
       }
+    }
+    if (net && s.phase !== 'menu' && (net.status === 'lobby' || net.interrupted)) {
+      // Somebody's line is down, or the room called the match off. Nothing is played against an
+      // empty bench: the clock and every skater hold where they are. Snapshots keep going out,
+      // so a guest coming back sees exactly where it stopped.
+      this.accumulator = 0;
+      this.held = true;
+      net.publish(s, dt);
+      this.tickPublish(delta);
+      return;
+    }
+    if (this.held) {
+      this.held = false;
+      net?.clearGuestInput();
     }
     if (this.freeze > 0) {
       this.freeze -= delta;

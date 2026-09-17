@@ -46,7 +46,10 @@ export function Menu() {
   const { match } = useGame();
   // An invite link lands straight in the room rather than on the main menu.
   const [invite] = useState(() => inviteCode());
-  const [screen, setScreen] = useState<Screen>(invite ? 'online' : 'main');
+  // So does coming back off the ice from a match the room called off: the room is still open.
+  const [screen, setScreen] = useState<Screen>(
+    invite || (runtime.net && !runtime.net.setup) ? 'online' : 'main',
+  );
   const [index, setIndex] = useState(0);
   const [mode, setMode] = useState<GameMode>('exhibition');
   /** A second person on the other bench, sharing the screen. */

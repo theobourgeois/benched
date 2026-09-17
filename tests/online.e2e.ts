@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Browser, type Page } from '@playwright/test';
 
 /**
  * Two browsers, one match. The host runs the simulation and the guest draws what it is told, so
@@ -136,7 +136,7 @@ test('two browsers meet in a room, drop the puck, and play one match', async ({ 
   // Leaving tells the other person rather than freezing them, and offers a way out.
   await guestPage.close();
   await expect.poll(async () => (await net(hostPage))?.players, { timeout: 20000 }).toBe(1);
-  await expect(hostPage.getByRole('heading', { name: 'Opponent left' })).toBeVisible({
+  await expect(hostPage.getByRole('heading', { name: 'Game over' })).toBeVisible({
     timeout: 10000,
   });
   await hostPage.getByRole('button', { name: 'Quit to Menu' }).click();
@@ -238,8 +238,8 @@ test('a socket that drops mid-match comes back to the same seat', async ({ brows
   expect([after.host.host, after.guest.host]).toEqual([before.host.host, before.guest.host]);
   expect([after.host.team, after.guest.team]).toEqual([before.host.team, before.guest.team]);
   expect([after.host.players, after.guest.players]).toEqual([2, 2]);
-  await expect(hostPage.getByRole('heading', { name: 'Opponent left' })).toHaveCount(0);
-  await expect(guestPage.getByRole('heading', { name: 'Opponent left' })).toHaveCount(0);
+  for (const page of [hostPage, guestPage])
+    await expect(page.getByRole('dialog', { name: 'Online game' })).toHaveCount(0);
   await expect(live(hostPage)).toBeVisible();
   await expect(live(guestPage)).toBeVisible();
 
@@ -289,6 +289,130 @@ test('both ends watch a goal replay, and a host skip takes the guest overlay dow
   await hostPage.getByRole('button', { name: /Skip replay/ }).click();
   await expect(goalReplay(hostPage)).toHaveCount(0);
   await expect(goalReplay(guestPage)).toHaveCount(0, { timeout: 10000 });
+
+  await hostPage.close();
+  await guestPage.close();
+});
+
+/** Two browsers in a room with the puck dropped, for the tests that are about what comes after. */
+async function openMatch(browser: Browser) {
+  const hostPage = await (await browser.newContext()).newPage();
+  const guestPage = await (await browser.newContext()).newPage();
+  await hostPage.goto('/');
+  await hostPage.getByRole('button', { name: 'Online', exact: true }).click();
+  await hostPage.getByRole('button', { name: /Create game/ }).click();
+  await expect(hostPage.getByRole('heading', { name: 'Game Lobby' })).toBeVisible({
+    timeout: 20000,
+  });
+  const room = (await net(hostPage))!.room;
+  await guestPage.goto(`/?join=${room}`);
+  await expect.poll(async () => (await net(hostPage))?.players, { timeout: 20000 }).toBe(2);
+  await hostPage.getByRole('button', { name: /^Ready/ }).click();
+  await guestPage.getByRole('button', { name: /^Ready/ }).click();
+  await hostPage.getByRole('button', { name: /Drop the puck/ }).click();
+  await expect(live(hostPage)).toBeVisible({ timeout: 30000 });
+  await expect(live(guestPage)).toBeVisible({ timeout: 30000 });
+  return { hostPage, guestPage, room };
+}
+
+test('a line that stays down holds the game for both, and it carries on when it is back', async ({
+  browser,
+}) => {
+  test.setTimeout(90_000);
+  const { hostPage, guestPage } = await openMatch(browser);
+  const before = { host: (await net(hostPage))!, guest: (await net(guestPage))! };
+
+  // The guest loses everything: the direct line and the room socket, and does not dial back.
+  await guestPage.evaluate(
+    '(() => { const n = window.__BENCHED__.runtime.net; n.link.close(); n.socket.close(); })()',
+  );
+  await expect(guestPage.getByRole('heading', { name: 'Reconnecting' })).toBeVisible({
+    timeout: 10000,
+  });
+  await expect(hostPage.getByRole('heading', { name: 'Connection lost' })).toBeVisible({
+    timeout: 10000,
+  });
+  await expect(hostPage.getByText(/before it is called off/)).toBeVisible();
+
+  // Nothing is played against the empty bench: the host's clock holds.
+  const held = (await state(hostPage)).tick;
+  await hostPage.waitForTimeout(1500);
+  expect((await state(hostPage)).tick).toBe(held);
+
+  // Back again: same seats, same host, and the match moves on from where it held.
+  await guestPage.evaluate('window.__BENCHED__.runtime.net.socket.reconnect()');
+  for (const page of [hostPage, guestPage])
+    await expect(page.getByRole('dialog', { name: 'Online game' })).toHaveCount(0, {
+      timeout: 15000,
+    });
+  const after = { host: (await net(hostPage))!, guest: (await net(guestPage))! };
+  expect([after.host.host, after.guest.host]).toEqual([before.host.host, before.guest.host]);
+  expect([after.host.team, after.guest.team]).toEqual([before.host.team, before.guest.team]);
+  await expect
+    .poll(async () => (await state(guestPage)).tick, { timeout: 15000 })
+    .toBeGreaterThan(held + 30);
+  // And the host offers a fresh direct line rather than leaving play on the relay.
+  await expect.poll(async () => (await net(guestPage))?.direct, { timeout: 30000 }).toBe(true);
+
+  await hostPage.close();
+  await guestPage.close();
+});
+
+test('a socket that goes silent is dropped and dialled again', async ({ browser }) => {
+  test.setTimeout(90_000);
+  const { hostPage, guestPage } = await openMatch(browser);
+  // Pretend the last ping went unanswered long ago, the way a line that died without closing
+  // looks from the browser, and let the watchdog look. The page's clock has to be old enough
+  // for "long ago" to be a real moment.
+  await expect
+    .poll(() => guestPage.evaluate('performance.now()'), { timeout: 15000 })
+    .toBeGreaterThan(12000);
+  await guestPage.evaluate(`(() => {
+    const n = window.__BENCHED__.runtime.net;
+    window.reopened = 0;
+    n.socket.addEventListener('open', () => window.reopened++);
+    n.pingSent = 1;
+    n.heardAt = 0;
+    n.tick();
+  })()`);
+  await expect.poll(() => guestPage.evaluate('window.reopened'), { timeout: 15000 }).toBe(1);
+  await expect.poll(async () => (await net(guestPage))?.status, { timeout: 15000 }).toBe('playing');
+  await expect(live(guestPage)).toBeVisible();
+  await hostPage.close();
+  await guestPage.close();
+});
+
+test('an opponent who leaves ends the match, and the room plays again from the lobby', async ({
+  browser,
+}) => {
+  test.setTimeout(120_000);
+  const { hostPage, guestPage, room } = await openMatch(browser);
+
+  // The guest means to go: pause asks, and they leave.
+  await guestPage.keyboard.press('Escape');
+  await guestPage.getByRole('button', { name: 'Leave game' }).click();
+  await expect(guestPage.getByRole('navigation', { name: 'Main menu' })).toBeVisible();
+
+  // The host is told, and goes back to the same room rather than out of it.
+  await expect(hostPage.getByRole('heading', { name: 'Game over' })).toBeVisible({
+    timeout: 10000,
+  });
+  expect((await state(hostPage)).phase).not.toBe('menu');
+  await hostPage.getByRole('button', { name: 'Back to lobby' }).click();
+  await expect(hostPage.getByRole('heading', { name: 'Game Lobby' })).toBeVisible();
+  expect(await net(hostPage)).toMatchObject({ room, players: 1, host: true, status: 'lobby' });
+
+  // They come back with the code and the two of them go again.
+  await guestPage.goto(`/?join=${room}`);
+  await expect.poll(async () => (await net(hostPage))?.players, { timeout: 20000 }).toBe(2);
+  await hostPage.getByRole('button', { name: /^Ready/ }).click();
+  await guestPage.getByRole('button', { name: /^Ready/ }).click();
+  await hostPage.getByRole('button', { name: /Drop the puck/ }).click();
+  await expect(live(hostPage)).toBeVisible({ timeout: 30000 });
+  await expect(live(guestPage)).toBeVisible({ timeout: 30000 });
+  await expect
+    .poll(async () => (await state(guestPage)).tick, { timeout: 15000 })
+    .toBeGreaterThan(30);
 
   await hostPage.close();
   await guestPage.close();

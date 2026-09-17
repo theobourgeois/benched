@@ -33,6 +33,16 @@ export function disconnect() {
   publish();
 }
 
+/**
+ * Off the ice and back to the room's lobby, still connected, after a match was called off. The
+ * menu opens on the lobby for a session with no match on, so whoever left can rejoin with the
+ * same code and the two of you go again.
+ */
+export function returnToLobby() {
+  runtime.leaving = false;
+  returnToMenu();
+}
+
 /** Hang up mid-match or from the lobby, and put the menu back. */
 export function leaveOnline() {
   disconnect();

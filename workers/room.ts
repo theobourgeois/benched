@@ -1,5 +1,6 @@
 import { Server, routePartykitRequest, type Connection, type ConnectionContext } from 'partyserver';
 import {
+  IDLE_CLOSE_MS,
   ONLINE_MODES,
   RECONNECT_GRACE_MS,
   ROOM_CAPACITY,
@@ -21,9 +22,12 @@ import type { GameMode } from '../src/game/types';
  * when it opens, takes the play traffic instead. It deliberately does not simulate hockey — a durable object is a poor place to run a
  * hundred and twenty steps a second, and it does not need to, because one of the browsers does.
  *
- * A socket that drops and comes back keeps its id, so a seat is held for a little while after
- * its socket closes rather than given up on the spot. The other person is only told somebody
- * left once they have stayed gone.
+ * A socket that drops and comes back keeps its id, so a seat is held for a while after its
+ * socket closes rather than given up on the spot. The other person is told the seat is empty
+ * straight away (their game holds while it is), and only told somebody left once they have
+ * stayed gone. Who is in the room is written down as it changes, so the room server restarting
+ * under a match (a deploy, the platform moving it) hands everybody the same seats when their
+ * sockets come back.
  *
  * Everything here is untrusted input from a browser. Nothing is read without a shape check.
  */
@@ -51,6 +55,32 @@ export class Room extends Server<Env> {
   private setup: MatchSetup | null = null;
   /** What the host has picked to play. */
   private mode: GameMode = ONLINE_MODES[0];
+  /** When each open socket last said anything, so one that has gone quiet can be let go. */
+  private heard = new Map<Connection, number>();
+  private sweeper: ReturnType<typeof setInterval> | null = null;
+  private savedAt = 0;
+
+  /**
+   * Back from a restart with whatever was written down. Everyone's socket went with the old
+   * instance, so every seat starts its grace; the ones whose owners reconnect keep it. A record
+   * older than the grace belongs to a room nobody came back to.
+   */
+  async onStart() {
+    const saved = await this.ctx.storage.get<Saved>(SAVED_KEY);
+    if (!saved) return;
+    if (Date.now() - saved.at > RECONNECT_GRACE_MS) {
+      await this.ctx.storage.delete(SAVED_KEY);
+      return;
+    }
+    this.seats = new Map(saved.seats);
+    this.setup = saved.setup;
+    this.mode = saved.mode;
+    for (const id of this.seats.keys())
+      this.dropping.set(
+        id,
+        setTimeout(() => this.drop(id), RECONNECT_GRACE_MS),
+      );
+  }
 
   onConnect(connection: Connection, _ctx: ConnectionContext) {
     const returning = this.seats.get(connection.id);
@@ -65,6 +95,8 @@ export class Room extends Server<Env> {
     }
     const stale = this.sockets.get(connection.id);
     this.sockets.set(connection.id, connection);
+    this.heard.set(connection, Date.now());
+    this.sweep(true);
     // The same seat on a fresh socket: the old one is done, and its close is ignored below.
     if (stale && stale !== connection) {
       try {
@@ -88,15 +120,18 @@ export class Room extends Server<Env> {
         host,
       });
     }
+    this.save();
     this.announce();
     // Someone coming back to a match already under way still needs to know what it is.
     if (this.setup) this.sendTo(connection, { t: 'start', setup: this.setup });
   }
 
   onClose(connection: Connection, code: number) {
+    this.heard.delete(connection);
     // A socket this seat has already replaced closing late says nothing about the seat.
-    if (this.sockets.get(connection.id) !== connection) return;
+    if (this.sockets.get(connection.id) !== connection) return this.sweep(this.sockets.size > 0);
     this.sockets.delete(connection.id);
+    this.sweep(this.sockets.size > 0);
     if (!this.seats.has(connection.id)) return;
     // A browser closing its tab says so, and is not coming back. Anything else might be.
     if (code === GOING_AWAY) return this.drop(connection.id);
@@ -105,6 +140,18 @@ export class Room extends Server<Env> {
       connection.id,
       setTimeout(() => this.drop(connection.id), RECONNECT_GRACE_MS),
     );
+    // The other person's game holds from now, rather than after the grace, so nothing is
+    // played against an empty bench.
+    this.announce();
+  }
+
+  onError(connection: Connection) {
+    // The close that follows does the work; this only makes sure the socket is not counted open.
+    try {
+      connection.close(1011, 'error');
+    } catch {
+      // Already gone.
+    }
   }
 
   /** Stop waiting on a seat: its socket came back, or it is being let go for good. */
@@ -114,19 +161,68 @@ export class Room extends Server<Env> {
     this.dropping.delete(id);
   }
 
-  /** Stayed gone. The seat opens up, and the other person is told. */
+  /**
+   * Stayed gone. The seat opens up, and the other person is told. A match cannot go on with one
+   * person, so it is called off: both ends go back to the lobby, where whoever is left can wait
+   * for them to rejoin with the same code. Only then does the room pick a new host, so the one
+   * running the simulation never changes while a match is on.
+   */
   private drop(id: string) {
     this.keep(id);
     if (this.sockets.has(id) || !this.seats.delete(id)) return;
     this.setup = null;
-    // The room needs a host. If the one who left was it, promote whoever is still here.
     const rest = [...this.seats.values()];
+    for (const seat of rest) seat.ready = false;
     if (rest.length && !rest.some((seat) => seat.host)) rest[0].host = true;
+    this.save();
     this.broadcastJson({ t: 'gone', id });
     this.announce();
   }
 
+  /**
+   * Now and then, while anyone is connected: let go of sockets that have gone quiet (a client
+   * pings every few seconds, so one that says nothing for this long is not there, whatever the
+   * platform thinks), and refresh the record so a restart knows it is recent.
+   */
+  private sweep(running: boolean) {
+    if (!running) {
+      if (this.sweeper !== null) clearInterval(this.sweeper);
+      this.sweeper = null;
+      return;
+    }
+    if (this.sweeper !== null) return;
+    this.sweeper = setInterval(() => {
+      const now = Date.now();
+      for (const [socket, at] of this.heard)
+        if (now - at > IDLE_CLOSE_MS) {
+          try {
+            socket.close(4003, 'silent');
+          } catch {
+            // Already gone.
+          }
+        }
+      if (this.seats.size && now - this.savedAt > RECONNECT_GRACE_MS / 3) this.save();
+    }, SWEEP_MS);
+  }
+
+  /** Write down who is here. An empty room leaves nothing behind. */
+  private save() {
+    this.savedAt = Date.now();
+    if (!this.seats.size) {
+      void this.ctx.storage.delete(SAVED_KEY);
+      return;
+    }
+    const saved: Saved = {
+      at: this.savedAt,
+      seats: [...this.seats],
+      setup: this.setup,
+      mode: this.mode,
+    };
+    void this.ctx.storage.put(SAVED_KEY, saved);
+  }
+
   onMessage(connection: Connection, raw: string | ArrayBuffer | ArrayBufferView) {
+    this.heard.set(connection, Date.now());
     // Play traffic is bytes, and the room is only a pipe for it: straight to the other person.
     if (typeof raw !== 'string') {
       const data = raw instanceof ArrayBuffer ? raw : toBuffer(raw);
@@ -179,12 +275,13 @@ export class Room extends Server<Env> {
         seat.ready = !!message.ready;
         break;
       case 'start': {
-        // Only the host drops the puck, and only once everybody is ready.
+        // Only the host drops the puck, and only once everybody is here and ready.
         if (!seat.host || this.seats.size < ROOM_CAPACITY) return;
-        if (![...this.seats.values()].every((s) => s.ready)) return;
+        if (![...this.seats].every(([id, s]) => s.ready && this.sockets.has(id))) return;
         const setup = cleanSetup(message.setup);
         if (!setup) return;
         this.setup = setup;
+        this.save();
         this.broadcastJson({ t: 'start', setup });
         return;
       }
@@ -195,6 +292,7 @@ export class Room extends Server<Env> {
         connection.close(1000, 'left');
         return;
     }
+    this.save();
     this.announce();
   }
 
@@ -213,12 +311,13 @@ export class Room extends Server<Env> {
     for (const [otherId, socket] of this.sockets) if (otherId !== id) yield socket;
   }
   private players(): Player[] {
-    return [...this.seats].map(([id, seat]) => ({ id, ...seat }));
+    return [...this.seats].map(([id, seat]) => ({ id, ...seat, away: !this.sockets.has(id) }));
   }
   private announce() {
     const players = this.players();
+    const playing = this.setup !== null;
     for (const [id, socket] of this.sockets)
-      this.sendTo(socket, { t: 'room', you: id, players, mode: this.mode });
+      this.sendTo(socket, { t: 'room', you: id, players, mode: this.mode, playing });
   }
   private sendTo(connection: Connection, message: ServerMessage) {
     try {
@@ -234,6 +333,16 @@ export class Room extends Server<Env> {
 
 /** The close code a browser sends when its page is closed or navigated away. */
 const GOING_AWAY = 1001;
+const SWEEP_MS = 10_000;
+const SAVED_KEY = 'room';
+
+/** What survives the room server restarting. */
+interface Saved {
+  at: number;
+  seats: [string, Seat][];
+  setup: MatchSetup | null;
+  mode: GameMode;
+}
 
 const toBuffer = (view: ArrayBufferView) =>
   view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength) as ArrayBuffer;
