@@ -18,7 +18,8 @@ import {
   toggleReplayPlayback,
   type ReplaySession,
 } from '../game/replay';
-import type { GameMode, Jersey, MatchState, Settings, Team } from '../game/types';
+import { leadHuman } from '../game/humans';
+import type { GameMode, Human, Jersey, MatchState, Settings, Team } from '../game/types';
 const SETTINGS_KEY = 'benched.settings';
 export const runtime = {
   match: createMatch(),
@@ -30,6 +31,12 @@ export const runtime = {
   controller: new Controller(),
   /** Second seat for local two-player. Pad only; it claims a controller seat one is not using. */
   controllerTwo: new Controller(false),
+  /**
+   * The bench seat two is on for this match, or null when nobody is. It can be `myTeam`: two people
+   * on the same side against the CPU. Seat one is always the first person on `myTeam`, and seat two
+   * the person after them on theirs.
+   */
+  seatTwo: null as Team | null,
   /** The room this client is in, while it is online. */
   net: null as NetSession | null,
   /**
@@ -109,25 +116,38 @@ export function useGame() {
 export const viewMatch = () => runtime.replay?.view ?? runtime.match;
 /** The watching side of a match, for everything drawn from this client's point of view. */
 export const mySide = (s: MatchState = viewMatch()) => s.sides[runtime.myTeam];
-/** The skater this client's camera and HUD follow. */
-export const mySkater = (s: MatchState = viewMatch()) => s.skaters[mySide(s).controlled];
+/** The skater this client's camera and HUD follow: see `leadHuman`. */
+export const mySkater = (s: MatchState = viewMatch()) =>
+  s.skaters[leadHuman(s, runtime.myTeam)?.controlled ?? runtime.myTeam * 6];
+/**
+ * The person a local seat is playing, if that seat is on the ice. Seat one is the first person on
+ * `myTeam`; seat two is the next person on whichever bench they took. Online there is no seat two.
+ */
+export function seatHuman(seat: 0 | 1, s: MatchState = viewMatch()): Human | undefined {
+  if (seat === 0) return s.sides[runtime.myTeam].humans[0];
+  const team = runtime.seatTwo;
+  if (team === null || runtime.net) return undefined;
+  return s.sides[team].humans[team === runtime.myTeam ? 1 : 0];
+}
 /** How fast the drawn state moves against real time: replays run slow, held or reversed. */
 export const viewTimeScale = () => (runtime.replay ? Math.abs(runtime.replay.rate) : 1);
 /**
- * `team` is the side seat one plays. `guests` seats a second local player on the other side; the
- * camera and HUD still take seat one's point of view, because there is only one screen.
+ * `team` is the side seat one plays. `seatTwo` seats a second local player: on the other side, or
+ * on the same one to play together against the CPU. The camera and HUD still take seat one's
+ * bench as the point of view, because there is only one screen.
  */
 export function beginGame(
   team: Team,
   mode: GameMode = 'exhibition',
   teams: [Club, Club] = runtime.match.teams,
   jerseys: [Jersey, Jersey] = runtime.match.jerseys,
-  guests = false,
+  seatTwo: Team | null = null,
 ) {
   runtime.audio.unlock();
   runtime.replay = null;
   runtime.myTeam = team;
-  runtime.match = createMatch(guests ? [0, 1] : team, mode, teams, jerseys);
+  runtime.seatTwo = seatTwo;
+  runtime.match = createMatch(seatTwo === null ? team : [team, seatTwo], mode, teams, jerseys);
   runtime.match.difficulty = runtime.settings.difficulty;
   startMatch(runtime.match);
   publish();

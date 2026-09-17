@@ -2,13 +2,14 @@ import { memo, useEffect, useMemo, useRef } from 'react';
 import { useFrame, useLoader } from '@react-three/fiber';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { mySide, runtime, viewMatch, viewTimeScale } from '../app/store';
+import { runtime, seatHuman, viewMatch, viewTimeScale } from '../app/store';
+import { humanOn } from '../game/humans';
 import { uniformFor } from '../game/clubs';
 import { STICK } from '../game/config';
 import { isOnIce } from '../game/engine';
 import { activeDeke } from '../game/dekes';
 import { activeCelly, cellyRagdoll } from '../game/cellys';
-import type { MatchState, Skater, Team } from '../game/types';
+import type { MatchState, Skater } from '../game/types';
 import {
   HELMET_GOALIE_URL,
   HELMET_PLAYER_URL,
@@ -289,8 +290,7 @@ export const Player = memo(function Player({ id }: { id: number }) {
     tilt.position.y = THREE.MathUtils.lerp(tilt.position.y, fallen * (diving ? 0.1 : 0.22), ease);
     root.updateMatrixWorld(true);
     const { bones } = rig;
-    const own = s.sides[skater.team];
-    const charge = shotWindup(skater, own.controlled === id ? own.shotCharge : 0);
+    const charge = shotWindup(skater, humanOn(s, skater)?.shotCharge ?? 0);
     if (goalie) sampleGoalieAction(skater, s.puck, goalieAction, dt * viewTimeScale());
     // The ragdoll runs on replay time, so a knockdown tumbles slowly in slow motion.
     const posture = poseSkater(
@@ -644,16 +644,17 @@ export const Player = memo(function Player({ id }: { id: number }) {
       labPose.ragdoll = ragdoll;
       labHooks.afterPose(rig, parts, labPose);
     }
-    // Red under the skater this client is holding, blue under the other person's, green on the
-    // player being passed to. A CPU side marks nobody.
-    const watching = mySide(s),
-      opposite = s.sides[(1 - runtime.myTeam) as Team];
-    const yours = watching.controlled === id,
-      theirs = opposite.human && opposite.controlled === id;
+    // Red under seat one's skater, blue under anybody else's — the couch partner on either bench,
+    // or the person across the ice online — and green on the player a seat here is passing to. A
+    // CPU side marks nobody.
+    const holder = humanOn(s, skater);
+    const yours = !!holder && holder === seatHuman(0, s),
+      theirs = !!holder && !yours;
+    const aimedAt = [seatHuman(0, s), seatHuman(1, s)].some(
+      (h) => h?.passHeld && h.passTarget === id,
+    );
     ring.current!.visible =
-      !runtime.replay &&
-      !(import.meta.env.DEV && labHooks.active) &&
-      (yours || theirs || (watching.passHeld && watching.passTarget === id));
+      !runtime.replay && !(import.meta.env.DEV && labHooks.active) && (yours || theirs || aimedAt);
     const marker = ring.current!.material;
     if (marker instanceof THREE.MeshBasicMaterial) {
       const want = yours ? MARKER_YOURS : theirs ? MARKER_THEIRS : MARKER_TARGET;

@@ -88,7 +88,7 @@ test('two browsers meet in a room, drop the puck, and play one match', async ({ 
   await expect(live(guestPage)).toBeVisible({ timeout: 30000 });
   const started = await state(hostPage);
   const guestStarted = await state(guestPage);
-  expect(started.sides.map((s: { human: boolean }) => s.human)).toEqual([true, true]);
+  expect(started.sides.map((s: { humans: unknown[] }) => s.humans.length)).toEqual([1, 1]);
   expect(guestStarted.mode).toBe(started.mode);
   expect(guestStarted.myTeam).not.toBe(started.myTeam);
 
@@ -117,7 +117,7 @@ test('two browsers meet in a room, drop the puck, and play one match', async ({ 
   await guestPage.evaluate('window.pad.axes[1]=0');
 
   const onHost = await state(hostPage);
-  const skater = onHost.skaters[onHost.sides[guestTeam].controlled];
+  const skater = onHost.skaters[onHost.sides[guestTeam].humans[0].controlled];
   expect(Math.hypot(skater.vx, skater.vz)).toBeGreaterThan(1);
 
   // And the guest sees its own skater where the host put it.
@@ -125,8 +125,8 @@ test('two browsers meet in a room, drop the puck, and play one match', async ({ 
     .poll(
       async () => {
         const seen = await state(guestPage);
-        const mine = seen.skaters[seen.sides[guestTeam].controlled];
-        const truth = (await state(hostPage)).skaters[onHost.sides[guestTeam].controlled];
+        const mine = seen.skaters[seen.sides[guestTeam].humans[0].controlled];
+        const truth = (await state(hostPage)).skaters[onHost.sides[guestTeam].humans[0].controlled];
         return Math.hypot(mine.x - truth.x, mine.z - truth.z);
       },
       { timeout: 10000 },
@@ -445,7 +445,7 @@ test('quick play warms up against the AI, and the puck drops when the host says 
   await expect.poll(async () => (await queue(hostPage)).public, { timeout: 20000 }).toBe(true);
   expect(await queue(hostPage)).toMatchObject({ queued: true, net: false, found: null });
   const warmup = await state(hostPage);
-  expect(warmup.sides.map((s: { human: boolean }) => s.human)).toEqual([true, false]);
+  expect(warmup.sides.map((s: { humans: unknown[] }) => s.humans.length)).toEqual([1, 0]);
 
   // The next person is sent into that room, ready, and waits on the host.
   await guestPage.goto('/');
@@ -471,7 +471,7 @@ test('quick play warms up against the AI, and the puck drops when the host says 
   expect(await queue(hostPage)).toMatchObject({ queued: false, found: null });
   expect(await queue(guestPage)).toMatchObject({ quickJoin: false });
   const started = await state(hostPage);
-  expect(started.sides.map((s: { human: boolean }) => s.human)).toEqual([true, true]);
+  expect(started.sides.map((s: { humans: unknown[] }) => s.humans.length)).toEqual([1, 1]);
   expect(started.myTeam).toBe(warmup.myTeam);
   expect((await state(guestPage)).myTeam).not.toBe(started.myTeam);
   expect((await net(hostPage))?.host).toBe(true);

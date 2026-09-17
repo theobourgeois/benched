@@ -19,6 +19,11 @@ import { Glyph, JerseyIcon, Prompts, TeamLogo, TitleBar } from './kit';
 
 /** Pick a club, then ready up. Once ready, up and down swap your sweater. */
 type Stage = 'team' | 'ready';
+/**
+ * Where a second person on the couch is sitting, relative to seat one: across the ice, or on the
+ * same bench against the CPU. Relative, so seat one changing sides takes the arrangement along.
+ */
+export type Partner = 'versus' | 'with';
 const SIDE = ['home', 'away'] as const;
 /** What the bumpers step through. Free skate is its own menu entry, not a format. */
 const FORMATS = MODES.filter((m) => !m.practice);
@@ -35,8 +40,8 @@ export function TeamSelect({
   setSide,
   jersey,
   setJersey,
-  guests = false,
-  setGuests,
+  partner,
+  setPartner,
   onBack,
 }: {
   mode: GameMode;
@@ -47,9 +52,9 @@ export function TeamSelect({
   setSide: (side: Team) => void;
   jersey: Jersey;
   setJersey: Dispatch<SetStateAction<Jersey>>;
-  /** A second person is taking the other bench on this screen. */
-  guests?: boolean;
-  setGuests: (guests: boolean) => void;
+  /** A second person playing on this screen, and which bench they took. */
+  partner: Partner | null;
+  setPartner: (partner: Partner | null) => void;
   onBack: () => void;
 }) {
   const { settings, controllerTwo } = useGame();
@@ -92,29 +97,42 @@ export function TeamSelect({
   // Two people need two pads. Starting without the second one would leave that bench frozen,
   // so the match waits rather than dropping somebody into a game they cannot play.
   const secondPad = controllerTwo.status.connected;
-  const ready = !guests || secondPad;
-  const play = () => ready && beginGame(side, mode, teams, jerseys, guests);
+  const ready = !partner || secondPad;
+  /** The bench seat two is on, if anybody is. */
+  const partnerSide: Team | null = !partner
+    ? null
+    : partner === 'with'
+      ? side
+      : ((1 - side) as Team);
+  // With a CPU bench on the ice, its difficulty still matters; two people across the ice have none.
+  const versus = partner === 'versus';
+  const play = () => ready && beginGame(side, mode, teams, jerseys, partnerSide);
   const advance = () => (stage === 'ready' ? play() : ready && setStage('ready'));
   const unready = () => setStage('team');
   const stepFormat = (dir: 1 | -1) => {
     const i = FORMATS.findIndex((m) => m.id === mode);
     setMode(FORMATS[(i + dir + FORMATS.length) % FORMATS.length].id);
   };
-  // Practice is one skater's rink, so there is no second bench to take.
-  const join = () => !info.practice && setGuests(true);
-  const drop = () => setGuests(false);
+  // Practice is one skater's rink, so there is no second bench to take. Seat two starts across
+  // the ice, as a couch game always has.
+  const join = () => !info.practice && !partner && setPartner('versus');
+  const drop = () => setPartner(null);
+  // Away is drawn on the left, home on the right, for seat two exactly as for seat one.
+  const sitAt = (bench: Team) => partner && setPartner(bench === side ? 'with' : 'versus');
 
-  // Seat two only ever joins or leaves. The matchup itself is seat one's to drive.
+  // Seat two joins, picks a bench, or leaves. The matchup itself is seat one's to drive.
   useSeatTwoNav((a) => {
     if (a === 'confirm' || a === 'start') join();
     else if (a === 'back') drop();
+    else if (a === 'left') sitAt(1);
+    else if (a === 'right') sitAt(0);
   });
 
   useNav((a) => {
     if (a === 'back') return stage === 'ready' ? unready() : onBack();
     if (a === 'confirm') return advance();
     if (a === 'start') return play();
-    if (a === 'x') return guests ? undefined : nextDifficulty();
+    if (a === 'x') return versus ? undefined : nextDifficulty();
     if (a === 'lb' || a === 'rb')
       return info.practice ? undefined : stepFormat(a === 'lb' ? -1 : 1);
     if (stage === 'ready') {
@@ -145,7 +163,7 @@ export function TeamSelect({
           title={info.practice ? 'Select Team' : 'Select Teams'}
         >
           <div className="title-chips">
-            {!guests && (
+            {!versus && (
               <button
                 className="cpu-chip"
                 onClick={nextDifficulty}
@@ -156,8 +174,9 @@ export function TeamSelect({
                 <strong>{difficulty.label}</strong>
               </button>
             )}
-            {guests ? (
-              // Both benches skate All-Star with two people on, so there is no difficulty to set.
+            {partner ? (
+              // Both benches skate All-Star with two people across the ice, so there is no
+              // difficulty to set; two on one bench still face the CPU at the chosen level.
               <button
                 className="cpu-chip"
                 data-waiting={!secondPad || undefined}
@@ -170,7 +189,7 @@ export function TeamSelect({
               >
                 <Gamepad2 size={14} aria-hidden="true" />
                 <span>P2</span>
-                <strong>{secondPad ? 'Ready' : 'Connect'}</strong>
+                <strong>{!secondPad ? 'Connect' : versus ? 'Versus' : 'Same team'}</strong>
                 <X size={15} aria-hidden="true" />
               </button>
             ) : (
@@ -214,9 +233,10 @@ export function TeamSelect({
               t={t}
               club={teams[t]}
               mine={t === side}
+              partner={t === partnerSide}
               stage={stage}
               jersey={jerseys[t]}
-              opponent={guests ? 'P2' : info.practice ? 'Goalie' : 'CPU'}
+              opponent={info.practice ? 'Goalie' : 'CPU'}
               canCycle={league.clubs.length > 2}
               onPick={() => onPanel(t)}
               onCycle={cycle}
@@ -228,16 +248,26 @@ export function TeamSelect({
             <span className="token" data-side={SIDE[side]}>
               {device === 'pad' ? <Gamepad2 size={24} /> : <Keyboard size={24} />}
             </span>
+            {partnerSide !== null && (
+              <span className="token" data-side={SIDE[partnerSide]} data-seat="two">
+                <Gamepad2 size={24} />
+              </span>
+            )}
           </div>
         </div>
         <div className="matchup-foot">
           {/* Say why the second bench is empty. A browser hides a pad until it has seen a press
               from that exact controller, which reads as a dead cable if nothing explains it. */}
-          {guests && !secondPad && (
+          {partner && !secondPad && (
             <span className="pad-hint" role="status">
               {controllerTwo.status.state === 'unsupported'
                 ? `Second controller not in a layout the browser exposes (${controllerTwo.status.name}).`
                 : 'Press a button on the second controller to wake it up.'}
+            </span>
+          )}
+          {partner && secondPad && stage === 'team' && (
+            <span className="pad-hint" role="status">
+              P2 picks a bench with left and right on their controller.
             </span>
           )}
           {LEAGUES.length > 1 && <span className="league-tag">{league.name}</span>}
@@ -273,6 +303,7 @@ function TeamPanel({
   t,
   club,
   mine,
+  partner,
   stage,
   jersey,
   opponent,
@@ -284,6 +315,8 @@ function TeamPanel({
   t: Team;
   club: Club;
   mine: boolean;
+  /** Seat two is on this bench. */
+  partner: boolean;
   stage: Stage;
   jersey: Jersey;
   opponent: string;
@@ -310,7 +343,9 @@ function TeamPanel({
       <span className="watermark" aria-hidden="true">
         {name}
       </span>
-      <span className="panel-tag">{ready ? 'Ready' : mine ? 'P1' : opponent}</span>
+      <span className="panel-tag">
+        {ready ? 'Ready' : mine && partner ? 'P1 + P2' : mine ? 'P1' : partner ? 'P2' : opponent}
+      </span>
       <TeamLogo club={club} className="panel-logo" />
       <div className="panel-name">
         <small>{club.city}</small>

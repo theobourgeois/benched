@@ -250,7 +250,7 @@ describe('puck physics', () => {
     expect(s.shots[0]).toBe(2);
     s.puck.owner = p.id;
     passPuck(s, p, 0, -1);
-    expect(s.sides[played(s)].controlled).toBe(1);
+    expect(s.sides[played(s)].humans[0].controlled).toBe(1);
     expect(s.puck.vz).toBeLessThan(0);
     expect(s.puck.owner).toBeNull();
   });
@@ -258,7 +258,7 @@ describe('puck physics', () => {
 describe('skating and defense', () => {
   it('accelerates smoothly, glides, drains hustle stamina, and recovers it', () => {
     const s = openIce();
-    const p = s.skaters[s.sides[played(s)].controlled];
+    const p = s.skaters[s.sides[played(s)].humans[0].controlled];
     p.x = 0;
     p.z = 0;
     stepMatch(s, seat(s, { ...EMPTY_INPUT, moveX: 1, hustle: true }));
@@ -275,12 +275,12 @@ describe('skating and defense', () => {
   });
   it('pivots on the spot at a standstill and carves a wide arc at speed', () => {
     const still = openIce(),
-      p = still.skaters[still.sides[played(still)].controlled];
+      p = still.skaters[still.sides[played(still)].humans[0].controlled];
     Object.assign(p, { x: 0, z: 0, vx: 0, vz: 0, angle: Math.PI / 2 });
     for (let i = 0; i < 30; i++) stepMatch(still, seat(still, { ...EMPTY_INPUT, moveZ: 1 }));
     expect(Math.abs(p.angle)).toBeLessThan(0.15);
     const fast = openIce(),
-      q = fast.skaters[fast.sides[played(fast)].controlled];
+      q = fast.skaters[fast.sides[played(fast)].humans[0].controlled];
     Object.assign(q, { x: -10, z: 0, vx: PHYSICS.maxSpeed, vz: 0, angle: Math.PI / 2 });
     for (let i = 0; i < 30; i++) stepMatch(fast, seat(fast, { ...EMPTY_INPUT, moveZ: 1 }));
     expect(q.angle).toBeGreaterThan(0.15);
@@ -291,7 +291,7 @@ describe('skating and defense', () => {
   });
   it('a hard carve at pace scrubs speed but keeps rolling', () => {
     const s = openIce(),
-      p = s.skaters[s.sides[played(s)].controlled];
+      p = s.skaters[s.sides[played(s)].humans[0].controlled];
     Object.assign(p, { x: -10, z: 0, vx: PHYSICS.maxSpeed, vz: 0, angle: Math.PI / 2 });
     for (let i = 0; i < 60; i++) stepMatch(s, seat(s, { ...EMPTY_INPUT, moveZ: 1 }));
     const speed = Math.hypot(p.vx, p.vz);
@@ -302,7 +302,7 @@ describe('skating and defense', () => {
   it('reaches a higher top speed while hustling and carrying the puck costs a little', () => {
     const run = (hustle: boolean, carry: boolean) => {
       const s = createMatch(0, 'freeSkate'),
-        p = s.skaters[s.sides[played(s)].controlled];
+        p = s.skaters[s.sides[played(s)].humans[0].controlled];
       s.phase = 'playing';
       Object.assign(p, { x: -20, z: 0, vx: 0, vz: 0, angle: Math.PI / 2, stamina: 1 });
       if (carry) s.puck.owner = p.id;
@@ -318,7 +318,7 @@ describe('skating and defense', () => {
     const s = openIce();
     Object.assign(s.skaters[2], { x: 0, z: 1 });
     stepMatch(s, seat(s, { ...EMPTY_INPUT, pass: true }));
-    expect(s.sides[played(s)].controlled).toBe(2);
+    expect(s.sides[played(s)].humans[0].controlled).toBe(2);
   });
   it('switches to the defender in front of a rush instead of a closer chaser', () => {
     const s = openIce();
@@ -331,7 +331,7 @@ describe('skating and defense', () => {
     Object.assign(s.puck, { owner: 6, x: 2, z: 0 });
     drive(s, 0);
     stepMatch(s, seat(s, { ...EMPTY_INPUT, switchPlayer: true }));
-    expect(s.sides[played(s)].controlled).toBe(3);
+    expect(s.sides[played(s)].humans[0].controlled).toBe(3);
   });
   it('keeps accelerating after a switch instead of coasting to a stop', () => {
     const setup = () => {
@@ -348,8 +348,8 @@ describe('skating and defense', () => {
     };
     const auto = setup();
     stepMatch(auto, seat(auto, { ...EMPTY_INPUT, switchPlayer: true }));
-    expect(auto.sides[played(auto)].controlled).toBe(3);
-    expect(auto.sides[played(auto)].autoSkate).toBe(true);
+    expect(auto.sides[played(auto)].humans[0].controlled).toBe(3);
+    expect(auto.sides[played(auto)].humans[0].autoSkate).toBe(true);
     for (let i = 0; i < 24; i++) stepMatch(auto);
     const coast = setup();
     drive(coast, 3);
@@ -368,8 +368,8 @@ describe('skating and defense', () => {
     Object.assign(s.puck, { owner: 6, x: 8, z: 0 });
     drive(s, 0);
     stepMatch(s, seat(s, { ...EMPTY_INPUT, switchPlayer: true, moveZ: 1 }));
-    expect(s.sides[played(s)].controlled).toBe(3);
-    expect(s.sides[played(s)].autoSkate).toBe(false);
+    expect(s.sides[played(s)].humans[0].controlled).toBe(3);
+    expect(s.sides[played(s)].humans[0].autoSkate).toBe(false);
     for (let i = 0; i < 12; i++) stepMatch(s, seat(s, { ...EMPTY_INPUT, moveZ: 1 }));
     expect(s.skaters[3].vz).toBeGreaterThan(1.5);
   });
@@ -384,7 +384,7 @@ describe('skating and defense', () => {
     Object.assign(s.puck, { owner: 6, x: 3.2, z: 0 });
     drive(s, 0);
     stepMatch(s, seat(s, { ...EMPTY_INPUT, switchPlayer: true }));
-    expect(s.sides[played(s)].controlled).toBe(3);
+    expect(s.sides[played(s)].humans[0].controlled).toBe(3);
     for (let i = 0; i < 18; i++) stepMatch(s);
     expect(s.skaters[3].vx).toBeGreaterThan(6.5);
   });
@@ -582,7 +582,7 @@ describe('skating and defense', () => {
     const s = createMatch();
     startMatch(s);
     for (let t = 0; t < 180 / RULES.fixedStep; t++) {
-      const ai = decideAI(s, s.skaters[s.sides[played(s)].controlled]);
+      const ai = decideAI(s, s.skaters[s.sides[played(s)].humans[0].controlled]);
       stepMatch(
         s,
         seat(s, {
@@ -1017,8 +1017,8 @@ describe('contact, elevation and puck handling', () => {
     drive(s, p.id);
     s.puck.owner = p.id;
     stepMatch(s, seat(s, { ...EMPTY_INPUT, aimZ: 0.75, shotHeight: 0.6 }));
-    expect(s.sides[played(s)].shotAim).toBeCloseTo(0.75);
-    expect(s.sides[played(s)].shotLift).toBeCloseTo(0.6);
+    expect(s.sides[played(s)].humans[0].shotAim).toBeCloseTo(0.75);
+    expect(s.sides[played(s)].humans[0].shotLift).toBeCloseTo(0.6);
   });
   it('sends two identical skill-stick shots on the same tick to the same place', () => {
     const shots = [0, 1].map(() => {
@@ -1093,7 +1093,7 @@ describe('contact, elevation and puck handling', () => {
       stepMatch(s, seat(s, { ...EMPTY_INPUT, stickX: 1, stickY: 1, toeDrag: true }));
     expect(p.stickReach).toBeLessThan(reach - 0.8);
     expect(s.puck.x - p.x).toBeLessThan(0.2);
-    expect(s.sides[played(s)].shotCharge).toBe(0);
+    expect(s.sides[played(s)].humans[0].shotCharge).toBe(0);
     expect(s.puck.owner).toBe(0);
     expect(s.puck.x).toBeCloseTo(p.x + p.stickReach, 2);
     expect(s.puck.z).toBeCloseTo(p.z - p.stickSide, 2);
@@ -1210,12 +1210,12 @@ describe('aimed passing', () => {
     s.puck.owner = 0;
     stepMatch(s, seat(s, { ...EMPTY_INPUT, pass: true, passHeld: true, moveZ: -1 }));
     expect(s.puck.owner).toBe(0);
-    expect(s.sides[played(s)].passHeld).toBe(true);
-    expect(s.sides[played(s)].passTarget).toBe(1);
-    expect(s.sides[played(s)].passAim.z).toBeLessThan(0);
+    expect(s.sides[played(s)].humans[0].passHeld).toBe(true);
+    expect(s.sides[played(s)].humans[0].passTarget).toBe(1);
+    expect(s.sides[played(s)].humans[0].passAim.z).toBeLessThan(0);
     stepMatch(s, seat(s, { ...EMPTY_INPUT, passRelease: true, moveZ: -1 }));
     expect(s.puck.owner).toBeNull();
-    expect(s.sides[played(s)].controlled).toBe(1);
+    expect(s.sides[played(s)].humans[0].controlled).toBe(1);
     expect(s.puck.vz).toBeLessThan(0);
   });
   it('passes to the aimed teammate instead of the closest one', () => {
@@ -1230,7 +1230,7 @@ describe('aimed passing', () => {
     drive(s, 0);
     s.puck.owner = 0;
     passPuck(s, p, 0, 1);
-    expect(s.sides[played(s)].controlled).toBe(2);
+    expect(s.sides[played(s)].humans[0].controlled).toBe(2);
     expect(s.puck.vz).toBeGreaterThan(0);
   });
   it('dumps the puck into space when no teammate is in the aim cone', () => {
@@ -1244,7 +1244,7 @@ describe('aimed passing', () => {
     s.puck.owner = 0;
     passPuck(s, p, 1, 0);
     expect(s.puck.owner).toBeNull();
-    expect(s.sides[played(s)].controlled).toBe(0);
+    expect(s.sides[played(s)].humans[0].controlled).toBe(0);
     expect(s.puck.vx).toBeGreaterThan(0);
   });
   it('hops a defender in the lane so the aimed teammate still takes the pass', () => {
@@ -1314,19 +1314,24 @@ describe('tighter gameplay', () => {
     const coast = openIce(),
       stop = openIce();
     for (const s of [coast, stop]) {
-      Object.assign(s.skaters[s.sides[played(s)].controlled], { x: 0, z: 0, vx: 0, vz: 0 });
+      Object.assign(s.skaters[s.sides[played(s)].humans[0].controlled], {
+        x: 0,
+        z: 0,
+        vx: 0,
+        vz: 0,
+      });
       for (let i = 0; i < 90; i++) stepMatch(s, seat(s, { ...EMPTY_INPUT, moveX: 1 }));
     }
-    const launched = coast.skaters[coast.sides[played(coast)].controlled].vx;
+    const launched = coast.skaters[coast.sides[played(coast)].humans[0].controlled].vx;
     expect(launched).toBeGreaterThan(4);
     for (let i = 0; i < 40; i++) {
       stepMatch(coast);
       stepMatch(stop, seat(stop, { ...EMPTY_INPUT, moveX: -1 }));
     }
-    expect(stop.skaters[stop.sides[played(stop)].controlled].vx).toBeLessThan(
-      coast.skaters[coast.sides[played(coast)].controlled].vx - 1.5,
+    expect(stop.skaters[stop.sides[played(stop)].humans[0].controlled].vx).toBeLessThan(
+      coast.skaters[coast.sides[played(coast)].humans[0].controlled].vx - 1.5,
     );
-    expect(coast.skaters[coast.sides[played(coast)].controlled].vx).toBeGreaterThan(2);
+    expect(coast.skaters[coast.sides[played(coast)].humans[0].controlled].vx).toBeGreaterThan(2);
   });
   it('does not dump shots from the defensive zone, and prefers a slot look', () => {
     const s = openIce();
@@ -1392,12 +1397,12 @@ describe('free skate', () => {
   it('starts at center ice with the puck against the opposing goalie', () => {
     const s = skate();
     expect(s.phase).toBe('playing');
-    expect(s.puck.owner).toBe(s.sides[played(s)].controlled);
-    expect(s.skaters[s.sides[played(s)].controlled].x).toBe(0);
-    expect(s.skaters[s.sides[played(s)].controlled].z).toBe(0);
+    expect(s.puck.owner).toBe(s.sides[played(s)].humans[0].controlled);
+    expect(s.skaters[s.sides[played(s)].humans[0].controlled].x).toBe(0);
+    expect(s.skaters[s.sides[played(s)].humans[0].controlled].z).toBe(0);
     const onIce = s.skaters.filter((p) => isOnIce(s, p));
     expect(onIce).toHaveLength(2);
-    expect(onIce.some((p) => p.id === s.sides[played(s)].controlled)).toBe(true);
+    expect(onIce.some((p) => p.id === s.sides[played(s)].humans[0].controlled)).toBe(true);
     expect(onIce.some((p) => p.role === 'G' && p.team !== played(s))).toBe(true);
   });
   it('does not run the period clock or end the session', () => {
@@ -1422,9 +1427,9 @@ describe('free skate', () => {
     expect(s.score).toEqual([0, 0]);
     tick(s, 1.7);
     expect(s.phase).toBe('playing');
-    expect(s.puck.owner).toBe(s.sides[played(s)].controlled);
-    expect(s.skaters[s.sides[played(s)].controlled].x).toBe(0);
-    expect(s.skaters[s.sides[played(s)].controlled].z).toBe(0);
+    expect(s.puck.owner).toBe(s.sides[played(s)].humans[0].controlled);
+    expect(s.skaters[s.sides[played(s)].humans[0].controlled].x).toBe(0);
+    expect(s.skaters[s.sides[played(s)].humans[0].controlled].z).toBe(0);
   });
   it('lets a save rebound without stopping play', () => {
     const s = skate();
@@ -1475,7 +1480,7 @@ describe('small-ice modes', () => {
     const onIce = s.skaters.filter((p) => isOnIce(s, p));
     expect(onIce).toHaveLength(4);
     expect(onIce.filter((p) => p.role === 'C')).toHaveLength(2);
-    expect(s.sides[played(s)].controlled).toBe(6);
+    expect(s.sides[played(s)].humans[0].controlled).toBe(6);
     expect(s.clock).toBe(180);
   });
 });
@@ -1492,9 +1497,11 @@ describe('shootout', () => {
     expect(s.clock).toBe(15);
     const onIce = s.skaters.filter((p) => isOnIce(s, p));
     expect(onIce).toHaveLength(2);
-    expect(onIce.some((p) => p.id === s.sides[played(s)].controlled && p.role === 'C')).toBe(true);
+    expect(
+      onIce.some((p) => p.id === s.sides[played(s)].humans[0].controlled && p.role === 'C'),
+    ).toBe(true);
     expect(onIce.some((p) => p.role === 'G' && p.team !== played(s))).toBe(true);
-    expect(s.puck.owner).toBe(s.sides[played(s)].controlled);
+    expect(s.puck.owner).toBe(s.sides[played(s)].humans[0].controlled);
   });
   it('counts a goal and hands the puck to the other team', () => {
     const s = so();
@@ -1511,7 +1518,7 @@ describe('shootout', () => {
     expect(s.phase).toBe('playing');
     expect(s.shootoutShooter).toBe(1);
     expect(s.shootoutTaken).toEqual([1, 0]);
-    expect(s.skaters[s.sides[played(s)].controlled].role).toBe('G');
+    expect(s.skaters[s.sides[played(s)].humans[0].controlled].role).toBe('G');
     expect(s.puck.owner).not.toBeNull();
     expect(s.skaters[s.puck.owner!].team).toBe(1);
   });
@@ -1714,7 +1721,7 @@ describe('goalies', () => {
     tick(s, 0.3);
     expect(s.puck.owner).toBe(g.id);
     expect(s.notice).toBe('COVERED');
-    expect(s.sides[played(s)].controlled).toBe(g.id);
+    expect(s.sides[played(s)].humans[0].controlled).toBe(g.id);
     const poker = s.skaters[0];
     Object.assign(poker, { x: g.x - 1.2, z: 0.2, angle: Math.PI / 2, cooldown: 0 });
     drive(s, poker.id);
@@ -1757,7 +1764,7 @@ describe('goalies', () => {
     stepMatch(s, seat(s, { ...EMPTY_INPUT, passRelease: true, moveX: -1, moveZ: -0.35 }));
     expect(s.puck.owner).toBeNull();
     expect(s.puck.passTo).toBe(mate.id);
-    expect(s.sides[played(s)].controlled).toBe(mate.id);
+    expect(s.sides[played(s)].humans[0].controlled).toBe(mate.id);
   });
 
   it('positions on the shooter, comes out for distance, and hugs the post behind the net', () => {
@@ -1803,7 +1810,7 @@ describe('goalies', () => {
   function breakaway(seed: number, release = 6.5) {
     const s = createMatch(0, 'shootout');
     startMatch(s);
-    const me = s.skaters[s.sides[0].controlled];
+    const me = s.skaters[s.sides[0].humans[0].controlled];
     const cut = seed % 2 ? 1 : -1;
     me.z += ((seed % 5) - 2) * 0.5;
     s.tick += seed * 7;
@@ -1833,7 +1840,7 @@ describe('goalies', () => {
     s.difficulty = difficulty;
     startMatch(s);
     s.tick += seed * 13;
-    const me = s.skaters[s.sides[0].controlled];
+    const me = s.skaters[s.sides[0].humans[0].controlled];
     me.z += ((seed % 5) - 2) * 0.3;
     const dir = seed % 2 ? 1 : -1;
     let shot = false;

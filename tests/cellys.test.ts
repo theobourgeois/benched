@@ -20,14 +20,14 @@ describe('goal celebrations', () => {
     const s = createMatch();
     startMatch(s);
     s.phase = 'playing';
-    const before = s.sides[played(s)].controlled;
+    const before = s.sides[played(s)].humans[0].controlled;
     scoreHome(s);
     expect(s.phase).toBe('goal');
     expect(s.scoringTeam).toBe(0);
-    const you = s.skaters[s.sides[played(s)].controlled];
+    const you = s.skaters[s.sides[played(s)].humans[0].controlled];
     expect(canStartCelly(s, you)).toBe(true);
     stepMatch(s, seat(s, { ...EMPTY_INPUT, switchPlayer: true, celly: 'helicopter' }));
-    expect(s.sides[played(s)].controlled).toBe(before);
+    expect(s.sides[played(s)].humans[0].controlled).toBe(before);
     expect(you.cellyKind).toBe('helicopter');
     expect(you.cellyTimer).toBe(0);
   });
@@ -37,7 +37,7 @@ describe('goal celebrations', () => {
       const s = createMatch();
       startMatch(s);
       scoreHome(s);
-      const you = s.skaters[s.sides[played(s)].controlled];
+      const you = s.skaters[s.sides[played(s)].humans[0].controlled];
       stepMatch(s, seat(s, { ...EMPTY_INPUT, celly: kind }));
       expect(you.cellyKind).toBe(kind);
       expect(cellyRagdoll(you)).toBe(kind === 'limp');
@@ -49,7 +49,7 @@ describe('goal celebrations', () => {
     startMatch(s);
     s.phase = 'playing';
     stepMatch(s, seat(s, { ...EMPTY_INPUT, celly: 'dance' }));
-    expect(s.skaters[s.sides[played(s)].controlled].cellyKind).toBeNull();
+    expect(s.skaters[s.sides[played(s)].humans[0].controlled].cellyKind).toBeNull();
   });
 
   it('does not let the home team celebrate an opponent goal', () => {
@@ -61,7 +61,7 @@ describe('goal celebrations', () => {
     expect(s.phase).toBe('goal');
     expect(s.scoringTeam).toBe(1);
     stepMatch(s, seat(s, { ...EMPTY_INPUT, celly: 'jump' }));
-    expect(s.skaters[s.sides[played(s)].controlled].cellyKind).toBeNull();
+    expect(s.skaters[s.sides[played(s)].humans[0].controlled].cellyKind).toBeNull();
   });
 
   it('holds the goal phase until a late celly finishes', () => {
@@ -70,13 +70,13 @@ describe('goal celebrations', () => {
     scoreHome(s);
     s.countdown = 0.4;
     stepMatch(s, seat(s, { ...EMPTY_INPUT, celly: 'dance' }));
-    expect(s.skaters[s.sides[played(s)].controlled].cellyKind).toBe('dance');
+    expect(s.skaters[s.sides[played(s)].humans[0].controlled].cellyKind).toBe('dance');
     expect(s.countdown).toBeGreaterThan(cellyDuration('dance'));
     tick(s, cellyDuration('dance') - 0.05);
     expect(s.phase).toBe('goal');
-    expect(s.skaters[s.sides[played(s)].controlled].cellyKind).toBe('dance');
+    expect(s.skaters[s.sides[played(s)].humans[0].controlled].cellyKind).toBe('dance');
     tick(s, 0.8);
-    expect(s.skaters[s.sides[played(s)].controlled].cellyKind).toBeNull();
+    expect(s.skaters[s.sides[played(s)].humans[0].controlled].cellyKind).toBeNull();
   });
 
   it('clears a finished celly and still keeps the puck in the net', () => {
@@ -85,7 +85,7 @@ describe('goal celebrations', () => {
     scoreHome(s);
     stepMatch(s, seat(s, { ...EMPTY_INPUT, celly: 'jump' }));
     tick(s, cellyDuration('jump') + 0.05);
-    expect(s.skaters[s.sides[played(s)].controlled].cellyKind).toBeNull();
+    expect(s.skaters[s.sides[played(s)].humans[0].controlled].cellyKind).toBeNull();
     expect(s.phase).toBe('goal');
   });
 });

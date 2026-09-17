@@ -12,7 +12,7 @@ import * as THREE from 'three';
 import { Arena } from './Arena';
 import { Player } from './Player';
 import { GoalLamp, IceSpray } from './Effects';
-import { mySide, runtime, useGame, viewMatch } from '../app/store';
+import { runtime, seatHuman, useGame, viewMatch } from '../app/store';
 import { impact, loop } from '../app/loop';
 import { netShotTarget, shotSpread } from '../game/engine';
 import { recordRagdollPoses } from './ragdoll';
@@ -130,18 +130,21 @@ function Puck() {
     </>
   );
 }
-function PassAim() {
+/** The pass arrow for one seat on this screen. Each person aims their own. */
+function PassAim({ seat }: { seat: 0 | 1 }) {
   const group = useRef<THREE.Group>(null),
     shaft = useRef<THREE.Mesh>(null),
     head = useRef<THREE.Mesh>(null),
     catchRing = useRef<THREE.Mesh>(null);
   useFrame(() => {
     const s = runtime.match,
-      side = mySide(s),
-      p = s.skaters[side.controlled],
+      side = seatHuman(seat, s),
+      p = side && s.skaters[side.controlled],
       root = group.current;
     if (!root) return;
     const live =
+      !!side &&
+      !!p &&
       !runtime.replay &&
       runtime.settings.beginner &&
       side.passHeld &&
@@ -149,7 +152,7 @@ function PassAim() {
       s.puck.owner === side.controlled &&
       p.role !== 'G';
     root.visible = live;
-    if (!live) return;
+    if (!live || !side || !p) return;
     const range = Math.max(2.2, side.passRange);
     root.position.set(p.x, 0.05, p.z);
     root.rotation.y = Math.atan2(side.passAim.x, side.passAim.z);
@@ -177,20 +180,29 @@ function PassAim() {
     </group>
   );
 }
-function PlayerLocatorHud({ marker }: { marker: RefObject<HTMLDivElement | null> }) {
+/** One seat's chip. With two people on the couch each gets one, labelled with their seat. */
+function PlayerLocatorHud({
+  marker,
+  seat,
+}: {
+  marker: RefObject<HTMLDivElement | null>;
+  seat: 0 | 1;
+}) {
   const shown = useRef(false);
   useFrame(({ camera, size }) => {
     const el = marker.current;
     if (!el) return;
-    const loc = runtime.replay
-      ? null
-      : playerLocator(
-          runtime.match,
-          camera as THREE.PerspectiveCamera,
-          size.width,
-          shown.current,
-          runtime.myTeam,
-        );
+    const human = seatHuman(seat, runtime.match);
+    const loc =
+      runtime.replay || !human
+        ? null
+        : playerLocator(
+            runtime.match,
+            camera as THREE.PerspectiveCamera,
+            size.width,
+            shown.current,
+            human,
+          );
     shown.current = Boolean(loc);
     if (!loc) {
       el.hidden = true;
@@ -201,6 +213,9 @@ function PlayerLocatorHud({ marker }: { marker: RefObject<HTMLDivElement | null>
     el.style.transform = `translateX(${loc.x}px) translateX(-50%)`;
     const num = el.querySelector('b');
     if (num && num.textContent !== String(loc.number)) num.textContent = String(loc.number);
+    const label = seat ? 'P2' : seatHuman(1, runtime.match) ? 'P1' : 'YOU';
+    const tag = el.querySelector('small');
+    if (tag && tag.textContent !== label) tag.textContent = label;
   });
   return null;
 }
@@ -208,10 +223,13 @@ function ShotAimHud({ marker }: { marker: RefObject<HTMLDivElement | null> }) {
   useFrame(({ camera, size }) => {
     const el = marker.current;
     if (!el) return;
+    // Only one person can have the puck, so the reticle belongs to whichever seat is carrying it.
     const s = runtime.match,
-      side = mySide(s),
-      p = s.skaters[side.controlled];
+      side = [seatHuman(0, s), seatHuman(1, s)].find((h) => h && h.controlled === s.puck.owner),
+      p = side && s.skaters[side.controlled];
     const live =
+      !!side &&
+      !!p &&
       !runtime.replay &&
       runtime.settings.beginner &&
       s.phase === 'playing' &&
@@ -219,7 +237,7 @@ function ShotAimHud({ marker }: { marker: RefObject<HTMLDivElement | null> }) {
       p.role !== 'G' &&
       !s.puck.shot &&
       !side.passHeld;
-    if (!live) {
+    if (!live || !side || !p) {
       el.hidden = true;
       return;
     }
@@ -263,7 +281,8 @@ class SceneBoundary extends Component<{ children: ReactNode }, { error: boolean 
 export function GameScene() {
   const { match, settings } = useGame();
   const shotAim = useRef<HTMLDivElement>(null),
-    locator = useRef<HTMLDivElement>(null);
+    locator = useRef<HTMLDivElement>(null),
+    locatorTwo = useRef<HTMLDivElement>(null);
   return (
     <>
       <div className={`arena-canvas ${match.phase === 'menu' ? 'arena-menu' : ''}`}>
@@ -307,7 +326,8 @@ export function GameScene() {
               <Arena iceLogo={match.teams[0].logoLight} />
               <Puck />
               <ShotAimHud marker={shotAim} />
-              <PassAim />
+              <PassAim seat={0} />
+              <PassAim seat={1} />
               <IceSpray />
               <GoalLamp />
             </Suspense>
@@ -322,7 +342,8 @@ export function GameScene() {
             </Suspense>
             <Simulation />
             <CameraRig />
-            <PlayerLocatorHud marker={locator} />
+            <PlayerLocatorHud marker={locator} seat={0} />
+            <PlayerLocatorHud marker={locatorTwo} seat={1} />
             {LabScene && labHooks.active && (
               <Suspense fallback={null}>
                 <LabScene />
@@ -331,13 +352,15 @@ export function GameScene() {
           </Canvas>
         </SceneBoundary>
       </div>
-      <div ref={locator} className="player-locator" hidden aria-hidden="true">
-        <span>
-          <b />
-          <small>YOU</small>
-        </span>
-        <i />
-      </div>
+      {[locator, locatorTwo].map((ref, seat) => (
+        <div key={seat} ref={ref} className="player-locator" hidden aria-hidden="true">
+          <span>
+            <b />
+            <small>YOU</small>
+          </span>
+          <i />
+        </div>
+      ))}
     </>
   );
 }

@@ -104,7 +104,7 @@ export function FeelHud({
   const [onlyChanged, setOnlyChanged] = useState(false);
   const [copied, setCopied] = useState(false);
   const meta = FEEL_GROUPS.find((item) => item.id === group) ?? FEEL_GROUPS[0];
-  const side = mySide(match);
+  const side = mySide(match).humans[0] ?? { controlled: -1 };
   const you = match.skaters[side.controlled];
   const speed = you ? Math.hypot(you.vx, you.vz) : 0;
   const puckDist = you ? distance(you, match.puck) : 0;

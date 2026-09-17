@@ -155,13 +155,11 @@ export interface InputFrame {
   celly: CellyKind | null;
 }
 /**
- * One side's half of the match: who they are driving and everything that skater is part-way
- * through. Both sides carry this whether a human or `decideAI` is holding the stick, so nothing
- * in the simulation has to ask which team the player is on.
+ * One person's stick: the skater they are holding and everything that skater is part-way through
+ * because of them. A side carries one of these per person playing it, in seat order, so two people
+ * can share a bench and neither's windup or pass arrow leaks into the other's.
  */
-export interface SideState {
-  /** A human is driving `controlled`. AI-only sides still track the rest, so a side can be handed over mid-match. */
-  human: boolean;
+export interface Human {
   controlled: number;
   /** After a defensive switch, keep skating at the play while the left stick is quiet. */
   autoSkate: boolean;
@@ -178,11 +176,27 @@ export interface SideState {
   passTarget: number | null;
   /** Ice-arrow length while aiming a pass. */
   passRange: number;
-  /** Faceoff countdown remaining when this side struck; -1 if they have not. */
+}
+/**
+ * One side's half of the match. Nothing in the simulation asks which team *you* are on; it asks
+ * whether anybody is holding a given skater.
+ */
+export interface SideState {
+  /**
+   * The people playing this side, in seat order. Empty leaves every skater on it to `decideAI`.
+   * No two ever hold the same skater.
+   */
+  humans: Human[];
+  /** Faceoff countdown remaining when this side's centre struck; -1 if they have not. */
   drawInput: number;
 }
-/** One frame of intent per side. `null` leaves that side entirely to `decideAI`. */
-export type SideInputs = [InputFrame | null, InputFrame | null];
+/** One frame per person on a side, in the order of `SideState.humans`. */
+export type HumanFrames = readonly (InputFrame | null)[];
+/**
+ * A frame for each person on each side. A person with no frame this step holds still: a dropped
+ * frame must never read as them handing the stick back.
+ */
+export type SideInputs = [HumanFrames, HumanFrames];
 export interface GameEvent {
   id: number;
   type: 'shot' | 'pass' | 'hit' | 'goal' | 'post' | 'crossbar' | 'save' | 'faceoff' | 'horn';

@@ -1,4 +1,5 @@
 import { attackDirection, RINK } from '../game/config';
+import { leadHuman } from '../game/humans';
 import { clamp } from '../game/math';
 import type { CameraMode, MatchState, Settings, Team } from '../game/types';
 
@@ -110,11 +111,14 @@ export function cameraFraming(
   }
 }
 
+/** The skater the tracking cameras lean toward: the watching bench's lead person, or its centre. */
+const followed = (match: MatchState, anchor: Team) =>
+  leadHuman(match, anchor)?.controlled ?? anchor * 6;
 function isShootoutGoalie(match: MatchState, anchor: Team) {
-  return match.mode === 'shootout' && match.skaters[match.sides[anchor].controlled]?.role === 'G';
+  return match.mode === 'shootout' && match.skaters[followed(match, anchor)]?.role === 'G';
 }
 function goalieFraming(match: MatchState, aspect: number, angle: TrackingAngle, anchor: Team) {
-  const goalie = match.skaters[match.sides[anchor].controlled],
+  const goalie = match.skaters[followed(match, anchor)],
     look = attackDirection(goalie.team, match.period),
     puck = match.puck,
     scale = clamp(1.45 / aspect, 1, 2.6);
@@ -130,13 +134,13 @@ function goalieFraming(match: MatchState, aspect: number, angle: TrackingAngle, 
 }
 function trackingFraming(match: MatchState, aspect: number, angle: TrackingAngle, anchor: Team) {
   if (isShootoutGoalie(match, anchor)) return goalieFraming(match, aspect, angle, anchor);
-  const side = match.sides[anchor];
+  const human = leadHuman(match, anchor);
   const direction = attackDirection(anchor, match.period),
-    player = match.skaters[side.controlled];
+    player = match.skaters[followed(match, anchor)];
   const attackX = player.x * direction;
   const netView = clamp((attackX - 8) / 14, 0, 1);
   const attackLook = clamp((match.puck.x * direction + 16) / 24, 0, 1);
-  const lift = match.puck.owner === side.controlled ? side.shotLift : 0;
+  const lift = human && match.puck.owner === human.controlled ? human.shotLift : 0;
   const x = clamp(
     match.puck.x * (1 - angle.follow - netView * 0.22) +
       player.x * angle.follow +
@@ -144,7 +148,7 @@ function trackingFraming(match: MatchState, aspect: number, angle: TrackingAngle
     -23,
     23,
   );
-  const z = clamp(match.puck.z * 0.22 + side.shotAim * netView * 0.55, -3.4, 3.4);
+  const z = clamp(match.puck.z * 0.22 + (human?.shotAim ?? 0) * netView * 0.55, -3.4, 3.4);
   const scale = clamp(1.45 / aspect, 1, 2.6);
   const height = (angle.height - netView * angle.heightDrop - lift * 1.8) * scale;
   const back = (angle.back + netView * angle.backIn) * scale;

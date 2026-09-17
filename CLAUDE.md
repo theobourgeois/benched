@@ -92,10 +92,10 @@ new `type` in `src/audio/sound.ts` `play` and, if it is felt, in `FELT_EVENTS` i
 `src/app/loop.ts`. Events are capped at 32 per match and identified by `id`; consumers track
 the last id they handled.
 
-**A field on `MatchState`, `SideState`, `Skater` or `Puck`.** Decide whether it moves during a
-match. If it does, add it to the matching field table in `src/net/snapshot.ts` (`MATCH`,
-`SIDE`, `SKATER`, `PUCK_FIELDS`) with a kind and a blend, or the guest will never see it. Enum
-orders there are the wire format: append, never reorder. If it must survive a replay, check
+**A field on `MatchState`, `SideState`, `Human`, `Skater` or `Puck`.** Decide whether it moves
+during a match. If it does, add it to the matching field table in `src/net/snapshot.ts`
+(`MATCH`, `SIDE`, `HUMAN`, `SKATER`, `PUCK_FIELDS`) with a kind and a blend, or the guest will
+never see it. Enum orders there are the wire format: append, never reorder. If it must survive a replay, check
 `src/game/replay.ts` copies it. `tests/snapshot.test.ts` round-trips a stepped match; add an
 assertion for the new field.
 
@@ -153,6 +153,11 @@ class needs a binding and a migration tag in `wrangler.jsonc`.
 - Controllers: seat one claims the first pad and the keyboard, seat two takes a pad seat one
   is not holding. A browser hides a pad until it has seen a press. Online, seat two is never
   read as a player.
+- A side holds a list of `humans`, one per person, in seat order; an empty list is a CPU side.
+  Anything a person's stick carries (windup, aim, pass arrow) goes on `Human`, never `SideState`,
+  because two people can share a bench, and online rooms will later seat more than one per team.
+  `SideInputs` is a frame per person. When the puck moves control, go through `handOver` in the
+  engine and switch through `switchSkater`; they keep the rule that no two people hold one skater.
 - Pause is resolved in the loop, not the engine, and does not exist online: the pause button
   asks whether to leave instead (`askToLeave`).
 - A queued session (`runtime.queue`) is not an online match. The loop never reads it, so the

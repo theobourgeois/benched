@@ -42,11 +42,13 @@ import {
 } from './goalie';
 import { SHOT_DOWNSWING } from './actionTiming';
 import { clamp, constrainToRink, distance, hash01, normalized } from './math';
+import { createHuman, humanOn, MAX_HUMANS } from './humans';
 import { freeSkateTeam, isOnIce, modeInfo, SHOOTOUT_ROUNDS } from './modes';
 import type {
   DekeSpecial,
   GameEvent,
   GameMode,
+  Human,
   InputFrame,
   MatchState,
   Jersey,
@@ -61,63 +63,85 @@ import type {
 import { TEAMS } from './types';
 export { isOnIce } from './modes';
 const ROLES = ['C', 'LW', 'RW', 'LD', 'RD', 'G'] as const;
-/** A side's starting state. `team * 6` is that team's centre. */
-function createSide(team: Team, human: boolean): SideState {
+/** A side's starting state: one person per seat, all of them to be placed at the first drop. */
+function createSide(team: Team, seats: number): SideState {
   return {
-    human,
-    controlled: team * 6,
-    autoSkate: false,
-    shotCharge: 0,
-    shotAim: 0,
-    shotLift: 0,
-    passHeld: false,
-    passAim: { x: 0, z: 0 },
-    passTarget: null,
-    passRange: 0,
+    humans: Array.from({ length: Math.min(seats, MAX_HUMANS) }, () => createHuman(team * 6)),
     drawInput: -1,
   };
 }
-/** Everything a side carries between whistles. The controlled skater survives; the rest does not. */
-function resetSide(side: SideState, team: Team) {
-  side.controlled = team * 6;
-  side.autoSkate = false;
-  side.shotCharge = 0;
-  side.shotAim = 0;
-  side.shotLift = 0;
-  side.passHeld = false;
-  side.passAim = { x: 0, z: 0 };
-  side.passTarget = null;
-  side.passRange = 0;
-  side.drawInput = -1;
+/** What a person's stick carries between whistles: nothing. */
+function resetHuman(human: Human) {
+  human.autoSkate = false;
+  human.shotCharge = 0;
+  human.shotAim = 0;
+  human.shotLift = 0;
+  clearPassAim(human);
 }
-/** The side driving this skater's team. */
-const sideOf = (s: MatchState, p: Skater) => s.sides[p.team];
-/** True when this skater is the one a human on their side is holding. */
-const isControlled = (s: MatchState, p: Skater) =>
-  s.sides[p.team].human && s.sides[p.team].controlled === p.id;
-/** Hand a side's control to a skater, but only where a human is there to receive it. */
-function takeControl(s: MatchState, p: Skater) {
-  const side = s.sides[p.team];
-  if (!side.human) return false;
-  side.controlled = p.id;
-  return true;
+/**
+ * Put a side's people on its skaters: the seat `lead` on `first`, and everybody after them, in
+ * seat order, on the rest of the roster: skaters on the ice first, then the goalie, then anyone
+ * off the ice. With one person that is just them on `first`; with two in a 1-on-1 the second is
+ * in goal; and a seat that has no skater on the ice this time (a shootout attempt) is parked on
+ * one that is not, so no two people ever hold the same skater.
+ */
+function seatHumans(s: MatchState, team: Team, first: Skater, lead = 0) {
+  const humans = s.sides[team].humans;
+  if (!humans.length) return;
+  const rank = (p: Skater) => (isOnIce(s, p) ? 0 : 2) + (p.role === 'G' ? 1 : 0);
+  const rest = s.skaters
+    .filter((p) => p.team === team && p.id !== first.id)
+    .sort((a, b) => rank(a) - rank(b) || a.id - b.id);
+  humans.forEach((human, i) => {
+    const seat = humans[(lead + i) % humans.length];
+    seat.controlled = i === 0 ? first.id : rest[i - 1].id;
+    resetHuman(human);
+  });
 }
-/** Hand a side's stick to this skater, seating a person on that side if one is not there. */
+/** True when somebody is holding this skater. */
+const isControlled = (s: MatchState, p: Skater) => humanOn(s, p) !== undefined;
+/**
+ * The puck has come to `p`, so somebody on that side should be holding them. Nobody moves if a
+ * person already is. Otherwise it is `from` — the person who threw the pass that got it there —
+ * or, for a puck nobody on the side sent (a loose puck, a draw, a goalie's freeze), whoever is
+ * nearest, with seat order settling a tie. Returns the person now on `p`, if the side has any.
+ */
+function handOver(s: MatchState, p: Skater, from?: Human) {
+  const humans = s.sides[p.team].humans;
+  const holding = humans.find((h) => h.controlled === p.id);
+  if (holding || !humans.length) return holding;
+  const reach = (h: Human) => distance(s.skaters[h.controlled], p);
+  const taker =
+    from && humans.includes(from)
+      ? from
+      : humans.reduce((best, h) => (reach(h) < reach(best) ? h : best));
+  taker.controlled = p.id;
+  return taker;
+}
+/**
+ * Hand this skater to the first person on their side, seating one if nobody is there. Whoever
+ * was already on that skater swaps onto the first person's old one, so nobody is holding twice.
+ */
 export function driveSkater(s: MatchState, id: number) {
   const p = s.skaters[id];
-  s.sides[p.team].human = true;
-  s.sides[p.team].controlled = id;
+  const humans = s.sides[p.team].humans;
+  if (!humans.length) {
+    humans.push(createHuman(id));
+    return;
+  }
+  const holding = humans.find((h) => h.controlled === id);
+  if (holding) holding.controlled = humans[0].controlled;
+  humans[0].controlled = id;
 }
 /**
- * What a side is actually doing this step. `human` alone decides whether a person is on the ice;
- * the frame only carries their intent. A side with somebody on it but no frame this step holds
- * still, because a dropped frame must never read as the player handing back the stick.
+ * What one person on a side is doing this step. The seat alone decides whether they are on the
+ * ice; the frame only carries their intent, and a missing one holds still.
  */
-const frameFor = (s: MatchState, t: Team, frames: SideInputs) =>
-  s.sides[t].human ? (frames[t] ?? EMPTY_INPUT) : null;
+const frameFor = (t: Team, seat: number, frames: SideInputs) => frames[t][seat] ?? EMPTY_INPUT;
 /**
- * `humans` is the side, or sides, a person is playing. One team is the usual game against the
- * CPU; both is two humans, whether they are sharing a couch or a room.
+ * `humans` is the side each person is playing, one entry per person, in seat order. One team is
+ * the usual game against the CPU; `[0, 1]` is two people against each other, and `[0, 0]` two
+ * people on the same bench against the CPU.
  */
 export function createMatch(
   humans: Team | Team[] = 0,
@@ -150,7 +174,10 @@ export function createMatch(
       shot: false,
       passTo: null,
     },
-    sides: [createSide(0, played.includes(0)), createSide(1, played.includes(1))],
+    sides: [
+      createSide(0, played.filter((t) => t === 0).length),
+      createSide(1, played.filter((t) => t === 1).length),
+    ],
     teams,
     jerseys,
     difficulty: DEFAULT_DIFFICULTY,
@@ -283,8 +310,7 @@ export function resetFormation(s: MatchState) {
     shot: false,
     passTo: null,
   });
-  resetSide(s.sides[0], 0);
-  resetSide(s.sides[1], 1);
+  for (const t of TEAMS) seatHumans(s, t, s.skaters[t * 6]);
   s.hitstop = 0;
   for (const p of s.skaters) {
     if (isOnIce(s, p)) continue;
@@ -293,7 +319,8 @@ export function resetFormation(s: MatchState) {
   }
   if (s.mode === 'freeSkate') {
     // Practice is one skater's rink: the first human side takes the puck at centre ice.
-    const you = s.skaters[s.sides[freeSkateTeam(s)].controlled];
+    const team = freeSkateTeam(s);
+    const you = s.skaters[s.sides[team].humans[0]?.controlled ?? team * 6];
     you.x = 0;
     you.z = 0;
     givePuck(s, you);
@@ -355,9 +382,11 @@ function setupShootoutAttempt(s: MatchState) {
   shooter.angle = dir > 0 ? Math.PI / 2 : -Math.PI / 2;
   givePuck(s, shooter);
   // Each side takes the only skater it has on the ice: the shooter, or the goalie facing them.
-  for (const t of [0, 1] as Team[]) {
+  // Two people on one bench take turns, shooting and keeping alike, one attempt each.
+  const attempt = s.shootoutTaken[s.shootoutShooter];
+  for (const t of TEAMS) {
     const keeper = s.skaters.find((p) => p.team === t && p.role === 'G');
-    s.sides[t].controlled = t === s.shootoutShooter ? shooter.id : (keeper?.id ?? t * 6);
+    seatHumans(s, t, t === s.shootoutShooter ? shooter : (keeper ?? s.skaters[t * 6]), attempt);
   }
   notice(s, 'SHOT', s.shootoutShooter);
 }
@@ -444,7 +473,7 @@ export function shotSpread(
   s: MatchState,
   p: Skater,
   power: number,
-  target = netShotTarget(s, p, s.sides[p.team].shotAim, s.sides[p.team].shotLift),
+  target = netShotTarget(s, p, humanOn(s, p)?.shotAim ?? 0, humanOn(s, p)?.shotLift ?? 0),
 ) {
   const tip = stickTip(p),
     range = Math.hypot(target.x - tip.x, target.z - tip.z),
@@ -590,7 +619,7 @@ function resolveFaceoff(s: MatchState) {
   s.puck.z = tip.z;
   s.puck.vx = winner.vx;
   s.puck.vz = winner.vz;
-  takeControl(s, winner);
+  handOver(s, winner);
   winner.cooldown = 0.1;
   loser.cooldown = 0.32;
   s.sides[0].drawInput = -1;
@@ -609,36 +638,32 @@ function switchCost(p: Skater, from: { x: number; z: number }, netX: number) {
     dist - clamp(along, 0, 10) * 0.85 + (along < 0 ? -along * 1.5 : 0) + Math.abs(across) * 0.4
   );
 }
-function endAutoSkate(side: SideState) {
-  side.autoSkate = false;
-}
-function beginAutoSkate(side: SideState) {
-  side.autoSkate = true;
-}
-export function switchSkater(s: MatchState, team: Team) {
-  const side = s.sides[team];
-  const owner = s.puck.owner;
+/**
+ * Move one person to another skater on their side. Nobody is ever switched onto a skater somebody
+ * else is holding: a carrier a teammate has is left to them, and so is anyone they are on. When
+ * two people switch on the same step the first seat picks first and the second picks from what is
+ * left, because the sides are read in seat order.
+ */
+export function switchSkater(s: MatchState, team: Team, human: Human) {
+  const humans = s.sides[team].humans;
+  const held = (p: Skater) => humans.some((h) => h.controlled === p.id);
+  const owner = s.puck.owner !== null ? s.skaters[s.puck.owner] : null;
   // A goalie holding the puck can be left to play it while you take a skater.
-  if (owner !== null && s.skaters[owner].team === team && s.skaters[owner].role !== 'G') {
-    side.controlled = owner;
-    endAutoSkate(side);
+  if (owner && owner.team === team && owner.role !== 'G' && !held(owner)) {
+    human.controlled = owner.id;
+    human.autoSkate = false;
     return;
   }
   const options = s.skaters.filter(
-    (p) =>
-      isOnIce(s, p) &&
-      p.team === team &&
-      p.role !== 'G' &&
-      p.downTimer <= 0 &&
-      p.id !== side.controlled,
+    (p) => isOnIce(s, p) && p.team === team && p.role !== 'G' && p.downTimer <= 0 && !held(p),
   );
   if (!options.length) return;
-  const from = owner !== null ? s.skaters[owner] : s.puck;
+  const from = owner ?? s.puck;
   const netX = -attackDirection(team, s.period) * RINK.goalX;
-  side.controlled = options.reduce((best, p) =>
+  human.controlled = options.reduce((best, p) =>
     switchCost(p, from, netX) < switchCost(best, from, netX) ? p : best,
   ).id;
-  beginAutoSkate(side);
+  human.autoSkate = true;
 }
 /** Keep stride toward the body. A full reverse would plant a hockey stop and kill the hit. */
 function autoSkateMove(s: MatchState, p: Skater): Vec2 {
@@ -658,11 +683,10 @@ function autoSkateMove(s: MatchState, p: Skater): Vec2 {
   const turn = clamp(error, -1.15, 1.15);
   return { x: Math.sin(travel + turn), z: Math.cos(travel + turn) };
 }
-function controlledSkate(s: MatchState, p: Skater, input: InputFrame) {
-  const side = s.sides[p.team];
+function controlledSkate(s: MatchState, p: Skater, input: InputFrame, human: Human) {
   const stick = Math.hypot(input.moveX, input.moveZ);
-  if (s.puck.owner === p.id || stick > 0.18 || input.backskate) endAutoSkate(side);
-  if (!side.autoSkate)
+  if (s.puck.owner === p.id || stick > 0.18 || input.backskate) human.autoSkate = false;
+  if (!human.autoSkate)
     return {
       x: input.moveX,
       z: input.moveZ,
@@ -714,10 +738,11 @@ export function requestShot(s: MatchState, p: Skater, power: number, aim = 0, he
     p.pendingShot
   )
     return;
-  const load = isControlled(s, p) ? sideOf(s, p).shotCharge : 0;
+  const human = humanOn(s, p);
+  const load = human?.shotCharge ?? 0;
   if (load > 0.2 && power > 0.55 && p.stickSide >= 0 && p.passTimer <= 0) {
     p.pendingShot = { timer: SHOT_DOWNSWING, load, power, aim, height, tick: s.tick };
-    sideOf(s, p).shotCharge = 0;
+    if (human) human.shotCharge = 0;
   } else shootPuck(s, p, power, aim, height);
 }
 
@@ -799,10 +824,11 @@ export function shootPuck(s: MatchState, p: Skater, power: number, aim = 0, heig
   p.shotSide = p.stickSide;
   p.shotReach = p.stickReach;
   // The pose unwinds whatever windup was showing through the release rather than dropping it.
-  p.shotLoad = isControlled(s, p) ? sideOf(s, p).shotCharge : 0;
+  const human = humanOn(s, p);
+  p.shotLoad = human?.shotCharge ?? 0;
   p.passTimer = 0;
   s.shots[p.team]++;
-  sideOf(s, p).shotCharge = 0;
+  if (human) human.shotCharge = 0;
   emit(s, 'shot', power);
   notice(
     s,
@@ -874,29 +900,28 @@ function hopPassLoft(cover: number) {
   const t = Math.max(0.1, cover / speed);
   return clamp((0.82 - 0.15 + 4.9 * t * t) / t, 2.6, PHYSICS.saucerLift);
 }
-/** Clear a side's pass arrow. */
-function clearPassAim(side: SideState) {
-  side.passHeld = false;
-  side.passAim = { x: 0, z: 0 };
-  side.passTarget = null;
-  side.passRange = 0;
+/** Clear a person's pass arrow. */
+function clearPassAim(human: Human) {
+  human.passHeld = false;
+  human.passAim = { x: 0, z: 0 };
+  human.passTarget = null;
+  human.passRange = 0;
 }
-function applyPassAim(s: MatchState, p: Skater, input: InputFrame) {
-  const side = s.sides[p.team];
+function applyPassAim(s: MatchState, p: Skater, input: InputFrame, human: Human) {
   const aiming =
     s.puck.owner === p.id &&
     (input.passHeld || input.passRelease) &&
     p.downTimer <= 0 &&
     p.stumbleTimer <= 0;
   if (!aiming) {
-    clearPassAim(side);
+    clearPassAim(human);
     return;
   }
   const lane = passLane(s, p, input.moveX, input.moveZ);
-  side.passHeld = true;
-  side.passAim = lane.aim;
-  side.passTarget = lane.target?.id ?? null;
-  side.passRange = lane.range;
+  human.passHeld = true;
+  human.passAim = lane.aim;
+  human.passTarget = lane.target?.id ?? null;
+  human.passRange = lane.range;
 }
 export function passPuck(s: MatchState, p: Skater, mx: number, mz: number, loft = 0) {
   if (s.puck.owner !== p.id || p.downTimer > 0 || p.stumbleTimer > 0) return;
@@ -910,8 +935,10 @@ export function passPuck(s: MatchState, p: Skater, mx: number, mz: number, loft 
   const lift = loft > 0 ? loft : cover !== null ? hopPassLoft(cover) : 0;
   releasePuck(s, p, lane.dx, lane.dz, PHYSICS.passSpeed * (lift > 0 ? 0.92 : 1), lift, false);
   s.puck.passTo = lane.target?.id ?? null;
-  if (lane.target) takeControl(s, lane.target);
-  clearPassAim(s.sides[p.team]);
+  // Whoever threw it follows the puck, unless the pass went to somebody a teammate is holding.
+  const passer = humanOn(s, p);
+  if (passer) clearPassAim(passer);
+  if (lane.target) handOver(s, lane.target, passer);
   emit(s, 'pass', loft > 0 ? 0.42 : 0.35);
   notice(s, loft > 0 ? 'SAUCER' : 'PASS');
 }
@@ -1085,7 +1112,7 @@ function stickLift(s: MatchState, p: Skater) {
   s.puck.lastTouch = p.team;
   s.puck.shot = false;
   s.puck.passTo = null;
-  takeControl(s, p);
+  handOver(s, p);
   emit(s, 'hit', 0.18);
   notice(s, 'STICK LIFT');
   return true;
@@ -1651,10 +1678,11 @@ function coverPuck(s: MatchState, g: Skater, label: string) {
   p.lockout = 0;
   p.vx = p.vz = p.vy = 0;
   p.y = PUCK.restY;
-  g.coverTimer = s.sides[g.team].human ? GOALIE.humanHold : GOALIE.hold;
+  g.coverTimer = s.sides[g.team].humans.length ? GOALIE.humanHold : GOALIE.hold;
   g.cooldown = 0.25;
   g.readTimer = 0;
-  if (takeControl(s, g)) endAutoSkate(s.sides[g.team]);
+  const keeper = handOver(s, g);
+  if (keeper) keeper.autoSkate = false;
   notice(s, label);
   if (s.mode === 'shootout') missShootout(s, 'SAVE');
 }
@@ -1842,8 +1870,9 @@ function advancePuck(s: MatchState, dt: number) {
   candidates.sort((a, b) => reachOf(a) - reachOf(b));
   // A human reaching for a loose puck gets the benefit of the doubt over a CPU. When both sides
   // are reaching, neither does, or the race would be settled by roster order instead of by reach.
+  // Two people on the same side reaching are one side: the nearer of them gets it.
   const held = candidates.filter((player) => isControlled(s, player));
-  const you = held.length === 1 ? held[0] : undefined;
+  const you = new Set(held.map((player) => player.team)).size === 1 ? held[0] : undefined;
   let player = candidates[0];
   if (you && player && reachOf(you) < reachOf(player) + 0.38) player = you;
   if (livePass && p.lastTouch !== null && player && player.team !== p.lastTouch) {
@@ -1871,18 +1900,18 @@ function advancePuck(s: MatchState, dt: number) {
       p.shot = false;
       p.passTo = null;
       player.cooldown = 0.15;
-      takeControl(s, player);
+      handOver(s, player);
     }
   }
 }
 /**
  * Pure fixed-step simulation. It has no React, browser, rendering or audio dependencies.
  *
- * One `InputFrame` per side, indexed by team; `null` leaves that side to `decideAI`. Pausing is
+ * One `InputFrame` per person, by team and then seat; a side nobody sits on is left to `decideAI`. Pausing is
  * deliberately not handled here — with two people playing, whose pause it is belongs to the
  * caller, not to the physics.
  */
-export function stepMatch(s: MatchState, inputs: SideInputs = [null, null], dt = RULES.fixedStep) {
+export function stepMatch(s: MatchState, inputs: SideInputs = [[], []], dt = RULES.fixedStep) {
   if (
     s.phase === 'menu' ||
     s.phase === 'paused' ||
@@ -1893,10 +1922,13 @@ export function stepMatch(s: MatchState, inputs: SideInputs = [null, null], dt =
   s.tick++;
   s.noticeTimer = Math.max(0, s.noticeTimer - dt);
   if (s.phase === 'faceoff') {
+    // A side's draw is taken by whoever is on its centre. Anybody else's swing is not at the dot.
     for (const t of TEAMS) {
-      const input = frameFor(s, t, inputs);
-      if (input && s.sides[t].drawInput < 0 && (input.pass || input.poke))
-        s.sides[t].drawInput = s.countdown;
+      const side = s.sides[t];
+      const seat = side.humans.findIndex((h) => h.controlled === t * 6);
+      if (seat < 0) continue;
+      const input = frameFor(t, seat, inputs);
+      if (side.drawInput < 0 && (input.pass || input.poke)) side.drawInput = s.countdown;
     }
     s.countdown -= dt;
     if (s.countdown <= 0) {
@@ -1933,44 +1965,44 @@ export function stepMatch(s: MatchState, inputs: SideInputs = [null, null], dt =
       return;
     }
   }
-  // Each side reads its own stick before anyone moves: switching, windup, aim and the pass arrow.
-  for (const t of TEAMS) {
-    const side = s.sides[t],
-      input = frameFor(s, t, inputs);
-    if (!input) continue;
-    if (input.switchPlayer) {
-      const ownGoal = s.phase === 'goal' && s.scoringTeam === t;
-      if (!ownGoal && !stickLift(s, s.skaters[side.controlled])) switchSkater(s, t);
-    } else if (input.pass && (s.puck.owner === null || s.skaters[s.puck.owner].team !== t))
-      switchSkater(s, t);
-    const you = s.skaters[side.controlled],
-      youCarry = s.puck.owner === side.controlled;
-    side.shotCharge =
-      !you.pendingShot &&
-      !input.toeDrag &&
-      !input.deke &&
-      !input.dekeSpecial &&
-      !you.dekeKind &&
-      input.stickY > 0.3 &&
-      youCarry
-        ? clamp(side.shotCharge + dt * 1.8, 0, 1)
-        : Math.max(0, side.shotCharge - dt * 2);
-    if (youCarry && !input.toeDrag) {
-      side.shotAim = clamp(input.aimZ ?? 0, -1, 1);
-      side.shotLift = clamp(input.shotHeight ?? 0, 0, 1);
-    } else {
-      side.shotAim = 0;
-      side.shotLift = 0;
-    }
-    applyPassAim(s, you, input);
-  }
-  // Freeze who each side is driving for the whole step. A pass that switches control mid-loop
+  // Each person reads their own stick before anyone moves: switching, windup, aim and the pass
+  // arrow. Seat order is the priority when two people on a side want the same skater.
+  for (const t of TEAMS)
+    s.sides[t].humans.forEach((human, seat) => {
+      const input = frameFor(t, seat, inputs);
+      if (input.switchPlayer) {
+        const ownGoal = s.phase === 'goal' && s.scoringTeam === t;
+        if (!ownGoal && !stickLift(s, s.skaters[human.controlled])) switchSkater(s, t, human);
+      } else if (input.pass && (s.puck.owner === null || s.skaters[s.puck.owner].team !== t))
+        switchSkater(s, t, human);
+      const you = s.skaters[human.controlled],
+        youCarry = s.puck.owner === human.controlled;
+      human.shotCharge =
+        !you.pendingShot &&
+        !input.toeDrag &&
+        !input.deke &&
+        !input.dekeSpecial &&
+        !you.dekeKind &&
+        input.stickY > 0.3 &&
+        youCarry
+          ? clamp(human.shotCharge + dt * 1.8, 0, 1)
+          : Math.max(0, human.shotCharge - dt * 2);
+      if (youCarry && !input.toeDrag) {
+        human.shotAim = clamp(input.aimZ ?? 0, -1, 1);
+        human.shotLift = clamp(input.shotHeight ?? 0, 0, 1);
+      } else {
+        human.shotAim = 0;
+        human.shotLift = 0;
+      }
+      applyPassAim(s, you, input, human);
+    });
+  // Freeze who each person is driving for the whole step. A pass that switches control mid-loop
   // must not hand the stick over before the skater who threw it has finished moving.
-  const driven = new Map<number, InputFrame>();
-  for (const t of TEAMS) {
-    const input = frameFor(s, t, inputs);
-    if (input) driven.set(s.sides[t].controlled, input);
-  }
+  const driven = new Map<number, { input: InputFrame; human: Human }>();
+  for (const t of TEAMS)
+    s.sides[t].humans.forEach((human, seat) =>
+      driven.set(human.controlled, { input: frameFor(t, seat, inputs), human }),
+    );
   const previous = s.skaters.map((p) => ({ x: p.x, z: p.z }));
   // Every CPU sees the same pre-movement frame, regardless of its roster index.
   const decisions = s.skaters.map((p) =>
@@ -1999,7 +2031,8 @@ export function stepMatch(s: MatchState, inputs: SideInputs = [null, null], dt =
     if (p.downTimer > 0 || p.diveTimer > 0 || s.puck.owner !== p.id) clearDeke(p);
     stepCelly(p, dt);
     if (p.downTimer > 0 && p.cellyKind !== 'limp') clearCelly(p);
-    const input = driven.get(p.id) ?? null;
+    const drive = driven.get(p.id);
+    const input = drive?.input ?? null;
     if (p.role === 'G') {
       p.angle = goalieFacing(s, p);
       stepGoalieRead(s, p, dt, cpuTune(s, p).reaction, !!input);
@@ -2030,7 +2063,7 @@ export function stepMatch(s: MatchState, inputs: SideInputs = [null, null], dt =
     }
     if (input) {
       if (input.block && p.role !== 'G') p.blockTimer = 0.16;
-      const skate = controlledSkate(s, p, input);
+      const skate = controlledSkate(s, p, input, drive!.human);
       const push = p.role === 'G' ? savePush(p) : null;
       const human = backcheckScales(s, p, skate.push, 1);
       moveSkater(
@@ -2091,7 +2124,7 @@ export function stepMatch(s: MatchState, inputs: SideInputs = [null, null], dt =
           p,
           input.shotPower,
           input.aimZ ?? 0,
-          input.shotHeight ?? s.sides[p.team].shotLift,
+          input.shotHeight ?? drive!.human.shotLift,
         );
       if (input.passRelease && s.puck.owner === p.id) passPuck(s, p, input.moveX, input.moveZ);
       if (input.poke) pokeCheck(s, p, input.moveX, input.moveZ);

@@ -14,7 +14,7 @@ const play = (s: MatchState, inputs: SideInputs, seconds: number) => {
 function busy() {
   const s = createMatch([0, 1]);
   startMatch(s);
-  play(s, [null, null], 4);
+  play(s, [[], []], 4);
   // Carry, wind up a shot, and deke, so pending shots, windups and stick geometry are all live.
   play(
     s,
@@ -145,10 +145,13 @@ describe('snapshot round trip', () => {
     expect(guest.puck.y).toBeCloseTo(host.puck.y, 2);
     expect(guest.puck.shot).toBe(host.puck.shot);
     for (const team of [0, 1] as const) {
-      expect(guest.sides[team].controlled).toBe(host.sides[team].controlled);
-      expect(guest.sides[team].human).toBe(host.sides[team].human);
-      expect(guest.sides[team].shotCharge).toBeCloseTo(host.sides[team].shotCharge, 2);
-      expect(guest.sides[team].passTarget).toBe(host.sides[team].passTarget);
+      expect(guest.sides[team].humans[0].controlled).toBe(host.sides[team].humans[0].controlled);
+      expect(guest.sides[team].humans.length).toBe(host.sides[team].humans.length);
+      expect(guest.sides[team].humans[0].shotCharge).toBeCloseTo(
+        host.sides[team].humans[0].shotCharge,
+        2,
+      );
+      expect(guest.sides[team].humans[0].passTarget).toBe(host.sides[team].humans[0].passTarget);
     }
   });
 
@@ -172,11 +175,11 @@ describe('snapshot round trip', () => {
   it('survives a charged shot in flight, nulls and all', () => {
     const s = createMatch([0, 1]);
     startMatch(s);
-    play(s, [null, null], 4);
+    play(s, [[], []], 4);
     const carrier = s.skaters.find((p) => p.id === s.puck.owner);
     if (carrier) {
       drive(s, carrier.id);
-      s.sides[carrier.team].shotCharge = 0.9;
+      s.sides[carrier.team].humans[0].shotCharge = 0.9;
       requestShot(s, carrier, 0.9, 0.3, 0.6);
     }
     const guest = createMatch([0, 1]);

@@ -1,3 +1,4 @@
+import { createHuman, MAX_HUMANS } from '../game/humans';
 import { TEAMS } from '../game/types';
 import { blendField, Cursor, metres, sizeOf, timer, unit, type Field } from './wire';
 import type {
@@ -123,8 +124,10 @@ const PUCK_FIELDS: readonly Field[] = [
   { key: 'passTo', kind: 'i16', scale: 1 },
 ];
 
-const SIDE: readonly Field[] = [
-  { key: 'human', kind: 'bool' },
+/** A side, followed on the wire by `humans` rows of `HUMAN`: the people playing it, in seat order. */
+const SIDE: readonly Field[] = [{ key: 'humans', kind: 'u8', scale: 1 }, unit('drawInput')];
+
+const HUMAN: readonly Field[] = [
   { key: 'controlled', kind: 'i16', scale: 1 },
   { key: 'autoSkate', kind: 'bool' },
   unit('shotCharge'),
@@ -135,7 +138,6 @@ const SIDE: readonly Field[] = [
   unit('passAimZ'),
   { key: 'passTarget', kind: 'i16', scale: 1 },
   unit('passRange'),
-  unit('drawInput'),
 ];
 
 const MATCH: readonly Field[] = [
@@ -166,6 +168,7 @@ const MATCH: readonly Field[] = [
   { key: 'echo', kind: 'f32' },
 ];
 const MATCH_INDEX = Object.fromEntries(MATCH.map((f, i) => [f.key, i]));
+const SIDE_INDEX = Object.fromEntries(SIDE.map((f, i) => [f.key, i]));
 
 /**
  * Whistles, hits and horns. The watching client has no simulation to raise its own, so what the
@@ -197,7 +200,7 @@ const MAX_EVENTS = 24;
 /** Bytes one snapshot takes at most: the match, both sides, the puck, the skaters and any calls. */
 export const SNAPSHOT_BYTES =
   sizeOf(MATCH) +
-  sizeOf(SIDE) * 2 +
+  (sizeOf(SIDE) + sizeOf(HUMAN) * MAX_HUMANS) * 2 +
   sizeOf(PUCK_FIELDS) +
   1 +
   sizeOf(SKATER) * 12 +
@@ -254,13 +257,18 @@ export function encodeSnapshot(s: MatchState, sinceEvent = -1, stamp = 0, echo =
   for (const field of MATCH) at.write(field, match[field.key]);
   for (const team of TEAMS) {
     const side = s.sides[team];
-    const values: Record<string, unknown> = {
-      ...side,
-      passAimX: side.passAim.x,
-      passAimZ: side.passAim.z,
-      passTarget: side.passTarget ?? -1,
-    };
+    const humans = side.humans.slice(0, MAX_HUMANS);
+    const values: Record<string, unknown> = { humans: humans.length, drawInput: side.drawInput };
     for (const field of SIDE) at.write(field, values[field.key]);
+    for (const human of humans) {
+      const seat: Record<string, unknown> = {
+        ...human,
+        passAimX: human.passAim.x,
+        passAimZ: human.passAim.z,
+        passTarget: human.passTarget ?? -1,
+      };
+      for (const field of HUMAN) at.write(field, seat[field.key]);
+    }
   }
   const puck: Record<string, unknown> = {
     ...s.puck,
@@ -295,9 +303,13 @@ export function encodeSnapshot(s: MatchState, sinceEvent = -1, stamp = 0, echo =
  * A snapshot read off the wire, still in the order of the field tables, so two of them can be
  * blended field by field without either being poured into a match first.
  */
+export interface SideSnapshot {
+  side: unknown[];
+  humans: unknown[][];
+}
 export interface Snapshot {
   match: unknown[];
-  sides: [unknown[], unknown[]];
+  sides: [SideSnapshot, SideSnapshot];
   puck: unknown[];
   skaters: unknown[][];
   events: GameEvent[];
@@ -312,7 +324,13 @@ const readAll = (at: Cursor, fields: readonly Field[], into?: unknown[]) => {
 export function decodeSnapshot(buffer: ArrayBuffer): Snapshot {
   const at = new Cursor(new DataView(buffer));
   const match = readAll(at, MATCH);
-  const sides: [unknown[], unknown[]] = [readAll(at, SIDE), readAll(at, SIDE)];
+  const readSide = (): SideSnapshot => {
+    const side = readAll(at, SIDE);
+    const humans: unknown[][] = [];
+    for (let i = 0; i < (side[SIDE_INDEX.humans] as number); i++) humans.push(readAll(at, HUMAN));
+    return { side, humans };
+  };
+  const sides: [SideSnapshot, SideSnapshot] = [readSide(), readSide()];
   const puck = readAll(at, PUCK_FIELDS);
   const roster = at.read({ key: 'count', kind: 'u8', scale: 1 }) as number;
   const skaters: unknown[][] = [];
@@ -359,13 +377,29 @@ const blendAll = (
 export function blendSnapshots(a: Snapshot, b: Snapshot, t: number, span: number, into?: Snapshot) {
   const out: Snapshot = into ?? {
     match: [],
-    sides: [[], []],
+    sides: [
+      { side: [], humans: [] },
+      { side: [], humans: [] },
+    ],
     puck: [],
     skaters: [],
     events: [],
   };
   blendAll(MATCH, a.match, b.match, t, span, out.match);
-  for (const team of TEAMS) blendAll(SIDE, a.sides[team], b.sides[team], t, span, out.sides[team]);
+  for (const team of TEAMS) {
+    const from = a.sides[team],
+      to = b.sides[team],
+      into = out.sides[team];
+    blendAll(SIDE, from.side, to.side, t, span, into.side);
+    // Seats only line up when both moments have the same people; otherwise take the nearer one.
+    const seats =
+      from.humans.length === to.humans.length ? to.humans : t < 0.5 ? from.humans : to.humans;
+    into.humans.length = seats.length;
+    seats.forEach((seat, k) => {
+      const start = from.humans.length === to.humans.length ? from.humans[k] : seat;
+      into.humans[k] = blendAll(HUMAN, start, seat, t, span, into.humans[k] ?? []);
+    });
+  }
   blendAll(PUCK_FIELDS, a.puck, b.puck, t, span, out.puck);
   const n = Math.min(a.skaters.length, b.skaters.length);
   out.skaters.length = n;
@@ -404,19 +438,23 @@ export function poseSnapshot(s: MatchState, snap: Snapshot) {
   s.shootoutTaken = [match.shootoutTaken0 as number, match.shootoutTaken1 as number];
   s.possession = [match.possessionHome as number, match.possessionAway as number];
   for (const team of TEAMS) {
-    const values = byKey(SIDE, snap.sides[team]);
     const side = s.sides[team];
-    side.human = values.human as boolean;
-    side.controlled = values.controlled as number;
-    side.autoSkate = values.autoSkate as boolean;
-    side.shotCharge = values.shotCharge as number;
-    side.shotAim = values.shotAim as number;
-    side.shotLift = values.shotLift as number;
-    side.passHeld = values.passHeld as boolean;
-    side.passAim = { x: values.passAimX as number, z: values.passAimZ as number };
-    side.passTarget = (values.passTarget as number) < 0 ? null : (values.passTarget as number);
-    side.passRange = values.passRange as number;
-    side.drawInput = values.drawInput as number;
+    side.drawInput = byKey(SIDE, snap.sides[team].side).drawInput as number;
+    const seats = snap.sides[team].humans;
+    side.humans.length = seats.length;
+    seats.forEach((row, k) => {
+      const values = byKey(HUMAN, row);
+      const human = (side.humans[k] ??= createHuman(values.controlled as number));
+      human.controlled = values.controlled as number;
+      human.autoSkate = values.autoSkate as boolean;
+      human.shotCharge = values.shotCharge as number;
+      human.shotAim = values.shotAim as number;
+      human.shotLift = values.shotLift as number;
+      human.passHeld = values.passHeld as boolean;
+      human.passAim = { x: values.passAimX as number, z: values.passAimZ as number };
+      human.passTarget = (values.passTarget as number) < 0 ? null : (values.passTarget as number);
+      human.passRange = values.passRange as number;
+    });
   }
   const puck = byKey(PUCK_FIELDS, snap.puck);
   s.puck.x = puck.x as number;

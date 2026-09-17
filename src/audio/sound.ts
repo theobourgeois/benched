@@ -1,3 +1,4 @@
+import { leadHuman } from '../game/humans';
 import { clamp } from '../game/math';
 import type { GameEvent, GameMode, MatchState, Settings, Team } from '../game/types';
 import { GOAL_BEAT, playGoalImpact, playGoalTrack, type GoalTrack } from './goalTrack';
@@ -157,7 +158,7 @@ export class ArenaAudio {
       this.skateGain.connect(this.sfx);
       this.skateSource.start();
     }
-    const p = match.skaters[match.sides[team].controlled];
+    const p = match.skaters[leadHuman(match, team)?.controlled ?? team * 6];
     const speed =
       (match.phase === 'playing' || match.phase === 'goal') &&
       p.downTimer <= 0 &&

@@ -3,7 +3,7 @@ import type { GameMode, MatchState, Skater, Team } from './types';
 
 /** Practice belongs to one skater: the first human side, or side 0 when neither is human. */
 export const freeSkateTeam = (s: MatchState): Team =>
-  s.sides[1].human && !s.sides[0].human ? 1 : 0;
+  s.sides[1].humans.length && !s.sides[0].humans.length ? 1 : 0;
 
 export interface ModeInfo {
   id: GameMode;
@@ -161,7 +161,8 @@ export function isOnIce(s: MatchState, p: Skater) {
       return p.role === 'C' || p.role === 'G';
     case 'freeSkate': {
       const you = freeSkateTeam(s);
-      return p.id === s.sides[you].controlled || (p.team !== you && p.role === 'G');
+      const skating = s.sides[you].humans[0]?.controlled ?? you * 6;
+      return p.id === skating || (p.team !== you && p.role === 'G');
     }
     case 'shootout': {
       const shooting = p.team === s.shootoutShooter && p.role === 'C';

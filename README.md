@@ -22,10 +22,19 @@ Deploy `dist/` to any static host with HTTPS. Localhost is suitable for developm
 
 ## Two players
 
-**2 Players** on the main menu puts somebody on the other bench. Each seat claims its own
-controller: seat one takes the first pad and the keyboard, seat two takes a pad seat one is not
-holding. Both seats map their stick through the same camera, because there is one screen, so up
-is up for whoever is holding one.
+On the matchup screen a second person presses A on their own pad to join, and starts across the
+ice. Left and right on that pad move them between benches: on the other one it is a game against
+each other, on seat one's it is the two of you against the CPU, at the CPU difficulty you set. B
+on their pad takes them off again. Each seat claims its own controller: seat one takes the first
+pad and the keyboard, seat two takes a pad seat one is not holding. Both seats map their stick
+through the same camera, because there is one screen, so up is up for whoever is holding one.
+
+Sharing a bench, each of you holds your own skater: red ring for seat one, blue for seat two. A
+switch never takes the skater your teammate is on, and when you both switch at once seat one picks
+first. A pass to your teammate leaves you both where you are; a pass to a CPU skater brings the
+passer's stick with it. A puck that reaches a CPU skater any other way (a loose puck, a goalie's
+freeze) goes to whichever of you is nearer. Seat one takes the draw from the centre. In a 1-on-1
+the second person plays goal, and in a shootout you take turns shooting and in goal.
 
 A browser hides a controller until it has seen a press from that exact one, so a second pad that
 is plugged in but silent will not appear. Press a face button on it. **Settings → Test

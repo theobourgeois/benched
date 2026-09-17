@@ -73,6 +73,7 @@ export function beginOnlineMatch(setup: MatchSetup, myTeam: Team) {
   runtime.audio.unlock();
   runtime.replay = null;
   runtime.myTeam = myTeam;
+  runtime.seatTwo = null;
   runtime.leaving = false;
   const clubs: [Club, Club] = [
     clubByKey(setup.clubs[0]) ?? DEFAULT_MATCHUP[0],

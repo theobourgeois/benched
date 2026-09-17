@@ -176,5 +176,5 @@ export function tuneFor(difficulty: Difficulty): CpuTune {
  * two people playing, both benches are All-Star and neither side is handed an easier opponent.
  */
 export function cpuTune(s: MatchState, p: Skater): CpuTune {
-  return s.sides[p.team].human ? ALL_STAR : tuneFor(s.difficulty);
+  return s.sides[p.team].humans.length ? ALL_STAR : tuneFor(s.difficulty);
 }

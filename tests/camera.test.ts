@@ -107,7 +107,7 @@ describe('end-to-end arena camera', () => {
     camera.position.set(...framing.position);
     camera.lookAt(new Vector3(...framing.target));
     camera.updateMatrixWorld();
-    const player = match.skaters[match.sides[played(match)].controlled];
+    const player = match.skaters[match.sides[played(match)].humans[0].controlled];
     const skater = new Vector3(player.x, 0.95, player.z).project(camera);
     expect(skater.y).toBeGreaterThan(-0.72);
     expect(skater.y).toBeLessThan(0.15);
@@ -137,7 +137,7 @@ describe('end-to-end arena camera', () => {
     const broadcast = cameraFraming(match, 'broadcast', 1.5);
     const tight = cameraFraming(match, 'tight', 1.5);
     const high = cameraFraming(match, 'high', 1.5);
-    const player = match.skaters[match.sides[played(match)].controlled];
+    const player = match.skaters[match.sides[played(match)].humans[0].controlled];
     const pitch = (f: typeof tight) =>
       Math.atan2(f.position[1] - f.target[1], Math.abs(f.position[0] - f.target[0]));
     expect(Math.abs(tight.position[0] - player.x)).toBeLessThan(
@@ -151,10 +151,10 @@ describe('end-to-end arena camera', () => {
     const match = createMatch();
     match.phase = 'playing';
     const open = cameraFraming(match, 'broadcast', 1.5);
-    match.skaters[match.sides[played(match)].controlled].x = 22;
+    match.skaters[match.sides[played(match)].humans[0].controlled].x = 22;
     match.puck.x = 22;
-    match.puck.owner = match.sides[played(match)].controlled;
-    match.sides[played(match)].shotLift = 1;
+    match.puck.owner = match.sides[played(match)].humans[0].controlled;
+    match.sides[played(match)].humans[0].shotLift = 1;
     const crease = cameraFraming(match, 'broadcast', 1.5);
     expect(crease.target[1]).toBeGreaterThan(0.6);
     expect(crease.position[1]).toBeLessThan(open.position[1] - 3);
@@ -168,7 +168,7 @@ describe('end-to-end arena camera', () => {
     match.shootoutShooter = 1;
     resetFormation(match);
     startMatch(match);
-    const goalie = match.skaters[match.sides[played(match)].controlled];
+    const goalie = match.skaters[match.sides[played(match)].humans[0].controlled];
     const shooter = match.skaters.find((p) => p.team === 1 && p.role === 'C')!;
     expect(goalie.role).toBe('G');
     const framing = cameraFraming(match, 'broadcast', 1.5);
@@ -195,7 +195,7 @@ describe('end-to-end arena camera', () => {
     const match = createMatch(0, 'freeSkate');
     startMatch(match);
     match.phase = 'playing';
-    const player = match.skaters[match.sides[played(match)].controlled];
+    const player = match.skaters[match.sides[played(match)].humans[0].controlled];
     const target = netShotTarget(match, player, 0, 0.35);
     const framing = cameraFraming(match, 'broadcast', 1.5);
     const camera = new PerspectiveCamera(framing.fov, 1.5, 0.1, 250);
@@ -229,7 +229,7 @@ describe('off-screen player locator', () => {
   it('pins a trailing skater to the bottom and keeps left wing left of right wing', () => {
     const match = createMatch();
     match.phase = 'playing';
-    const player = match.skaters[match.sides[played(match)].controlled];
+    const player = match.skaters[match.sides[played(match)].humans[0].controlled];
     match.puck.x = 25;
     match.puck.z = 0;
     player.x = -18;
@@ -252,7 +252,7 @@ describe('off-screen player locator', () => {
     const match = createMatch();
     match.phase = 'playing';
     match.puck.x = 25;
-    match.skaters[match.sides[played(match)].controlled].x = -18;
+    match.skaters[match.sides[played(match)].humans[0].controlled].x = -18;
     expect(playerLocator(match, framedCamera(match, 'wide'), 1600)).toBeNull();
   });
 });

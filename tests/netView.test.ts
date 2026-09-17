@@ -17,13 +17,13 @@ const STEPS_PER_SNAPSHOT = Math.round(1 / RULES.fixedStep / SNAPSHOT_HZ);
 function host() {
   const s = createMatch([0, 1]);
   startMatch(s);
-  for (let i = 0; i < 4 / RULES.fixedStep; i++) stepMatch(s, [null, null], RULES.fixedStep);
+  for (let i = 0; i < 4 / RULES.fixedStep; i++) stepMatch(s, [[], []], RULES.fixedStep);
   return s;
 }
 /** Advance the host one snapshot's worth and say what happened. */
 function snapshotAfter(s: MatchState, sent: { event: number }, steps = STEPS_PER_SNAPSHOT) {
   for (let i = 0; i < steps; i++)
-    stepMatch(s, [{ ...EMPTY_INPUT, moveX: 1, hustle: true }, null], RULES.fixedStep);
+    stepMatch(s, [[{ ...EMPTY_INPUT, moveX: 1, hustle: true }], []], RULES.fixedStep);
   const snap = decodeSnapshot(encodeSnapshot(s, sent.event));
   sent.event = s.events.at(-1)?.id ?? sent.event;
   return snap;
@@ -104,7 +104,7 @@ describe('the guest view of a match', () => {
     expect(t).toBeGreaterThan(0.4);
     expect(t).toBeLessThan(0.6);
     const fromB = createMatch([0, 1]);
-    for (let i = 0; i < 60; i++) stepMatch(fromB, [null, null], RULES.fixedStep);
+    for (let i = 0; i < 60; i++) stepMatch(fromB, [[], []], RULES.fixedStep);
     // The clock is a line between the two readings; the score and phase are one or the other.
     const clockA = a.match[2] as number,
       clockB = b.match[2] as number;

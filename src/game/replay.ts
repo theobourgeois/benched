@@ -63,10 +63,7 @@ export class ReplayBuffer {
     this.lastEvent = s.events.at(-1)?.id ?? this.lastEvent;
     const frame: ReplayFrame = {
       phase: s.phase,
-      sides: [
-        { ...s.sides[0], passAim: { ...s.sides[0].passAim } },
-        { ...s.sides[1], passAim: { ...s.sides[1].passAim } },
-      ],
+      sides: [copySide(s.sides[0]), copySide(s.sides[1])],
       scoringTeam: s.scoringTeam,
       shootoutShooter: s.shootoutShooter,
       skaters: s.skaters.map((p) => ({
@@ -156,16 +153,22 @@ function blend<T extends object>(out: T, a: T, b: T, t: number) {
   }
 }
 
+const copySide = (side: SideState, passHeld?: boolean): SideState => ({
+  ...side,
+  humans: side.humans.map((h) => ({
+    ...h,
+    passHeld: passHeld ?? h.passHeld,
+    passAim: { ...h.passAim },
+  })),
+});
+
 export function createView(match: MatchState): MatchState {
   return {
     ...match,
     skaters: match.skaters.map((p) => ({ ...p })),
     puck: { ...match.puck },
     events: [],
-    sides: [
-      { ...match.sides[0], passHeld: false, passAim: { ...match.sides[0].passAim } },
-      { ...match.sides[1], passHeld: false, passAim: { ...match.sides[1].passAim } },
-    ],
+    sides: [copySide(match.sides[0], false), copySide(match.sides[1], false)],
   };
 }
 
@@ -181,12 +184,20 @@ export function sampleReplay(view: MatchState, frames: ReplayFrame[], time: numb
   view.scoringTeam = near.scoringTeam;
   view.shootoutShooter = near.shootoutShooter;
   for (const team of TEAMS) {
-    const side = view.sides[team];
-    side.human = near.sides[team].human;
-    side.controlled = near.sides[team].controlled;
-    side.shotCharge =
-      a.sides[team].shotCharge + (b.sides[team].shotCharge - a.sides[team].shotCharge) * t;
-    side.shotLift = a.sides[team].shotLift + (b.sides[team].shotLift - a.sides[team].shotLift) * t;
+    // Who sits where never changes inside a match, so the seats line up frame to frame.
+    const seats = near.sides[team].humans;
+    const humans = view.sides[team].humans;
+    humans.length = seats.length;
+    seats.forEach((seat, k) => {
+      const from = a.sides[team].humans[k] ?? seat,
+        to = b.sides[team].humans[k] ?? seat;
+      humans[k] = {
+        ...(humans[k] ?? seat),
+        controlled: seat.controlled,
+        shotCharge: from.shotCharge + (to.shotCharge - from.shotCharge) * t,
+        shotLift: from.shotLift + (to.shotLift - from.shotLift) * t,
+      };
+    });
   }
   view.skaters.forEach((p, k) => {
     const from = a.skaters[k],
@@ -209,9 +220,10 @@ export function sampleReplay(view: MatchState, frames: ReplayFrame[], time: numb
       p.saveHeight = from.saveHeight;
     }
     // A windup that released between snapshots keeps the charge it was holding at the release.
-    const side = view.sides[b.skaters[k].team];
-    if (k === side.controlled && !from.pendingShot && to.pendingShot && t < 1)
-      side.shotCharge = a.sides[b.skaters[k].team].shotCharge;
+    const team = b.skaters[k].team;
+    const seat = view.sides[team].humans.findIndex((h) => h.controlled === k);
+    if (seat >= 0 && !from.pendingShot && to.pendingShot && t < 1)
+      view.sides[team].humans[seat].shotCharge = a.sides[team].humans[seat]?.shotCharge ?? 0;
     if (from.pendingShot && to.pendingShot && from.pendingShot.tick === to.pendingShot.tick) {
       p.pendingShot = {
         ...from.pendingShot,

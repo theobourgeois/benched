@@ -17,7 +17,7 @@ function chargedShot() {
     p = s.skaters[0];
   drive(s, p.id);
   s.puck.owner = p.id;
-  s.sides[played(s)].shotCharge = 0.85;
+  s.sides[played(s)].humans[0].shotCharge = 0.85;
   requestShot(s, p, 0.9, 0.3, 0.6);
   return { s, p };
 }
@@ -56,7 +56,7 @@ describe('charged-shot contact timing', () => {
     s.phase = 'playing';
     drive(s, 0);
     s.puck.owner = 0;
-    s.sides[played(s)].shotCharge = 0.9;
+    s.sides[played(s)].humans[0].shotCharge = 0.9;
     Object.assign(p, { x: 0, z: 0, angle: Math.PI / 2, cooldown: 0 });
     stepMatch(s, seat(s, { ...EMPTY_INPUT, shoot: true, shotPower: 0.9 }));
     expect(p.pendingShot).not.toBeNull();
@@ -75,7 +75,7 @@ describe('charged-shot contact timing', () => {
         p = s.skaters[0];
       s.puck.owner = p.id;
       drive(s, p.id);
-      s.sides[played(s)].shotCharge = kind === 'tap' ? 0 : 0.9;
+      s.sides[played(s)].humans[0].shotCharge = kind === 'tap' ? 0 : 0.9;
       if (kind === 'backhand') p.stickSide = -0.6;
       if (kind === 'one-timer') p.passTimer = 0.2;
       requestShot(s, p, 0.9);

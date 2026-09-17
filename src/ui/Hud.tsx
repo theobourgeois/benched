@@ -10,6 +10,7 @@ import {
   pauseGame,
   returnToMenu,
   runtime,
+  seatHuman,
   useGame,
 } from '../app/store';
 import {
@@ -22,7 +23,7 @@ import {
 } from '../app/online';
 import { FOUND_CONFIRM_MS } from '../net/protocol';
 import type { NetSession } from '../net/session';
-import { cameraUsesAttackUp, type MatchState, type Team } from '../game/types';
+import { cameraUsesAttackUp, type Human, type MatchState, type Team } from '../game/types';
 
 /**
  * The simulation leaves point-of-view calls neutral and marks who they happened to, so each
@@ -84,11 +85,9 @@ export function Hud() {
       {runtime.found && <FoundOverlay />}
       {s.phase !== 'intermission' && s.phase !== 'final' && (
         <>
-          <PlayerCard s={s} team={runtime.myTeam} />
-          {/* A second person on the couch gets their own card, mirrored to the far corner. */}
-          {s.sides[1 - runtime.myTeam].human && (
-            <PlayerCard s={s} team={(1 - runtime.myTeam) as Team} seat="two" />
-          )}
+          {seatCards(s).map((card, i) => (
+            <PlayerCard key={i} s={s} {...card} />
+          ))}
         </>
       )}
       {s.phase === 'faceoff' && <Faceoff s={s} />}
@@ -250,8 +249,30 @@ function AttackArrow({ s }: { s: MatchState }) {
   );
 }
 
-function PlayerCard({ s, team, seat }: { s: MatchState; team: Team; seat?: 'two' }) {
-  const side = s.sides[team];
+/**
+ * A card for each person this screen should show: seat one, then one more mirrored to the far
+ * corner — the couch partner on either bench, or online the person across the ice.
+ */
+function seatCards(s: MatchState): { team: Team; human: Human; seat?: 'two' }[] {
+  const one = seatHuman(0, s);
+  const two = runtime.net ? s.sides[1 - runtime.myTeam].humans[0] : seatHuman(1, s);
+  const cards: { team: Team; human: Human; seat?: 'two' }[] = [];
+  if (one) cards.push({ team: runtime.myTeam, human: one });
+  if (two) cards.push({ team: s.skaters[two.controlled].team, human: two, seat: 'two' });
+  return cards;
+}
+
+function PlayerCard({
+  s,
+  team,
+  human: side,
+  seat,
+}: {
+  s: MatchState;
+  team: Team;
+  human: Human;
+  seat?: 'two';
+}) {
   const p = s.skaters[side.controlled];
   const status = p.downTimer > 0 ? 'Down' : p.stumbleTimer > 0 ? 'Off balance' : null;
   return (
@@ -480,7 +501,15 @@ function Results({ s }: { s: MatchState }) {
     final
       ? {
           label: runtime.queue ? 'Another warm-up' : 'Rematch',
-          run: () => beginGame(runtime.myTeam, s.mode),
+          // The same people on the same benches: a rematch keeps the couch together.
+          run: () =>
+            beginGame(
+              runtime.myTeam,
+              s.mode,
+              s.teams,
+              s.jerseys,
+              runtime.queue ? null : runtime.seatTwo,
+            ),
         }
       : { label: `Start period ${s.period + 1}`, run: continueGame },
     { label: 'Quit to Menu', run: returnToMenu },

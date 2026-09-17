@@ -3,7 +3,7 @@ import { hasActiveCelly } from '../game/cellys';
 import { EMPTY_INPUT, RULES } from '../game/config';
 import { stepMatch, togglePause } from '../game/engine';
 import { GOAL_REPLAY, REPLAY_HZ, type ReplayFrame } from '../game/replay';
-import type { InputFrame, MatchState, Phase, SideInputs, Team } from '../game/types';
+import type { Human, InputFrame, MatchState, Phase, Team } from '../game/types';
 import type { Controller } from '../input/controller';
 import { screenInputToRink } from '../input/coordinates';
 import { mergeEdges, noEdges } from '../input/frames';
@@ -16,6 +16,7 @@ import {
   goalReplayWanted,
   publish,
   runtime,
+  seatHuman,
   startGoalReplay,
   viewMatch,
   viewTimeScale,
@@ -46,6 +47,13 @@ const FELT_EVENTS = new Set(['shot', 'hit', 'goal', 'post', 'crossbar', 'save'])
 /** Phases a person can pause from. */
 const PAUSABLE: Phase[] = ['playing', 'faceoff', 'goal'];
 
+/** Presses gathered for the next step, by team and then seat, like `SideInputs`. */
+type Pending = [(InputFrame | null)[], (InputFrame | null)[]];
+const settle = (pending: Pending): Pending => [
+  pending[0].map((frame) => frame && noEdges(frame)),
+  pending[1].map((frame) => frame && noEdges(frame)),
+];
+
 /** Impact feedback shared between the loop and the camera: a big hit shakes the frame. */
 export const impact = { shake: 0 };
 
@@ -54,7 +62,7 @@ export class GameLoop {
   private lastEvent = -1;
   private publishTime = 0;
   private lastMatch: MatchState = runtime.match;
-  private pending: SideInputs = [null, null];
+  private pending: Pending = [[], []];
   private steps = 0;
   private goalReplay = false;
   private replayedGoal: string | null = null;
@@ -79,7 +87,7 @@ export class GameLoop {
     runtime.controller.onDisconnect = pause;
     // A second player's pad dying mid-shift stops the game too, but only while they are on it.
     runtime.controllerTwo.onDisconnect = () => {
-      if (runtime.match.sides[1 - runtime.myTeam].human) pause();
+      if (seatHuman(1, runtime.match)) pause();
     };
     const visibility = () => {
       if (document.hidden) pause();
@@ -151,12 +159,18 @@ export class GameLoop {
     }
   }
 
+  /** Every pad with somebody playing on it. */
+  private rumble(strength: number, ms: number) {
+    runtime.controller.rumble(strength, ms);
+    if (seatHuman(1, runtime.match)) runtime.controllerTwo.rumble(strength, ms);
+  }
+
   /** The pad thumps with every 808 for the first bars of the celebration. */
   private rumbleToTheBeat() {
     this.pulses.forEach(clearTimeout);
     this.pulses = runtime.audio
       .celebrationPulses()
-      .map((ms) => window.setTimeout(() => runtime.controller.rumble(0.85, 90), ms));
+      .map((ms) => window.setTimeout(() => this.rumble(0.85, 90), ms));
   }
 
   /**
@@ -198,7 +212,7 @@ export class GameLoop {
                 : iron
                   ? 130
                   : 100;
-        runtime.controller.rumble(strength, ms);
+        this.rumble(strength, ms);
       }
       this.lastEvent = event.id;
     }
@@ -218,7 +232,7 @@ export class GameLoop {
     this.lastMatch = s;
     this.lastEvent = -1;
     this.accumulator = 0;
-    this.pending = [null, null];
+    this.pending = [[], []];
     this.goalReplay = false;
     this.replayedGoal = null;
     this.freeze = 0;
@@ -276,7 +290,7 @@ export class GameLoop {
       runtime.controllerTwo.claimed =
         runtime.controller.padIndex === undefined ? [] : [runtime.controller.padIndex];
       runtime.controllerTwo.read(dt, false);
-      this.pending = [null, null];
+      this.pending = [[], []];
       this.accumulator = 0;
       driveReplay(replay, replayInput, dt);
       const net = runtime.net;
@@ -294,23 +308,24 @@ export class GameLoop {
     }
     // Every seat reads its own pad but maps through the same anchor: one screen, one orientation,
     // so up is up for whoever is holding a stick.
-    const readSeat = (seat: Controller, team: Team) =>
+    const readSeat = (seat: Controller, human: Human | undefined) =>
       screenInputToRink(
-        seat.read(dt, s.puck.owner === s.sides[team].controlled),
+        seat.read(dt, !!human && s.puck.owner === human.controlled),
         s,
         runtime.settings.camera,
         runtime.myTeam,
       );
     const net = runtime.net;
-    const guest = (1 - runtime.myTeam) as Team;
+    const one = seatHuman(0, s),
+      two = seatHuman(1, s);
     // Seat one picks first and seat two takes what is left, so one pad always belongs to P1.
     runtime.controller.claimed = [];
-    const mine = readSeat(runtime.controller, runtime.myTeam);
+    const mine = readSeat(runtime.controller, one);
     runtime.controllerTwo.claimed =
       runtime.controller.padIndex === undefined ? [] : [runtime.controller.padIndex];
     // Seat two is polled even with nobody on it, so the matchup screen can tell you whether a
     // second controller has turned up yet. Its frame only counts once somebody is playing it.
-    const guestFrame = readSeat(runtime.controllerTwo, guest);
+    const couchFrame = readSeat(runtime.controllerTwo, two);
     // The first press on a pad is the gesture that lets sound start.
     if (runtime.controller.padActive) runtime.audio.unlock();
     // Menus consume the pad only after it has been read, or a press lands on the stale frame.
@@ -327,17 +342,19 @@ export class GameLoop {
       if (blocked) frame.pause = false;
       return frame;
     };
-    this.pending[runtime.myTeam] = mergeEdges(this.pending[runtime.myTeam], gate(mine));
-    // Online, the other bench is a person somewhere else; the second seat belongs to the couch.
-    this.pending[guest] = net
-      ? null
-      : s.sides[guest].human
-        ? mergeEdges(this.pending[guest], gate(guestFrame))
-        : null;
+    const mySeats = this.pending[runtime.myTeam];
+    mySeats[0] = mergeEdges(mySeats[0] ?? null, gate(mine));
+    // Seat two sits after seat one when they share a bench, and first on the other one.
+    const guest = (1 - runtime.myTeam) as Team;
+    if (two && runtime.seatTwo !== null) {
+      const seats = this.pending[runtime.seatTwo];
+      const at = runtime.seatTwo === runtime.myTeam ? 1 : 0;
+      seats[at] = mergeEdges(seats[at] ?? null, gate(couchFrame));
+    }
     if (net && !net.isHost) {
       // The pause button asks about leaving here too. It is this person's question, so it never
       // crosses to the host as input.
-      const own = this.pending[runtime.myTeam];
+      const own = mySeats[0];
       if (own?.pause) {
         own.pause = false;
         askToLeave(!runtime.leaving);
@@ -345,8 +362,7 @@ export class GameLoop {
       // A guest runs no simulation. It says what it is trying to do and draws what it is told,
       // so there is no second version of the match to disagree with the host's.
       // Presses are kept until a frame actually goes out, so none is lost between sends.
-      if (net.sendInput(this.pending[runtime.myTeam] ?? EMPTY_INPUT))
-        this.pending[runtime.myTeam] = noEdges(this.pending[runtime.myTeam] ?? EMPTY_INPUT);
+      if (net.sendInput(mySeats[0] ?? EMPTY_INPUT)) mySeats[0] = noEdges(mySeats[0] ?? EMPTY_INPUT);
       if (net.view(s, dt) && RECORDED.includes(s.phase)) this.record(s);
       this.drainEvents(s);
       this.rollGoalReplay(s);
@@ -358,8 +374,8 @@ export class GameLoop {
     // on the ice the engine cannot know whose pause it is, so it is resolved out here. Either
     // seat can call it. Online nobody gets to freeze somebody else's game, so the pause button
     // asks about leaving instead.
-    if (this.pending.some((frame) => frame?.pause)) {
-      this.pending = this.pending.map((frame) => frame && noEdges(frame)) as SideInputs;
+    if (this.pending.some((seats) => seats.some((frame) => frame?.pause))) {
+      this.pending = settle(this.pending);
       if (net) askToLeave(!runtime.leaving);
       else {
         togglePause(s);
@@ -391,9 +407,9 @@ export class GameLoop {
     while (this.accumulator >= RULES.fixedStep) {
       // As host, the other bench is whatever the last packet said. A missing one repeats rather
       // than handing the skater back to the AI.
-      if (net) this.pending[guest] = net.takeGuestInput();
+      if (net) this.pending[guest] = [net.takeGuestInput()];
       stepMatch(s, this.pending, RULES.fixedStep);
-      this.pending = this.pending.map((frame) => frame && noEdges(frame)) as SideInputs;
+      this.pending = settle(this.pending);
       this.accumulator -= RULES.fixedStep;
       if (RECORDED.includes(s.phase) && ++this.steps % RECORD_EVERY === 0) this.record(s);
     }

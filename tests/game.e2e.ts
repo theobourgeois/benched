@@ -134,7 +134,7 @@ test('keyboard skates, skill stick shoots, pause freezes play and help stays pau
   await start(page);
   await changeState(
     page,
-    'const s=runtime.match; s.sides[0].controlled=0; s.puck.owner=0; s.skaters[0].x=0; s.skaters[0].z=-8; s.skaters[0].cooldown=0;Object.assign(s.skaters[0],{vx:0,vz:0,angle:Math.PI/2,downTimer:0,stumbleTimer:0,checkTimer:0}); s.skaters.slice(6).forEach(p=>{p.x=20;p.z=10})',
+    'const s=runtime.match; s.sides[0].humans[0].controlled=0; s.puck.owner=0; s.skaters[0].x=0; s.skaters[0].z=-8; s.skaters[0].cooldown=0;Object.assign(s.skaters[0],{vx:0,vz:0,angle:Math.PI/2,downTimer:0,stumbleTimer:0,checkTimer:0}); s.skaters.slice(6).forEach(p=>{p.x=20;p.z=10})',
   );
   await page.keyboard.down('KeyD');
   await expect.poll(async () => (await state(page)).skaters[0].z).toBeGreaterThan(-7.7);
@@ -233,7 +233,7 @@ test('virtual Xbox drives the menus, picks a jersey, skates, shoots, and safely 
   expect(started.mode).toBe('exhibition');
   await changeState(
     page,
-    'const s=runtime.match; s.sides[0].controlled=0; s.puck.owner=0; s.skaters[0].x=0;s.skaters[0].z=-8;s.skaters[0].cooldown=0;Object.assign(s.skaters[0],{vx:0,vz:0,angle:Math.PI/2,downTimer:0,stumbleTimer:0,checkTimer:0});s.skaters.slice(6).forEach(p=>{p.x=20;p.z=10})',
+    'const s=runtime.match; s.sides[0].humans[0].controlled=0; s.puck.owner=0; s.skaters[0].x=0;s.skaters[0].z=-8;s.skaters[0].cooldown=0;Object.assign(s.skaters[0],{vx:0,vz:0,angle:Math.PI/2,downTimer:0,stumbleTimer:0,checkTimer:0});s.skaters.slice(6).forEach(p=>{p.x=20;p.z=10})',
   );
   await page.evaluate('window.testPad.axes[0]=1');
   await expect.poll(async () => (await state(page)).skaters[0].z).toBeGreaterThan(-7.7);
@@ -404,7 +404,7 @@ test('3-on-3 and shootout can be selected on the matchup', async ({ page }) => {
   const shootout = await state(page);
   expect(shootout.mode).toBe('shootout');
   expect(shootout.phase).toBe('playing');
-  expect(shootout.puck.owner).toBe(shootout.sides[shootout.myTeam].controlled);
+  expect(shootout.puck.owner).toBe(shootout.sides[shootout.myTeam].humans[0].controlled);
 });
 
 test('free skate starts on open ice, keeps saves live, and resets after a goal', async ({
@@ -420,7 +420,7 @@ test('free skate starts on open ice, keeps saves live, and resets after a goal',
   const opened = await state(page);
   expect(opened.mode).toBe('freeSkate');
   expect(opened.phase).toBe('playing');
-  expect(opened.puck.owner).toBe(opened.sides[opened.myTeam].controlled);
+  expect(opened.puck.owner).toBe(opened.sides[opened.myTeam].humans[0].controlled);
   await changeState(
     page,
     'const s=runtime.match; const g=s.skaters.find(p=>p.role==="G"&&p.team!==runtime.myTeam); Object.assign(g,{x:25,z:0}); Object.assign(s.puck,{owner:null,x:24.1,z:0.1,y:0.4,vx:30,vz:0,shot:true,lockout:0})',
@@ -476,7 +476,7 @@ test('a keyboard flick drives a backcheck toward your own end and dislodges the 
     page,
     `
     const s=runtime.match;
-    s.mode='oneOnOne'; s.sides[0].controlled=0; s.hitstop=0; s.hits=[0,0]; s.phase='playing';
+    s.mode='oneOnOne'; s.sides[0].humans[0].controlled=0; s.hitstop=0; s.hits=[0,0]; s.phase='playing';
     Object.assign(s.skaters[0], {x:2,z:5,vx:-8,vz:0,angle:-Math.PI/2,cooldown:0,downTimer:0,stumbleTimer:0,checkTimer:0,checkLanded:false});
     Object.assign(s.skaters[6], {x:-0.5,z:5,vx:-5,vz:0,angle:-Math.PI/2,cooldown:10,stumbleTimer:1,downTimer:0,hitImmunity:0});
     Object.assign(s.puck, {owner:6,x:-1.5,z:5,vx:-5,vz:0,shot:false});
@@ -512,13 +512,14 @@ test('feel tuner changes live physics, shows a readout, and resets', async ({ pa
 
 test('shows a bottom locator when you trail the play off-camera', async ({ page }) => {
   await start(page);
-  await expect(page.locator('.player-locator')).toBeHidden();
+  // Seat two has a chip of its own; with nobody on it, only seat one's can show.
+  await expect(page.locator('.player-locator').first()).toBeHidden();
   await changeState(
     page,
-    'const s=runtime.match,c=s.sides[runtime.myTeam].controlled,p=s.skaters[c]; s.puck.x=24; s.puck.z=0; s.puck.owner=6; s.skaters.forEach(q=>{if(q.id!==c){q.x=22;q.z=(q.id-6)*1.4}}); p.x=-18; p.z=0; p.vx=0; p.vz=0',
+    'const s=runtime.match,c=s.sides[runtime.myTeam].humans[0].controlled,p=s.skaters[c]; s.puck.x=24; s.puck.z=0; s.puck.owner=6; s.skaters.forEach(q=>{if(q.id!==c){q.x=22;q.z=(q.id-6)*1.4}}); p.x=-18; p.z=0; p.vx=0; p.vz=0',
   );
-  await expect(page.locator('.player-locator')).toBeVisible({ timeout: 4000 });
-  await expect(page.locator('.player-locator small')).toHaveText('YOU');
+  await expect(page.locator('.player-locator').first()).toBeVisible({ timeout: 4000 });
+  await expect(page.locator('.player-locator').first().locator('small')).toHaveText('YOU');
 });
 test('a goal rolls a skippable replay, and pause opens a scrubbable instant replay', async ({
   page,
@@ -614,7 +615,7 @@ test('two pads take a bench each and drive their own skater', async ({ page }) =
 
   const started = await state(page);
   expect(started.mode).toBe('threeOnThree');
-  expect(started.sides.map((side: { human: boolean }) => side.human)).toEqual([true, true]);
+  expect(started.sides.map((side: { humans: unknown[] }) => side.humans.length)).toEqual([1, 1]);
   // Two cards on the ice, one per bench.
   await expect(page.locator('.player-card')).toHaveCount(2);
 
@@ -622,7 +623,7 @@ test('two pads take a bench each and drive their own skater', async ({ page }) =
     page,
     `const s=runtime.match; s.phase='playing'; s.countdown=0; s.puck.owner=null;
      s.skaters.forEach(p=>{p.cooldown=0;p.vx=0;p.vz=0});
-     s.skaters[s.sides[0].controlled].x=-6; s.skaters[s.sides[1].controlled].x=6;`,
+     s.skaters[s.sides[0].humans[0].controlled].x=-6; s.skaters[s.sides[1].humans[0].controlled].x=6;`,
   );
   // Opposite sticks: each bench should travel its own way, not share one input.
   await page.evaluate('window.pads[0].axes[0]=1; window.pads[1].axes[0]=-1');
@@ -631,11 +632,82 @@ test('two pads take a bench each and drive their own skater', async ({ page }) =
   const moved = await state(page);
   // Compare the velocity vectors rather than one axis: the camera decides which way screen
   // left runs on the ice, and both seats map through the same one.
-  const drift = (team: number) => moved.skaters[moved.sides[team].controlled];
+  const drift = (team: number) => moved.skaters[moved.sides[team].humans[0].controlled];
   const [a, b] = [drift(0), drift(1)];
   expect(Math.hypot(a.vx, a.vz)).toBeGreaterThan(1);
   expect(Math.hypot(b.vx, b.vz)).toBeGreaterThan(1);
   expect(a.vx * b.vx + a.vz * b.vz).toBeLessThan(0);
+});
+
+test('two people can share a bench against the CPU', async ({ page }) => {
+  await page.addInitScript(() => {
+    const w = window as unknown as { pads: unknown[] };
+    w.pads = [0, 1].map((index) => ({
+      connected: true,
+      index,
+      id: `Xbox Wireless Controller (test ${index})`,
+      mapping: 'standard',
+      axes: [0, 0, 0, 0],
+      buttons: Array.from({ length: 17 }, () => ({ pressed: false, value: 0 })),
+    }));
+    Object.defineProperty(navigator, 'getGamepads', { value: () => w.pads });
+  });
+  await page.goto('/');
+  const tap = async (pad: number, button: number) => {
+    await page.evaluate(`window.pads[${pad}].buttons[${button}].pressed=true`);
+    await page.waitForTimeout(90);
+    await page.evaluate(`window.pads[${pad}].buttons[${button}].pressed=false`);
+    await page.waitForTimeout(60);
+  };
+  await page.getByRole('button', { name: 'Play Now', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Select Teams' })).toBeVisible();
+  // Seat two joins across the ice, then moves to seat one's bench with the d-pad.
+  await tap(1, 0);
+  await expect(page.locator('.side-away .panel-tag')).toHaveText('P2');
+  await tap(1, 15);
+  await expect(page.locator('.side-home .panel-tag')).toHaveText('P1 + P2');
+  await expect(page.locator('.side-away .panel-tag')).toHaveText('CPU');
+  // A CPU bench is back on the ice, so its difficulty can be set again.
+  await expect(page.getByRole('button', { name: /CPU difficulty/ })).toBeVisible();
+  // Seat one changing sides takes seat two along.
+  await page.keyboard.press('ArrowLeft');
+  await expect(page.locator('.side-away .panel-tag')).toHaveText('P1 + P2');
+  await page.keyboard.press('ArrowRight');
+  await page.getByRole('button', { name: 'Ready', exact: true }).click();
+  await page.getByRole('button', { name: 'Play game', exact: true }).click();
+  await expect(live(page)).toBeVisible({ timeout: 30000 });
+
+  const started = await state(page);
+  expect(started.sides.map((side: { humans: unknown[] }) => side.humans.length)).toEqual([2, 0]);
+  const held = started.sides[0].humans.map((h: { controlled: number }) => h.controlled);
+  expect(new Set(held).size).toBe(2);
+  await expect(page.locator('.player-card')).toHaveCount(2);
+
+  await changeState(
+    page,
+    `const s=runtime.match; s.phase='playing'; s.countdown=0; s.puck.owner=null;
+     s.skaters.forEach(p=>{p.cooldown=0;p.vx=0;p.vz=0});
+     s.skaters[s.sides[0].humans[0].controlled].x=-6; s.skaters[s.sides[0].humans[1].controlled].x=6;`,
+  );
+  await page.evaluate('window.pads[0].axes[0]=1; window.pads[1].axes[0]=-1');
+  await page.waitForTimeout(600);
+  await page.evaluate('window.pads[0].axes[0]=0; window.pads[1].axes[0]=0');
+  const moved = await state(page);
+  const [a, b] = moved.sides[0].humans.map(
+    (h: { controlled: number }) => moved.skaters[h.controlled],
+  );
+  expect(Math.hypot(a.vx, a.vz)).toBeGreaterThan(1);
+  expect(Math.hypot(b.vx, b.vz)).toBeGreaterThan(1);
+  expect(a.vx * b.vx + a.vz * b.vz).toBeLessThan(0);
+
+  // A rematch keeps the couch together on the same bench.
+  await changeState(page, `runtime.match.phase='final'`);
+  await page.getByRole('button', { name: 'Rematch' }).click();
+  await expect
+    .poll(() =>
+      page.evaluate('window.__BENCHED__.runtime.match.sides.map(s=>s.humans.length).join()'),
+    )
+    .toBe('2,0');
 });
 
 test('two-player waits for a second pad and says why', async ({ page }) => {

@@ -4,7 +4,8 @@
 import { useSyncExternalStore } from 'react';
 import * as THREE from 'three';
 import { beginGame, mySide, publish, returnToMenu, runtime } from '../app/store';
-import { stickTip } from '../game/engine';
+import { driveSkater, stickTip } from '../game/engine';
+import { humanOn } from '../game/humans';
 import { PUCK } from '../game/config';
 import type { MatchState } from '../game/types';
 import { labHooks, reviewSkaters, type PoseDebug } from '../scene/animationReview';
@@ -170,14 +171,12 @@ const goalieIndex = (s: MatchState) =>
   s.skaters.findIndex((p) => p.role === 'G' && p.team === s.skaters[skaterIndex].team);
 let skaterIndex = 0;
 /**
- * The lab puppets one skater directly. Whichever side that skater is on is the one holding the
- * stick, so poses and windups are read off that side rather than off a fixed "you".
+ * The lab puppets one skater directly. Whoever on that skater's side is holding them has the
+ * stick, so poses and windups are read off that person rather than off a fixed "you".
  */
 function labSide(s: MatchState, subject = lab.subject) {
-  const side = s.sides[s.skaters[subject]?.team ?? 0];
-  side.human = true;
-  side.controlled = subject;
-  return side;
+  driveSkater(s, subject);
+  return humanOn(s, s.skaters[subject])!;
 }
 
 function applyClip(s: MatchState, clip: LabClip, t: number) {
@@ -235,7 +234,7 @@ export function openLab(
   if (!labHooks.active) {
     beginGame(runtime.myTeam, 'freeSkate');
     runtime.match.phase = 'playing';
-    skaterIndex = mySide(runtime.match).controlled;
+    skaterIndex = mySide(runtime.match).humans[0]?.controlled ?? 0;
     muted = runtime.audio.enabled;
     runtime.audio.enabled = false;
     labHooks.active = true;

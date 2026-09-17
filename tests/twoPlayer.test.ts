@@ -1,9 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { createMatch, drawWinner, resetFormation, startMatch, stepMatch } from '../src/game/engine';
+import {
+  createMatch,
+  drawWinner,
+  passPuck,
+  resetFormation,
+  startMatch,
+  stepMatch,
+  stickTip,
+} from '../src/game/engine';
 import { cpuTune } from '../src/game/difficulty';
 import { EMPTY_INPUT, GOALIE, RULES } from '../src/game/config';
 import { isOnIce } from '../src/game/modes';
-import type { MatchState, SideInputs, Team } from '../src/game/types';
+import { createView, REPLAY_HZ, ReplayBuffer, sampleReplay } from '../src/game/replay';
+import { decodeSnapshot, encodeSnapshot, poseSnapshot } from '../src/net/snapshot';
+import type { MatchState, SideInputs, Skater, Team } from '../src/game/types';
 
 /** Both sides taken by a person, on open ice, with nobody able to interfere. */
 function twoPlayer(mode: Parameters<typeof createMatch>[1] = 'exhibition') {
@@ -17,8 +27,8 @@ function twoPlayer(mode: Parameters<typeof createMatch>[1] = 'exhibition') {
   return s;
 }
 const both = (home: Partial<typeof EMPTY_INPUT>, away: Partial<typeof EMPTY_INPUT>): SideInputs => [
-  { ...EMPTY_INPUT, ...home },
-  { ...EMPTY_INPUT, ...away },
+  [{ ...EMPTY_INPUT, ...home }],
+  [{ ...EMPTY_INPUT, ...away }],
 ];
 const run = (s: MatchState, inputs: SideInputs, seconds: number) => {
   for (let t = 0; t < Math.ceil(seconds / RULES.fixedStep); t++)
@@ -28,8 +38,8 @@ const run = (s: MatchState, inputs: SideInputs, seconds: number) => {
 describe('two people on the ice', () => {
   it('drives one skater per side from that side own stick', () => {
     const s = twoPlayer();
-    const home = s.skaters[s.sides[0].controlled],
-      away = s.skaters[s.sides[1].controlled];
+    const home = s.skaters[s.sides[0].humans[0].controlled],
+      away = s.skaters[s.sides[1].humans[0].controlled];
     home.cooldown = away.cooldown = 0;
     // Opposite left sticks: each carrier should travel its own way, not share one input.
     run(s, both({ moveX: 1 }, { moveX: -1 }), 0.6);
@@ -39,19 +49,19 @@ describe('two people on the ice', () => {
 
   it('holds a side still when its frame goes missing, rather than handing back to the AI', () => {
     const s = twoPlayer();
-    const away = s.skaters[s.sides[1].controlled];
+    const away = s.skaters[s.sides[1].humans[0].controlled];
     away.cooldown = 0;
     // A dropped frame is the shape network starvation takes, and it must read as "stood still".
-    run(s, [{ ...EMPTY_INPUT, moveX: 1 }, null], 0.5);
+    run(s, [[{ ...EMPTY_INPUT, moveX: 1 }], []], 0.5);
     expect(Math.hypot(away.vx, away.vz)).toBeLessThan(0.001);
   });
 
   it('still lets the AI play a side nobody is sitting on', () => {
     const s = twoPlayer();
-    s.sides[1].human = false;
-    const away = s.skaters[s.sides[1].controlled];
+    s.sides[1].humans = [];
+    const away = s.skaters[6];
     away.cooldown = 0;
-    run(s, [{ ...EMPTY_INPUT }, null], 0.6);
+    run(s, [[{ ...EMPTY_INPUT }], []], 0.6);
     expect(Math.hypot(away.vx, away.vz)).toBeGreaterThan(0.5);
   });
 
@@ -120,8 +130,8 @@ describe('shootout with two people', () => {
     for (const attempt of [0, 1]) {
       const shooting = s.shootoutShooter,
         defending = (1 - shooting) as Team;
-      const shooter = s.skaters[s.sides[shooting].controlled],
-        keeper = s.skaters[s.sides[defending].controlled];
+      const shooter = s.skaters[s.sides[shooting].humans[0].controlled],
+        keeper = s.skaters[s.sides[defending].humans[0].controlled];
       expect(shooter.role).toBe('C');
       expect(shooter.team).toBe(shooting);
       expect(keeper.role).toBe('G');
@@ -136,5 +146,303 @@ describe('shootout with two people', () => {
       resetFormation(s);
       startMatch(s);
     }
+  });
+});
+
+/** Two people on the home bench against the CPU, on open ice, nobody able to interfere. */
+function sameBench(mode: Parameters<typeof createMatch>[1] = 'exhibition') {
+  const s = createMatch([0, 0], mode);
+  s.phase = 'playing';
+  s.skaters.forEach((p, i) => {
+    p.cooldown = 10;
+    if (p.role === 'G') return;
+    Object.assign(p, { x: -20 + (i % 6) * 8, z: p.team ? -25 : 12, vx: 0, vz: 0 });
+  });
+  return s;
+}
+const seats = (...frames: Partial<typeof EMPTY_INPUT>[]): SideInputs => [
+  frames.map((f) => ({ ...EMPTY_INPUT, ...f })),
+  [],
+];
+/** Nobody is ever holding a skater somebody else on their bench is holding. */
+const heldOnce = (s: MatchState) => {
+  const held = s.sides.flatMap((side) => side.humans.map((h) => h.controlled));
+  expect(new Set(held).size).toBe(held.length);
+};
+const place = (p: Skater, x: number, z: number) => Object.assign(p, { x, z, vx: 0, vz: 0 });
+const tape = (s: MatchState, p: Skater) => {
+  Object.assign(s.puck, { ...stickTip(p), y: 0.1, vx: 0, vz: 0, vy: 0 });
+  Object.assign(s.puck, { owner: p.id, lastTouch: p.team, shot: false, lockout: 0 });
+};
+
+describe('two people on the same bench', () => {
+  it('seats both on the home side, on different skaters, and leaves the away side to the CPU', () => {
+    const s = createMatch([0, 0]);
+    expect(s.sides[0].humans.map((h) => s.skaters[h.controlled].role)).toEqual(['C', 'LW']);
+    expect(s.sides[1].humans).toEqual([]);
+    heldOnce(s);
+  });
+
+  it('puts the second person in goal in 1-on-1, where there is nobody else to take', () => {
+    const s = createMatch([0, 0], 'oneOnOne');
+    expect(s.sides[0].humans.map((h) => s.skaters[h.controlled].role)).toEqual(['C', 'G']);
+    heldOnce(s);
+  });
+
+  it('still plays the CPU bench at the chosen difficulty, and the home bench at All-Star', () => {
+    const s = createMatch([0, 0]),
+      solo = createMatch(0);
+    s.difficulty = solo.difficulty = 'rookie';
+    expect(cpuTune(s, s.skaters[7])).toEqual(cpuTune(solo, solo.skaters[7]));
+    expect(cpuTune(s, s.skaters[2])).toEqual(cpuTune(createMatch([0, 1]), s.skaters[2]));
+  });
+
+  it('drives each skater from its own person', () => {
+    const s = sameBench();
+    const [one, two] = s.sides[0].humans.map((h) => s.skaters[h.controlled]);
+    one.cooldown = two.cooldown = 0;
+    run(s, seats({ moveX: 1 }, { moveX: -1 }), 0.6);
+    expect(one.vx).toBeGreaterThan(1);
+    expect(two.vx).toBeLessThan(-1);
+  });
+
+  it('holds the second person still when only the first has a frame', () => {
+    const s = sameBench();
+    const two = s.skaters[s.sides[0].humans[1].controlled];
+    two.cooldown = 0;
+    run(s, seats({ moveX: 1 }), 0.5);
+    expect(Math.hypot(two.vx, two.vz)).toBeLessThan(0.001);
+  });
+
+  it('winds up only the stick that is holding the button', () => {
+    const s = sameBench();
+    const [one] = s.sides[0].humans;
+    tape(s, s.skaters[one.controlled]);
+    run(s, seats({ stickY: 1 }, { stickY: 1 }), 0.3);
+    expect(one.shotCharge).toBeGreaterThan(0.2);
+    expect(s.sides[0].humans[1].shotCharge).toBe(0);
+  });
+
+  describe('switching', () => {
+    it('never lands on the skater the other person is holding', () => {
+      const s = sameBench();
+      const [one, two] = s.sides[0].humans;
+      // The puck is loose right beside the partner, so they are the obvious pick for a switch.
+      const partner = s.skaters[two.controlled];
+      place(partner, -5, 0);
+      Object.assign(s.puck, { x: -4, z: 0, owner: null });
+      stepMatch(s, seats({ switchPlayer: true }));
+      expect(one.controlled).not.toBe(partner.id);
+      expect(two.controlled).toBe(partner.id);
+      heldOnce(s);
+    });
+
+    it('leaves a carrier to the teammate who has them, rather than jumping onto the puck', () => {
+      const s = sameBench();
+      const [one, two] = s.sides[0].humans;
+      tape(s, s.skaters[two.controlled]);
+      stepMatch(s, seats({ switchPlayer: true }));
+      expect(one.controlled).not.toBe(two.controlled);
+      expect(s.skaters[one.controlled].role).not.toBe('G');
+      heldOnce(s);
+    });
+
+    it('still takes an AI carrier on the same bench', () => {
+      const s = sameBench();
+      const [one] = s.sides[0].humans;
+      tape(s, s.skaters[2]);
+      stepMatch(s, seats({ switchPlayer: true }));
+      expect(one.controlled).toBe(2);
+    });
+
+    it('gives the first seat first pick when both switch on the same step', () => {
+      const alone = sameBench();
+      Object.assign(alone.puck, { x: -10, z: 0, owner: null });
+      stepMatch(alone, seats({ switchPlayer: true }));
+      const firstPick = alone.sides[0].humans[0].controlled;
+
+      const s = sameBench();
+      Object.assign(s.puck, { x: -10, z: 0, owner: null });
+      stepMatch(s, seats({ switchPlayer: true }, { switchPlayer: true }));
+      expect(s.sides[0].humans[0].controlled).toBe(firstPick);
+      heldOnce(s);
+    });
+
+    it('stays put when the only other skater is the partner, as in a 1-on-1', () => {
+      const s = sameBench('oneOnOne');
+      const [one, two] = s.sides[0].humans;
+      const [was, wasTwo] = [one.controlled, two.controlled];
+      stepMatch(s, seats({ switchPlayer: true }, { switchPlayer: true }));
+      expect([one.controlled, two.controlled]).toEqual([was, wasTwo]);
+    });
+  });
+
+  describe('who the puck brings the stick to', () => {
+    it('keeps both people where they are on a pass between them', () => {
+      const s = sameBench();
+      const [one, two] = s.sides[0].humans;
+      const passer = s.skaters[one.controlled],
+        receiver = s.skaters[two.controlled];
+      place(passer, 0, 0);
+      place(receiver, 0, -8);
+      tape(s, passer);
+      passPuck(s, passer, 0, -1);
+      expect(s.puck.passTo).toBe(receiver.id);
+      expect([one.controlled, two.controlled]).toEqual([passer.id, receiver.id]);
+    });
+
+    it('sends the passer after the puck on a pass to a CPU teammate, even with the partner closer', () => {
+      const s = sameBench();
+      const [one, two] = s.sides[0].humans;
+      const passer = s.skaters[one.controlled],
+        partner = s.skaters[two.controlled],
+        receiver = s.skaters[3];
+      place(passer, 0, 0);
+      place(receiver, 0, -10);
+      place(partner, 2, -11);
+      tape(s, passer);
+      passPuck(s, passer, 0, -1);
+      expect(s.puck.passTo).toBe(receiver.id);
+      expect(one.controlled).toBe(receiver.id);
+      expect(two.controlled).toBe(partner.id);
+      heldOnce(s);
+    });
+
+    it('hands a puck a CPU teammate picks up to whichever person is nearer', () => {
+      const s = sameBench();
+      const [one, two] = s.sides[0].humans;
+      const far = s.skaters[one.controlled],
+        near = s.skaters[two.controlled],
+        mate = s.skaters[3];
+      place(far, -20, 0);
+      place(near, 6, 0);
+      place(mate, 3, 0);
+      mate.cooldown = 0;
+      Object.assign(s.puck, { ...stickTip(mate), y: 0.1, vx: 0, vz: 0, vy: 0, owner: null });
+      Object.assign(s.puck, { lockout: 0, shot: false, lastTouch: 1 });
+      stepMatch(s, seats({}, {}));
+      expect(s.puck.owner).toBe(mate.id);
+      expect(two.controlled).toBe(mate.id);
+      expect(one.controlled).toBe(far.id);
+      heldOnce(s);
+    });
+
+    it('moves only the nearer person into goal when the goalie freezes it', () => {
+      const s = sameBench();
+      const [one, two] = s.sides[0].humans;
+      const g = s.skaters.find((p) => p.role === 'G' && p.team === 0)!;
+      const far = s.skaters[one.controlled],
+        near = s.skaters[two.controlled];
+      place(far, 0, 0);
+      place(near, g.x * 0.8, 3);
+      Object.assign(s.puck, { x: g.x, z: g.z, y: 0.1, vx: 0, vz: 0, vy: 0, shot: true });
+      Object.assign(s.puck, { owner: null, lockout: 0 });
+      g.cooldown = 0;
+      stepMatch(s, seats({}, {}));
+      expect(s.puck.owner).toBe(g.id);
+      expect(two.controlled).toBe(g.id);
+      expect(one.controlled).toBe(far.id);
+      heldOnce(s);
+    });
+  });
+
+  it('takes the draw from whoever is on the centre, not the winger swinging beside them', () => {
+    const early = createMatch([0, 0]);
+    startMatch(early);
+    // Only the winger swings, and early: that must not count as the side jumping it.
+    stepMatch(early, seats({}, { pass: true }));
+    expect(early.sides[0].drawInput).toBe(-1);
+    stepMatch(early, seats({ pass: true }, {}));
+    expect(early.sides[0].drawInput).toBeGreaterThan(0);
+  });
+
+  it('starts every faceoff with the first seat on the centre and the second on a wing', () => {
+    const s = sameBench();
+    const [one, two] = s.sides[0].humans;
+    tape(s, s.skaters[3]);
+    stepMatch(s, seats({ switchPlayer: true }, { switchPlayer: true }));
+    resetFormation(s);
+    expect(s.skaters[one.controlled].role).toBe('C');
+    expect(s.skaters[two.controlled].role).toBe('LW');
+  });
+
+  it('takes turns in a shootout, shooting and in goal, with the other seat sitting it out', () => {
+    const s = createMatch([0, 0], 'shootout');
+    startMatch(s);
+    const turns: { shooting: Team; seat: number }[] = [];
+    for (let attempt = 0; attempt < 4; attempt++) {
+      heldOnce(s);
+      const shooting = s.shootoutShooter;
+      const onIce = s.sides[0].humans.findIndex((h) => isOnIce(s, s.skaters[h.controlled]));
+      const off = s.sides[0].humans.filter((h) => !isOnIce(s, s.skaters[h.controlled]));
+      expect(onIce).toBeGreaterThanOrEqual(0);
+      expect(off).toHaveLength(1);
+      const role = s.skaters[s.sides[0].humans[onIce].controlled].role;
+      expect(role).toBe(shooting === 0 ? 'C' : 'G');
+      turns.push({ shooting, seat: onIce });
+      s.shootoutTaken[shooting]++;
+      s.shootoutShooter = (1 - shooting) as Team;
+      resetFormation(s);
+      startMatch(s);
+    }
+    const shots = turns.filter((t) => t.shooting === 0).map((t) => t.seat);
+    const saves = turns.filter((t) => t.shooting === 1).map((t) => t.seat);
+    expect(shots).toEqual([0, 1]);
+    expect(saves).toEqual([0, 1]);
+  });
+
+  it('never has two people on one skater through a long scramble', () => {
+    const s = createMatch([0, 0], 'threeOnThree');
+    startMatch(s);
+    for (let i = 0; i < 20 / RULES.fixedStep; i++) {
+      const beat = Math.floor(i / 30);
+      stepMatch(
+        s,
+        seats(
+          { moveX: Math.sin(beat), moveZ: Math.cos(beat), switchPlayer: beat % 3 === 0 },
+          { moveX: -Math.cos(beat), pass: beat % 4 === 1, switchPlayer: beat % 5 === 2 },
+        ),
+        RULES.fixedStep,
+      );
+      if (i % 12 === 0) heldOnce(s);
+      if (s.phase === 'goal' || s.phase === 'intermission') {
+        resetFormation(s);
+        startMatch(s);
+      }
+    }
+    heldOnce(s);
+  });
+});
+
+describe('two people on one bench, over the wire and in a replay', () => {
+  it('carries both people on a side through a snapshot', () => {
+    const host = createMatch([0, 0]);
+    startMatch(host);
+    host.phase = 'playing';
+    host.sides[0].humans[1].shotCharge = 0.6;
+    host.sides[0].humans[1].passTarget = 3;
+    const guest = createMatch([0, 1]);
+    poseSnapshot(guest, decodeSnapshot(encodeSnapshot(host)));
+    expect(guest.sides[0].humans.map((h) => h.controlled)).toEqual(
+      host.sides[0].humans.map((h) => h.controlled),
+    );
+    expect(guest.sides[0].humans[1].shotCharge).toBeCloseTo(0.6, 2);
+    expect(guest.sides[0].humans[1].passTarget).toBe(3);
+    expect(guest.sides[1].humans).toEqual([]);
+  });
+
+  it('replays each person on their own skater', () => {
+    const s = sameBench();
+    const buffer = new ReplayBuffer();
+    s.sides[0].humans[1].shotCharge = 0.8;
+    buffer.record(s);
+    s.sides[0].humans[1].shotCharge = 0.4;
+    buffer.record(s);
+    const view = createView(s);
+    sampleReplay(view, buffer.snapshot(), 0.5 / REPLAY_HZ);
+    expect(view.sides[0].humans).toHaveLength(2);
+    expect(view.sides[0].humans[1].controlled).toBe(s.sides[0].humans[1].controlled);
+    expect(view.sides[0].humans[1].shotCharge).toBeCloseTo(0.6, 2);
+    expect(view.sides[0].humans[0].shotCharge).toBe(0);
   });
 });

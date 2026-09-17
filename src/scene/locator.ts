@@ -1,7 +1,8 @@
 import { PerspectiveCamera, Vector3 } from 'three';
+import { leadHuman } from '../game/humans';
 import { isOnIce } from '../game/modes';
 import { clamp } from '../game/math';
-import type { MatchState, Team } from '../game/types';
+import type { Human, MatchState } from '../game/types';
 
 const _world = new Vector3();
 const _view = new Vector3();
@@ -17,16 +18,16 @@ export type PlayerLocator = {
   color: string;
 };
 
-/** Screen-space chip for the controlled skater when they're off the bottom of a tracking camera. */
+/** Screen-space chip for a person's skater when they're off the bottom of a tracking camera. */
 export function playerLocator(
   match: MatchState,
   camera: PerspectiveCamera,
   width: number,
   wasVisible = false,
-  anchor: Team = 0,
+  human: Human | undefined = leadHuman(match, 0),
 ): PlayerLocator | null {
-  if (match.phase !== 'playing') return null;
-  const player = match.skaters[match.sides[anchor].controlled];
+  if (match.phase !== 'playing' || !human) return null;
+  const player = match.skaters[human.controlled];
   if (!player || !isOnIce(match, player)) return null;
   _world.set(player.x, 0.95, player.z);
   _view.copy(_world).applyMatrix4(camera.matrixWorldInverse);

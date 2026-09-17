@@ -769,6 +769,17 @@ a {
   right: -10px;
   border-left: 10px solid #fff;
 }
+/* Seat two wears the same blue as the ring under their skater on the ice. */
+.token[data-seat='two'] {
+  color: #fff;
+  background: linear-gradient(180deg, #7cc4f2, #3a8fcc);
+}
+.token[data-seat='two'][data-side='away']::before {
+  border-right-color: #7cc4f2;
+}
+.token[data-seat='two'][data-side='home']::before {
+  border-left-color: #7cc4f2;
+}
 .matchup-foot {
   display: flex;
   justify-content: flex-end;

@@ -6,7 +6,7 @@ import { step, useNav } from '../input/menuNavigation';
 import { ControlsScreen } from './Controls';
 import { Brand, MenuItem, Prompts } from './kit';
 import { SettingsScreen } from './Settings';
-import { TeamSelect } from './TeamSelect';
+import { TeamSelect, type Partner } from './TeamSelect';
 import { OnlineScreen } from './Online';
 import { normaliseCode } from '../net/protocol';
 
@@ -55,8 +55,10 @@ export function Menu() {
   /** The last match format picked, kept across trips to the menu like the teams are. */
   const [format, setFormat] = useState<GameMode>('exhibition');
   const [practice, setPractice] = useState(false);
-  /** A second person on the other bench, sharing the screen. */
-  const [guests, setGuests] = useState(false);
+  /** A second person sharing the screen, across the ice or on the same bench. Kept after a game. */
+  const [partner, setPartner] = useState<Partner | null>(() =>
+    runtime.seatTwo === null ? null : runtime.seatTwo === runtime.myTeam ? 'with' : 'versus',
+  );
   // The matchup outlives the screens, so backing out to change modes keeps your picks.
   const [teams, setTeams] = useState<[Club, Club]>(match.teams);
   const [side, setSide] = useState<Team>(runtime.myTeam);
@@ -85,8 +87,8 @@ export function Menu() {
           setSide={setSide}
           jersey={jersey}
           setJersey={setJersey}
-          guests={guests && !practice}
-          setGuests={setGuests}
+          partner={practice ? null : partner}
+          setPartner={setPartner}
           onBack={home}
         />
       )}
