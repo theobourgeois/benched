@@ -3,7 +3,7 @@ import { useFrame, useLoader } from '@react-three/fiber';
 import * as THREE from 'three';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { mySide, runtime, viewMatch, viewTimeScale } from '../game/store';
+import { mySide, runtime, viewMatch, viewTimeScale } from '../app/store';
 import { uniformFor } from '../game/clubs';
 import { STICK } from '../game/config';
 import { isOnIce } from '../game/engine';

@@ -1,7 +1,7 @@
 import { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import { runtime, viewMatch, viewTimeScale } from '../game/store';
+import { runtime, viewMatch, viewTimeScale } from '../app/store';
 import { RINK } from '../game/config';
 interface Particle {
   x: number;

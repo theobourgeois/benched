@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { runtime } from '../game/store';
+import { runtime } from '../app/store';
 
 /**
  * Frames drawn per second, sampled every half second, and online the round trip to the other

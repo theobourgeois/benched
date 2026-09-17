@@ -32,7 +32,10 @@ describe('stick solver continuity probe', () => {
       });
       if (last) {
         const d = grip.distanceTo(last);
-        if (d > 0.02) console.log(`u=${u.toFixed(3)} lift=${lift.toFixed(3)} socket jump ${(d * 100).toFixed(1)}cm`);
+        if (d > 0.02)
+          console.log(
+            `u=${u.toFixed(3)} lift=${lift.toFixed(3)} socket jump ${(d * 100).toFixed(1)}cm`,
+          );
       }
       last = grip.clone();
     }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_PHYSICS, DEFAULT_STICK, PHYSICS, STICK } from '../src/game/config';
-import { copyFeelTweaks, FEEL_PARAMS, formatFeel } from '../src/game/feel';
+import { copyFeelTweaks, FEEL_PARAMS, formatFeel } from '../src/dev/feel';
 
 describe('feel tuner coverage', () => {
   it('exposes every live-feel physics and stick constant except body geometry', () => {

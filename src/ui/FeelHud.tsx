@@ -16,9 +16,9 @@ import {
   useFeel,
   type FeelGroupId,
   type FeelParam,
-} from '../game/feel';
+} from '../dev/feel';
 import { distance } from '../game/math';
-import { mySide, useGame } from '../game/store';
+import { mySide, useGame } from '../app/store';
 
 function band(speed: number) {
   if (speed < 1.2) return 'still';

@@ -12,33 +12,14 @@ import * as THREE from 'three';
 import { Arena } from './Arena';
 import { Player } from './Player';
 import { GoalLamp, IceSpray } from './Effects';
-import {
-  driveReplay,
-  askToLeave,
-  followLiveGoalReplay,
-  goalReplayWanted,
-  mySide,
-  publish,
-  runtime,
-  startGoalReplay,
-  useGame,
-  viewMatch,
-  viewTimeScale,
-} from '../game/store';
-import { stepMatch, togglePause, netShotTarget, shotSpread } from '../game/engine';
+import { mySide, runtime, useGame, viewMatch } from '../app/store';
+import { impact, loop } from '../app/loop';
+import { netShotTarget, shotSpread } from '../game/engine';
 import { recordRagdollPoses } from './ragdoll';
-import { GOAL_REPLAY, REPLAY_HZ } from '../game/replay';
-import { GOAL_BEAT } from '../audio/goalTrack';
 import { replayFraming } from './replayCamera';
-import { navigateWithController } from '../input/menuNavigation';
-import { screenInputToRink } from '../input/coordinates';
 import { cameraFraming } from './camera';
 import { playerLocator } from './locator';
-import { EMPTY_INPUT, PUCK, RULES } from '../game/config';
-import { hasActiveCelly } from '../game/cellys';
-import type { InputFrame, MatchState, Phase, SideInputs, Team } from '../game/types';
-import { mergeEdges, noEdges } from '../input/frames';
-import type { Controller } from '../input/controller';
+import { PUCK } from '../game/config';
 import { labHooks } from './animationReview';
 /** Dev-only animation lab: drives the subject, the close-up camera, overlays and captures. */
 const LabScene = import.meta.env.DEV
@@ -47,309 +28,20 @@ const LabScene = import.meta.env.DEV
 const _aimNdc = new THREE.Vector3();
 const _aimEdge = new THREE.Vector3();
 const _framing = new THREE.Vector3();
-/** Simulation steps per replay snapshot. */
-const RECORD_EVERY = Math.max(1, Math.round(1 / RULES.fixedStep / REPLAY_HZ));
-const RECORDED: Phase[] = ['faceoff', 'playing', 'goal'];
-/** The world holds for two sixteenths as the puck crosses, so the drop lands on a still frame. */
-const GOAL_FREEZE = GOAL_BEAT / 2;
-/** Impact feedback shared between the simulation loop and the camera: a big hit shakes the frame. */
-const impact = { shake: 0 };
+/**
+ * The loop lives in `app/loop.ts`; this only hands it the render clock and the scene's part of a
+ * replay frame, and gives the controllers back when the scene goes away.
+ */
 function Simulation() {
-  const accumulator = useRef(0),
-    lastEvent = useRef(-1),
-    publishTime = useRef(0),
-    lastMatch = useRef(runtime.match),
-    pending = useRef<SideInputs>([null, null]),
-    steps = useRef(0),
-    goalReplay = useRef(false),
-    replayedGoal = useRef<string | null>(null),
-    freeze = useRef(0),
-    pulses = useRef<number[]>([]),
-    frameRef = useRef<(delta: number) => void>(() => {});
-  // Online, the host runs the match for both people, so it has to keep stepping even while
-  // nobody is looking at this tab. A worker's clock is not throttled the way the render loop is.
   useEffect(() => {
-    const beat = new Worker(new URL('../net/heartbeat.worker.ts', import.meta.url), {
-      type: 'module',
-    });
-    let last = performance.now();
-    beat.onmessage = () => {
-      const now = performance.now();
-      const delta = (now - last) / 1000;
-      last = now;
-      if (document.hidden && runtime.net) frameRef.current(Math.min(delta, 0.05));
-    };
-    // It only runs while it is needed: hidden, and with somebody on the other end.
-    const sync = () => {
-      const wanted = document.hidden && !!runtime.net;
-      last = performance.now();
-      beat.postMessage(wanted ? 'start' : 'stop');
-    };
-    document.addEventListener('visibilitychange', sync);
-    sync();
-    return () => {
-      document.removeEventListener('visibilitychange', sync);
-      beat.postMessage('stop');
-      beat.terminate();
-    };
-  }, []);
-  useEffect(() => {
-    const detach = runtime.controller.attach(),
-      detachTwo = runtime.controllerTwo.attach();
-    const pause = () => {
-      if (runtime.replay) {
-        if (runtime.replay.kind === 'instant') runtime.replay.playing = false;
-        return;
-      }
-      // Online there is nothing to pause. The host pausing would stop the match for the guest
-      // too, and a dropped pad or a hidden tab is no reason to freeze somebody else's game.
-      if (runtime.net) return;
-      if (['playing', 'faceoff', 'goal'].includes(runtime.match.phase)) {
-        togglePause(runtime.match);
-        runtime.audio.updateSkating(runtime.match, 1, runtime.myTeam);
-        publish();
-      }
-    };
-    runtime.controller.onDisconnect = pause;
-    // A second player's pad dying mid-shift stops the game too, but only while they are on it.
-    runtime.controllerTwo.onDisconnect = () => {
-      if (runtime.match.sides[1 - runtime.myTeam].human) pause();
-    };
-    const visibility = () => {
-      if (document.hidden) pause();
-    };
-    document.addEventListener('visibilitychange', visibility);
+    loop.onRecord = recordRagdollPoses;
+    const detach = loop.attach();
     return () => {
       detach();
-      detachTwo();
-      runtime.controller.onDisconnect = undefined;
-      runtime.controllerTwo.onDisconnect = undefined;
-      document.removeEventListener('visibilitychange', visibility);
-      pulses.current.forEach(clearTimeout);
+      loop.onRecord = null;
     };
   }, []);
-  /** The pad thumps with every 808 for the first bars of the celebration. */
-  const rumbleToTheBeat = () => {
-    pulses.current.forEach(clearTimeout);
-    pulses.current = runtime.audio
-      .celebrationPulses()
-      .map((ms) => window.setTimeout(() => runtime.controller.rumble(0.85, 90), ms));
-  };
-  /**
-   * Whistles, hits and horns: sound, rumble and camera shake. The watching side runs this on the
-   * calls the host sent rather than on any of its own, which is why they cross with the snapshot.
-   */
-  const drainEvents = (s: MatchState) => {
-    for (const event of s.events)
-      if (event.id > lastEvent.current) {
-        runtime.audio.play(event, s.mode);
-        if (event.type === 'goal') {
-          goalReplay.current = goalReplayWanted(s);
-          if (s.mode !== 'freeSkate') {
-            freeze.current = GOAL_FREEZE;
-            impact.shake = Math.max(impact.shake, 0.6);
-            rumbleToTheBeat();
-          }
-        }
-        if (['shot', 'hit', 'goal', 'post', 'crossbar', 'save'].includes(event.type)) {
-          const bigHit = event.type === 'hit' && event.power >= 0.5;
-          if (bigHit) impact.shake = Math.max(impact.shake, event.power >= 0.75 ? 1 : 0.45);
-          if (event.barDown && event.type === 'crossbar')
-            impact.shake = Math.max(impact.shake, 0.3);
-          const iron = event.type === 'crossbar';
-          runtime.controller.rumble(
-            event.type === 'goal'
-              ? 1
-              : bigHit
-                ? Math.max(0.7, event.power)
-                : iron
-                  ? Math.max(0.55, event.power)
-                  : event.power * 0.7,
-            event.type === 'goal'
-              ? 380
-              : bigHit
-                ? 280
-                : event.type === 'hit'
-                  ? 160
-                  : iron
-                    ? 130
-                    : 100,
-          );
-        }
-        lastEvent.current = event.id;
-      }
-  };
-  /** One pass of the game loop: read the sticks, advance the match, play what happened. */
-  const advance = (delta: number) => {
-    const s = runtime.match;
-    if (s !== lastMatch.current) {
-      lastMatch.current = s;
-      lastEvent.current = -1;
-      accumulator.current = 0;
-      pending.current = [null, null];
-      goalReplay.current = false;
-      replayedGoal.current = null;
-      freeze.current = 0;
-      pulses.current.forEach(clearTimeout);
-    }
-    runtime.audio.updateCelebration(
-      s.phase === 'goal' || (s.phase === 'paused' && s.previousPhase === 'goal'),
-      s.phase === 'paused',
-    );
-    const tickPublish = () => {
-      publishTime.current += delta;
-      if (publishTime.current > 0.08) {
-        publish();
-        publishTime.current = 0;
-      }
-    };
-    // Replay controls read every frame, before read() clears this frame's key taps, so a button
-    // already held when a replay opens doesn't count as a press.
-    const replayInput = runtime.controller.replayInput();
-    const replay = runtime.replay;
-    /** Let the goal land live for a moment, then roll the replay. True when one just opened. */
-    const rollGoalReplay = (match: MatchState) => {
-      if (match.phase !== 'goal' && match.phase !== 'paused') {
-        goalReplay.current = false;
-        return false;
-      }
-      const scoreKey = `${match.score[0]}-${match.score[1]}`;
-      // The watching side can miss the call itself and still see the celebration, so arm off
-      // the score rather than the event. The key stops a skip from rolling the same goal again.
-      if (match.phase === 'goal' && goalReplayWanted(match) && replayedGoal.current !== scoreKey)
-        goalReplay.current = true;
-      if (
-        goalReplay.current &&
-        match.phase === 'goal' &&
-        match.countdown <= RULES.goalSeconds - GOAL_REPLAY.celebrate &&
-        match.countdown > 0 &&
-        !hasActiveCelly(match) &&
-        startGoalReplay()
-      ) {
-        replayedGoal.current = scoreKey;
-        goalReplay.current = false;
-        return true;
-      }
-      return false;
-    };
-    if (replay) {
-      const dt = Math.min(delta, 0.05);
-      // Play input keeps reading too, so buttons held on the way out aren't fresh presses.
-      runtime.controller.claimed = [];
-      runtime.controller.read(dt, false);
-      runtime.controllerTwo.claimed =
-        runtime.controller.padIndex === undefined ? [] : [runtime.controller.padIndex];
-      runtime.controllerTwo.read(dt, false);
-      pending.current = [null, null];
-      accumulator.current = 0;
-      driveReplay(replay, replayInput, dt);
-      const net = runtime.net;
-      if (net?.isHost) {
-        // The sim is held, but the guest still needs the freeze-point — and a skip that
-        // zeros the countdown — or it never catches up enough to open or close its overlay.
-        net.publish(s, dt);
-      } else if (net) {
-        net.view(s, dt);
-        if (followLiveGoalReplay(s)) drainEvents(s);
-      }
-      runtime.audio.updateSkating(viewMatch(), Math.min(1, viewTimeScale()), runtime.myTeam);
-      tickPublish();
-      return;
-    }
-    // Every seat reads its own pad but maps through the same anchor: one screen, one orientation,
-    // so up is up for whoever is holding a stick.
-    const readSeat = (seat: Controller, team: Team) =>
-      screenInputToRink(
-        seat.read(Math.min(delta, 0.05), s.puck.owner === s.sides[team].controlled),
-        s,
-        runtime.settings.camera,
-        runtime.myTeam,
-      );
-    const net = runtime.net;
-    const guest = (1 - runtime.myTeam) as Team;
-    // Seat one picks first and seat two takes what is left, so one pad always belongs to P1.
-    runtime.controller.claimed = [];
-    const mine = readSeat(runtime.controller, runtime.myTeam);
-    runtime.controllerTwo.claimed =
-      runtime.controller.padIndex === undefined ? [] : [runtime.controller.padIndex];
-    // Seat two is polled even with nobody on it, so the matchup screen can tell you whether a
-    // second controller has turned up yet. Its frame only counts once somebody is playing it.
-    const guestFrame = readSeat(runtime.controllerTwo, guest);
-    // Menus consume the pad only after it has been read, or a press lands on the stale frame.
-    const menuOwnsInput = navigateWithController();
-    const blocked = !!document.querySelector('[data-block-game-input]');
-    const gate = (frame: InputFrame) => {
-      if (menuOwnsInput) {
-        frame.pause = false;
-        frame.switchPlayer = false;
-      }
-      if (blocked) frame.pause = false;
-      return frame;
-    };
-    pending.current[runtime.myTeam] = mergeEdges(pending.current[runtime.myTeam], gate(mine));
-    // Online, the other bench is a person somewhere else; the second seat belongs to the couch.
-    pending.current[guest] = net
-      ? null
-      : s.sides[guest].human
-        ? mergeEdges(pending.current[guest], gate(guestFrame))
-        : null;
-    if (net && !net.isHost) {
-      // A guest runs no simulation. It says what it is trying to do and draws what it is told,
-      // so there is no second version of the match to disagree with the host's.
-      // Presses are kept until a frame actually goes out, so none is lost between sends.
-      if (net.sendInput(pending.current[runtime.myTeam] ?? EMPTY_INPUT))
-        pending.current[runtime.myTeam] = noEdges(pending.current[runtime.myTeam] ?? EMPTY_INPUT);
-      if (net.view(s, Math.min(delta, 0.05)) && RECORDED.includes(s.phase))
-        recordRagdollPoses(runtime.recorder.record(s));
-      drainEvents(s);
-      rollGoalReplay(s);
-      runtime.audio.updateSkating(s, 1, runtime.myTeam);
-      tickPublish();
-      return;
-    }
-    // Pausing is a request from a person, not something the physics can decide: with two sticks
-    // on the ice the engine cannot know whose pause it is, so it is resolved out here. Either
-    // seat can call it.
-    // Nobody gets to freeze somebody else's game, so the pause button asks about leaving instead.
-    if (net && pending.current.some((frame) => frame?.pause)) {
-      pending.current = pending.current.map((frame) => frame && noEdges(frame)) as SideInputs;
-      askToLeave(!runtime.leaving);
-    }
-    if (!net && pending.current.some((frame) => frame?.pause)) {
-      togglePause(s);
-      pending.current = pending.current.map((frame) => frame && noEdges(frame)) as SideInputs;
-      runtime.audio.updateSkating(s, 1, runtime.myTeam);
-      publish();
-      accumulator.current = 0;
-      return;
-    }
-    if (freeze.current > 0) {
-      freeze.current -= delta;
-      accumulator.current = 0;
-    } else
-      accumulator.current +=
-        Math.min(delta, 0.05) * (import.meta.env.DEV && labHooks.active ? labHooks.simScale : 1);
-    while (accumulator.current >= RULES.fixedStep) {
-      // As host, the other bench is whatever the last packet said. A missing one repeats rather
-      // than handing the skater back to the AI.
-      if (net) pending.current[guest] = net.takeGuestInput();
-      stepMatch(s, pending.current, RULES.fixedStep);
-      pending.current = pending.current.map((frame) => frame && noEdges(frame)) as SideInputs;
-      accumulator.current -= RULES.fixedStep;
-      if (RECORDED.includes(s.phase) && ++steps.current % RECORD_EVERY === 0)
-        recordRagdollPoses(runtime.recorder.record(s));
-    }
-    net?.publish(s, Math.min(delta, 0.05));
-    drainEvents(s);
-    if (rollGoalReplay(s)) net?.publish(s, 1);
-    runtime.audio.updateSkating(s, 1, runtime.myTeam);
-    tickPublish();
-  };
-  frameRef.current = advance;
-  // A hidden tab throttles this to about once a second, so the heartbeat takes over there.
-  useFrame((_, delta) => {
-    if (!document.hidden) advance(delta);
-  });
+  useFrame((_, delta) => loop.frame(delta));
   return null;
 }
 function CameraRig() {

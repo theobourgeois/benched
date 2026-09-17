@@ -2,7 +2,7 @@ import { Gamepad2, X } from 'lucide-react';
 import { Fragment, useEffect, useState } from 'react';
 import { formatVolume, stepVolume } from '../audio/sound';
 import { DIFFICULTIES, difficultyInfo } from '../game/difficulty';
-import { publish, updateSettings, useGame } from '../game/store';
+import { publish, updateSettings, useGame } from '../app/store';
 import type { Settings } from '../game/types';
 import { step, useNav } from '../input/menuNavigation';
 import { CAMERA_OPTIONS } from '../scene/camera';

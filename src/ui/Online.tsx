@@ -9,7 +9,8 @@ import {
   type Club,
 } from '../game/clubs';
 import { modeInfo } from '../game/modes';
-import { beginOnlineMatch, runtime, useGame } from '../game/store';
+import { connectToRoom, disconnect } from '../app/online';
+import { useGame } from '../app/store';
 import type { GameMode, Team } from '../game/types';
 import { useNav } from '../input/menuNavigation';
 import {
@@ -19,7 +20,7 @@ import {
   type MatchSetup,
   type Player,
 } from '../net/protocol';
-import { NetSession, ROOM_HOST } from '../net/session';
+import type { NetSession } from '../net/session';
 import { Glyph, Prompts, TeamLogo, TitleBar } from './kit';
 
 /** Re-render whenever the room says anything. */
@@ -41,10 +42,7 @@ export function OnlineScreen({ onBack, join }: { onBack: () => void; join?: stri
   useRoom(net);
 
   const connect = (room: string) => {
-    runtime.net?.close();
-    const session = new NetSession(room, ROOM_HOST, 'Player');
-    session.onStart = (setup) => beginOnlineMatch(setup, session.team);
-    runtime.net = session;
+    connectToRoom(room);
     setCode(room);
   };
   // An invite link connects straight through rather than making you retype the code.
@@ -57,8 +55,7 @@ export function OnlineScreen({ onBack, join }: { onBack: () => void; join?: stri
   }, [join]);
 
   const leave = () => {
-    runtime.net?.close();
-    runtime.net = null;
+    disconnect();
     onBack();
   };
 

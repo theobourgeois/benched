@@ -39,8 +39,6 @@ export const PHYSICS = {
   autoSkatePush: 1.4,
   /** Edges can only redirect this much velocity per second; pace widens the turning circle. */
   edgeAcceleration: 40,
-  // Feel tweaks — paste into src/game/config.ts
-
   /** Tight turns spend speed as the skater loads an edge. */
   carveBleed: 0.0,
 

@@ -1,6 +1,5 @@
 import { useEffect, useRef, useSyncExternalStore } from 'react';
-import { runtime } from '../game/store';
-import { MENU_BUTTONS, type MenuButton } from './controller';
+import { MENU_BUTTONS, type Controller, type MenuButton } from './controller';
 
 /**
  * Menu input. Every screen that takes presses mounts a layer; the newest layer owns the pad and
@@ -57,12 +56,8 @@ export function step(index: number, dir: number, count: number, skip?: (i: numbe
 }
 
 /** Runs once per frame from the simulation loop. True while a menu owns the pad. */
-export function navigateWithController() {
-  const { controller } = runtime;
-  if (controller.padActive) {
-    setDevice('pad');
-    runtime.audio.unlock();
-  }
+export function navigateWithController(controller: Controller) {
+  if (controller.padActive) setDevice('pad');
   if (!navActive()) return false;
   for (const button of MENU_BUTTONS) if (controller.ui[button]) dispatch(button);
   return true;

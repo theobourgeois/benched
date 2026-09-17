@@ -5,9 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
-    "build": "tsc -b && tsc --noEmit -p tsconfig.worker.json && vite build",
+    "build": "npm run lint && tsc -b && tsc --noEmit -p tsconfig.worker.json && vite build",
     "preview": "vite preview --host 0.0.0.0",
-    "test": "vitest run",
+    "lint": "node scripts/check-imports.mjs",
+    "test": "npm run lint && vitest run",
     "test:e2e": "playwright test",
     "data:nhl": "node scripts/fetch-nhl.ts",
     "format": "prettier --write src tests *.ts *.json index.html README.md",

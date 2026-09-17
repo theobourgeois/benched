@@ -129,45 +129,71 @@ React 19 + TypeScript + Vite + Three.js + React Three Fiber. The simulation runs
 
 ```text
 src/
-  game/
-    types.ts       Match, player, puck, input and event contracts
+  game/            The simulation: pure TypeScript, tested without a browser
+    types.ts       Match, player, puck, input, event and settings contracts
     config.ts      Rink dimensions, physics constants, match rules
+    modes.ts       Exhibition, 3-on-3, 1-on-1, shootout and free skate: rules and who is on the ice
+    difficulty.ts  CPU skill tiers
     clubs.ts       Leagues, clubs, starting lineups and uniforms built from league snapshots
     math.ts        Vectors, angular smoothing, rounded-board collision
     skating.ts     Shared acceleration, edge forces, stops, pivots and committed movement
     dekes.ts       One-touch and special deke clips
+    cellys.ts      Goal celebrations
     ai.ts          Puck pursuit, support lanes, defensive shape, goalie positioning and puck play
     goalie.ts      Goalie model: reading shots, committed saves, coverage, rebounds and covers
-    engine.ts      Pure simulation, possession, shots, collisions, periods, scoring
-    store.ts       Runtime composition and React subscriptions
+    engine.ts      Possession, shots, collisions, periods, scoring; stepMatch
+    replay.ts      Ring buffer of recent play, and replay transport
+  app/
+    store.ts       The runtime object (match, controllers, audio, session, settings) and React subscriptions
+    loop.ts        The game loop: pads → fixed-step simulation → events → publish
+    online.ts      Opening, joining and leaving a room; starting the agreed match
+  net/
+    protocol.ts    Lobby messages and the binary tags, shared with the room worker
+    session.ts     One side of an online match: room socket, direct link, input and snapshot flow
+    snapshot.ts    Binary snapshot of a moment of a match, and posing a match from one
+    view.ts        Guest-side interpolation a little behind the newest snapshot
+    peer.ts        WebRTC data channel between the two browsers
+    wire.ts        Field encoders
   input/
     controller.ts  Gamepad + keyboard, dead zones, tap buffering, shot gestures
+    frames.ts      Folding presses across frames so each is delivered once
+    coordinates.ts Screen-relative sticks to rink-relative intent
     menuNavigation.ts  Menu input layers: pad and keyboard presses go to the screen on top
   audio/
     sound.ts       Recorded puck strikes and speed-responsive skate loop, synthesized arena signals
+    goalTrack.ts   The goal soundtrack and its beat
   scene/
     Arena.tsx      Procedural rink, rounded boards, glass, stands, crowds, nets
     Player.tsx     Places each skater, plants the stick and wraps both hands around the shaft
     skaterPose.ts  Skating posture: stride cycle with planted leg IK, hip sway, torso lean, knockdown ragdoll
     skaterModel.ts Runtime skeleton for the skater model, team jersey recolor, crest/number decals, limb IK, hand grip
     stick.ts       Curved, taped blade geometry and stick placement from grip and puck position
+    ragdoll.ts     Rapier ragdolls for knockdowns
+    camera.ts, replayCamera.ts  Broadcast, wide and replay framing
     Effects.tsx    Pooled ice spray and impact particles
-    textures.ts   Canvas-generated ice graphics, board ads and jersey numbers
-    GameScene.tsx  Fixed-step loop, broadcast/wide cameras, lighting, puck renderer
+    textures.ts    Canvas-generated ice graphics, board ads and jersey numbers
+    GameScene.tsx  The canvas, lighting, puck renderer, camera rig
   ui/
     kit.tsx        Shared pieces: menu items, option rows, button glyphs and prompts
     Menu.tsx       Main menu and screen routing
     TeamSelect.tsx Matchup: side, club, ready and jersey
+    Online.tsx     Create or join a room, and the lobby
     Settings.tsx   Settings and the live controller test
     Hud.tsx        Score bug, player card, calls, pause and results
     Controls.tsx   Xbox and keyboard reference
     ReplayHud.tsx  Goal and instant replay overlays
+  dev/             Animation lab and feel tuner; development builds only
   data/leagues/    League snapshots (nhl.json) and their types
   fonts.css        Locally bundled font declarations
   style.css        Responsive UI
+workers/
+  room.ts          The room: a Durable Object that seats two players and relays bytes
 scripts/
   fetch-nhl.ts     Refreshes the NHL snapshot and logos (npm run data:nhl)
+  check-imports.mjs  Enforces which folders may import which (npm run lint)
 ```
+
+`CLAUDE.md` describes how a frame flows through these, and where each kind of change goes.
 
 Gameplay physics is purpose-built. Human and CPU skaters share bounded forward acceleration and lateral edge forces. Velocity determines the skating arc while body facing can pivot independently for backskating. Fast cuts widen the turning circle and spend speed; opposite-stick stops shed momentum before the next push. Hustle adds top-end pace once moving, and dekes share a finite push budget instead of stacking speed boosts. The animation follows actual push effort and edge load, so releasing the stick produces a glide. CPU decisions read the same pre-movement frame, and puck handling advances once per skater. Body collisions sweep the movement path and resolve contacts in time order. A check needs forward shoulder contact and closing momentum; glancing or rear contact cannot consume the committed hit. A dislodged puck keeps its pre-impact momentum instead of inheriting the knockdown impulse. Also rounded rink constraints, skater separation, solid net frames, friction and gravity for the puck, swept goal-line checks, post rebounds, body deflections, goalie saves and puck pickup. Physics parameters live in `game/config.ts`, locomotion in `game/skating.ts`, and team tactics in `game/ai.ts`. The pure engine can be tested without WebGL or a browser.
 
@@ -178,7 +204,7 @@ Skaters share the rigged Mixamo character `public/models/skater.fbx` (see [model
 ## Validation
 
 ```sh
-npm test           # Simulation and controller unit tests
+npm test           # Import layering check, then simulation and controller unit tests
 npm run test:e2e  # Chrome browser integration tests
 npm run build     # Strict TypeScript + production bundle
 npm run format    # Format source, tests, and configuration
@@ -190,7 +216,7 @@ For development inspection only, `window.__BENCHED__` exposes the runtime, publi
 
 ## Prototype scope
 
-Single local player against AI. No online multiplayer, penalties, offside, icing, line changes, overtime, or fighting. You control your goalie in shootouts and whenever they freeze the puck (shuffle, throw a glove, blocker or pad with the right stick, butterfly, poke, then pass or shoot it out); the rest of the time the goalie reads shots itself. Faceoffs use a countdown followed by a race for the loose puck. All players share one sculpted skater, recolored per team with crest and number decals; goalies add pads. Its animation is procedural — skating crouch and stride, arms solved onto the stick, and knockdown recovery — with no motion capture. Settings persist in local storage; the matchup is kept for the session. The physics and AI are an arcade foundation for further playtesting and tuning.
+Local play against AI, two players on one screen, or two players online. No penalties, offside, icing, line changes, overtime, or fighting. You control your goalie in shootouts and whenever they freeze the puck (shuffle, throw a glove, blocker or pad with the right stick, butterfly, poke, then pass or shoot it out); the rest of the time the goalie reads shots itself. Faceoffs use a countdown followed by a race for the loose puck. All players share one sculpted skater, recolored per team with crest and number decals; goalies add pads. Its animation is procedural — skating crouch and stride, arms solved onto the stick, and knockdown recovery — with no motion capture. Settings persist in local storage; the matchup is kept for the session. The physics and AI are an arcade foundation for further playtesting and tuning.
 
 Technical references: [React Three Fiber setup](https://r3f.docs.pmnd.rs/getting-started/installation), [Gamepad API](https://developer.mozilla.org/en-US/docs/Web/API/Gamepad), [controller haptics](https://developer.mozilla.org/en-US/docs/Web/API/Gamepad/vibrationActuator).
 

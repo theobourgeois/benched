@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createMatch, emit, startMatch } from '../src/game/engine';
 import { attackDirection, RINK } from '../src/game/config';
-import { closeReplay, followLiveGoalReplay, runtime } from '../src/game/store';
+import { closeReplay, followLiveGoalReplay, runtime } from '../src/app/store';
 import type { NetSession } from '../src/net/session';
 import {
   advanceReplay,

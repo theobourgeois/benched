@@ -12,7 +12,7 @@ import {
 } from '../game/clubs';
 import { DIFFICULTIES, difficultyInfo } from '../game/difficulty';
 import { modeInfo } from '../game/modes';
-import { beginGame, updateSettings, useGame } from '../game/store';
+import { beginGame, updateSettings, useGame } from '../app/store';
 import type { GameMode, Jersey, Team } from '../game/types';
 import { useDevice, useNav } from '../input/menuNavigation';
 import { Glyph, JerseyIcon, Prompts, TeamLogo, TitleBar } from './kit';

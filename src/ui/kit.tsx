@@ -1,7 +1,7 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useEffect, useId, useRef, type CSSProperties, type ReactNode } from 'react';
 import type { Club, Uniform } from '../game/clubs';
-import { useGame } from '../game/store';
+import { useGame } from '../app/store';
 import { useDevice, type Device, type NavAction } from '../input/menuNavigation';
 
 export type PromptKey = NavAction | 'updown' | 'leftright';

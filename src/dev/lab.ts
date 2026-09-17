@@ -3,7 +3,7 @@
 // Docs: docs/anim-lab.md.
 import { useSyncExternalStore } from 'react';
 import * as THREE from 'three';
-import { beginGame, mySide, publish, returnToMenu, runtime } from '../game/store';
+import { beginGame, mySide, publish, returnToMenu, runtime } from '../app/store';
 import { stickTip } from '../game/engine';
 import { PUCK } from '../game/config';
 import type { MatchState } from '../game/types';

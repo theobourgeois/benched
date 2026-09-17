@@ -9,7 +9,7 @@ import {
   toggleReplayPlayback,
   type ReplaySession,
 } from '../game/replay';
-import { closeReplay, publish, useGame } from '../game/store';
+import { closeReplay, publish, useGame } from '../app/store';
 import type { MatchState } from '../game/types';
 import { useDevice } from '../input/menuNavigation';
 import { Glyph, KeyChip } from './kit';

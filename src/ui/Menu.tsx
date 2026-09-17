@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { Club } from '../game/clubs';
-import { runtime, useGame } from '../game/store';
+import { runtime, useGame } from '../app/store';
 import type { GameMode, Jersey, Team } from '../game/types';
 import { step, useNav } from '../input/menuNavigation';
 import { ControlsScreen } from './Controls';
@@ -57,7 +57,11 @@ export function Menu() {
   const [jersey, setJersey] = useState<Jersey>(match.jerseys[runtime.myTeam]);
   const pick = (id: Entry) => {
     if (id === 'settings' || id === 'controls' || id === 'online') return setScreen(id);
-    if (id === 'lab') return void import('../dev/lab').then((m) => m.openLab());
+    // Guarded so the lab is not even a chunk in a production build.
+    if (id === 'lab') {
+      if (import.meta.env.DEV) void import('../dev/lab').then((m) => m.openLab());
+      return;
+    }
     setGuests(id === 'twoPlayer');
     setMode(id === 'twoPlayer' ? 'exhibition' : id);
     setScreen('teams');

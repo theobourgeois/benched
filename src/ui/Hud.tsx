@@ -1,19 +1,18 @@
 import { ArrowRight } from 'lucide-react';
-import { useState, type CSSProperties } from 'react';
+import { lazy, Suspense, useState, type CSSProperties } from 'react';
 import { attackDirection } from '../game/config';
 import { modeInfo } from '../game/modes';
 import {
-  askToLeave,
   beginGame,
   canInstantReplay,
   continueGame,
-  leaveOnline,
   openInstantReplay,
   pauseGame,
   returnToMenu,
   runtime,
   useGame,
-} from '../game/store';
+} from '../app/store';
+import { askToLeave, leaveOnline } from '../app/online';
 import { cameraUsesAttackUp, type MatchState, type Team } from '../game/types';
 
 /**
@@ -29,8 +28,11 @@ function noticeText(s: MatchState, you: Team) {
 }
 import { step, useNav } from '../input/menuNavigation';
 import { ControlsScreen } from './Controls';
-import { FeelHud } from './FeelHud';
 import { FpsCounter } from './FpsCounter';
+/** Dev-only feel tuner: a separate chunk, absent from a production build. */
+const FeelHud = import.meta.env.DEV
+  ? lazy(() => import('./FeelHud').then((m) => ({ default: m.FeelHud })))
+  : null;
 import { MenuItem, Prompts, TeamLogo, TitleBar } from './kit';
 import { SettingsScreen } from './Settings';
 
@@ -95,7 +97,11 @@ export function Hud() {
         <ControlsScreen crumb="Paused" onClose={() => setPanel(null)} />
       )}
       {(s.phase === 'intermission' || s.phase === 'final') && <Results s={s} />}
-      <FeelHud open={feel} onOpenChange={setFeel} />
+      {FeelHud && (
+        <Suspense fallback={null}>
+          <FeelHud open={feel} onOpenChange={setFeel} />
+        </Suspense>
+      )}
     </div>
   );
 }
