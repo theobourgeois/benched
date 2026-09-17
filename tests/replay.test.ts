@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { createMatch, emit, startMatch } from '../src/game/engine';
 import { attackDirection, RINK } from '../src/game/config';
+import { closeReplay, followLiveGoalReplay, runtime } from '../src/game/store';
+import type { NetSession } from '../src/net/session';
 import {
   advanceReplay,
   createView,
@@ -176,6 +178,12 @@ describe('replay timeline', () => {
     expect(findGoal(frames)).toEqual({ time: GOAL_AT / REPLAY_HZ, team: 0, scorer });
   });
 
+  it('finds a goal from the celebration when the call itself was not recorded', () => {
+    const { frames, scorer } = filmGoal();
+    for (const frame of frames) frame.events = [];
+    expect(findGoal(frames)).toEqual({ time: GOAL_AT / REPLAY_HZ, team: 0, scorer });
+  });
+
   it('frames a goal replay around the finish', () => {
     const { s, frames } = filmGoal();
     const r = startReplay(s, frames, 'goal')!;
@@ -323,5 +331,70 @@ describe('replay camera', () => {
     expect(r.camera.mode).toBe('free');
     cycleReplayCamera(r);
     expect(r.camera.mode).toBe('broadcast');
+  });
+});
+
+describe('online goal replay overlay', () => {
+  afterEach(() => {
+    runtime.replay = null;
+    runtime.net = null;
+    runtime.recorder.clear();
+    runtime.match = createMatch();
+  });
+
+  function openGoalReplay() {
+    const { s, frames } = filmGoal();
+    s.phase = 'goal';
+    s.countdown = 3;
+    runtime.match = s;
+    const session = startReplay(s, frames, 'goal');
+    expect(session).not.toBeNull();
+    runtime.replay = session;
+    return s;
+  }
+
+  it('does not cut the live celebration when the guest skips', () => {
+    const s = openGoalReplay();
+    runtime.net = { isHost: false } as NetSession;
+    closeReplay();
+    expect(runtime.replay).toBeNull();
+    expect(s.countdown).toBe(3);
+  });
+
+  it('cuts the live celebration when the host skips', () => {
+    const s = openGoalReplay();
+    runtime.net = { isHost: true } as NetSession;
+    closeReplay();
+    expect(s.countdown).toBe(0);
+  });
+
+  it('drops a guest overlay once the host has skipped', () => {
+    const s = openGoalReplay();
+    runtime.net = { isHost: false } as NetSession;
+    s.countdown = 0;
+    expect(followLiveGoalReplay(s)).toBe(true);
+    expect(runtime.replay).toBeNull();
+    expect(s.countdown).toBe(0);
+  });
+
+  it('drops a guest overlay once the live match has left the goal', () => {
+    const s = openGoalReplay();
+    runtime.net = { isHost: false } as NetSession;
+    s.phase = 'faceoff';
+    s.countdown = 3;
+    expect(followLiveGoalReplay(s)).toBe(true);
+    expect(runtime.replay).toBeNull();
+  });
+
+  it('holds the overlay while the live celebration is still going', () => {
+    const s = openGoalReplay();
+    expect(followLiveGoalReplay(s)).toBe(false);
+    expect(runtime.replay?.kind).toBe('goal');
+  });
+
+  it('cuts the live celebration when skipping locally', () => {
+    const s = openGoalReplay();
+    closeReplay();
+    expect(s.countdown).toBe(0);
   });
 });

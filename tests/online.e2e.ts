@@ -251,3 +251,45 @@ test('a socket that drops mid-match comes back to the same seat', async ({ brows
   await hostPage.close();
   await guestPage.close();
 });
+
+test('both ends watch a goal replay, and a host skip takes the guest overlay down', async ({
+  browser,
+}) => {
+  test.setTimeout(90_000);
+  const hostPage = await (await browser.newContext()).newPage();
+  const guestPage = await (await browser.newContext()).newPage();
+  await hostPage.goto('/');
+  await hostPage.getByRole('button', { name: 'Online', exact: true }).click();
+  await hostPage.getByRole('button', { name: /Create game/ }).click();
+  await expect(hostPage.getByRole('heading', { name: 'Game Lobby' })).toBeVisible({
+    timeout: 20000,
+  });
+  const room = (await net(hostPage))!.room;
+  await guestPage.goto(`/?join=${room}`);
+  await expect.poll(async () => (await net(hostPage))?.players, { timeout: 20000 }).toBe(2);
+  await hostPage.getByRole('button', { name: /^Ready/ }).click();
+  await guestPage.getByRole('button', { name: /^Ready/ }).click();
+  await hostPage.getByRole('button', { name: /Drop the puck/ }).click();
+  await expect(live(hostPage)).toBeVisible({ timeout: 30000 });
+  await expect(live(guestPage)).toBeVisible({ timeout: 30000 });
+
+  // The same swept goal the local replay test uses, scored on the host's simulation.
+  await hostPage.evaluate(
+    `(() => { const s = window.__BENCHED__.runtime.match;
+      s.phase='playing'; s.countdown=0;
+      for (const p of s.skaters) if (p.role === 'G') { p.x = 0; p.z = p.team ? -10 : 10; }
+      Object.assign(s.puck, { owner: null, x: 25.8, z: 0.8, y: 0.4, vx: 44, vz: 0, vy: 0, lockout: 1 });
+      window.__BENCHED__.publish(); })()`,
+  );
+
+  const goalReplay = (page: Page) => page.getByRole('region', { name: 'Goal replay' });
+  await expect(goalReplay(hostPage)).toBeVisible({ timeout: 15000 });
+  await expect(goalReplay(guestPage)).toBeVisible({ timeout: 15000 });
+
+  await hostPage.getByRole('button', { name: /Skip replay/ }).click();
+  await expect(goalReplay(hostPage)).toHaveCount(0);
+  await expect(goalReplay(guestPage)).toHaveCount(0, { timeout: 10000 });
+
+  await hostPage.close();
+  await guestPage.close();
+});

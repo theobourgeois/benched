@@ -205,8 +205,23 @@ export function closeReplay() {
   if (!r) return;
   runtime.replay = null;
   const celebrating = s.phase === 'goal' || (s.phase === 'paused' && s.previousPhase === 'goal');
-  if (r.kind === 'goal' && celebrating) s.countdown = 0;
+  // Online the guest does not own the clock; skipping a replay only leaves the overlay.
+  const ownsSim = !runtime.net || runtime.net.isHost;
+  if (r.kind === 'goal' && celebrating && ownsSim) s.countdown = 0;
   publish();
+}
+/**
+ * A goal replay is a local overlay on a live match that keeps moving. If the host has skipped,
+ * or the celebration has ended, take this one down so nobody is stuck watching while play resumes.
+ */
+export function followLiveGoalReplay(s: MatchState = runtime.match) {
+  const r = runtime.replay;
+  if (!r || r.kind !== 'goal') return false;
+  const held =
+    (s.phase === 'goal' || (s.phase === 'paused' && s.previousPhase === 'goal')) && s.countdown > 0;
+  if (held) return false;
+  closeReplay();
+  return true;
 }
 /** One frame of replay: transport buttons, then camera sticks, then the playhead. */
 export function driveReplay(r: ReplaySession, input: ReplayInput, dt: number) {

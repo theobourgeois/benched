@@ -231,23 +231,39 @@ export function eventsBetween(frames: ReplayFrame[], from: number, to: number) {
   return events;
 }
 
-/** The latest goal in the frames, with the skater who last carried it for the scoring side. */
+/**
+ * The latest goal in the frames, with the skater who last carried it for the scoring side.
+ * A guest may miss the call itself (a later snapshot can overtake it) and still have the
+ * celebration, so the first frame of that spell is enough to hang a replay on.
+ */
 export function findGoal(frames: ReplayFrame[]) {
-  for (let i = frames.length - 1; i >= 0; i--) {
+  let start = -1;
+  let team: Team | null = null;
+  for (let i = 0; i < frames.length; i++) {
     const frame = frames[i];
-    if (!frame.events.some((e) => e.type === 'goal') || frame.scoringTeam === null) continue;
-    const team = frame.scoringTeam;
-    let scorer: number | null = null;
-    for (let j = i; j >= Math.max(0, i - GOAL_REPLAY.before * REPLAY_HZ); j--) {
-      const owner = frames[j].puck.owner;
-      if (owner !== null && frames[j].skaters[owner].team === team) {
-        scorer = owner;
-        break;
-      }
+    const scored =
+      frame.scoringTeam !== null &&
+      (frame.phase === 'goal' || frame.events.some((e) => e.type === 'goal'));
+    if (!scored) {
+      start = -1;
+      team = null;
+      continue;
     }
-    return { time: i / REPLAY_HZ, team, scorer };
+    if (start < 0) {
+      start = i;
+      team = frame.scoringTeam;
+    }
   }
-  return null;
+  if (start < 0 || team === null) return null;
+  let scorer: number | null = null;
+  for (let j = start; j >= Math.max(0, start - GOAL_REPLAY.before * REPLAY_HZ); j--) {
+    const owner = frames[j].puck.owner;
+    if (owner !== null && frames[j].skaters[owner].team === team) {
+      scorer = owner;
+      break;
+    }
+  }
+  return { time: start / REPLAY_HZ, team, scorer };
 }
 
 function newCamera(mode: ReplayCameraMode): ReplayCamera {

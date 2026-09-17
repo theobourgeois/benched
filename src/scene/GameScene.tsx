@@ -15,6 +15,7 @@ import { GoalLamp, IceSpray } from './Effects';
 import {
   driveReplay,
   askToLeave,
+  followLiveGoalReplay,
   goalReplayWanted,
   mySide,
   publish,
@@ -61,6 +62,7 @@ function Simulation() {
     pending = useRef<SideInputs>([null, null]),
     steps = useRef(0),
     goalReplay = useRef(false),
+    replayedGoal = useRef<string | null>(null),
     freeze = useRef(0),
     pulses = useRef<number[]>([]),
     frameRef = useRef<(delta: number) => void>(() => {});
@@ -186,6 +188,7 @@ function Simulation() {
       accumulator.current = 0;
       pending.current = [null, null];
       goalReplay.current = false;
+      replayedGoal.current = null;
       freeze.current = 0;
       pulses.current.forEach(clearTimeout);
     }
@@ -204,6 +207,31 @@ function Simulation() {
     // already held when a replay opens doesn't count as a press.
     const replayInput = runtime.controller.replayInput();
     const replay = runtime.replay;
+    /** Let the goal land live for a moment, then roll the replay. True when one just opened. */
+    const rollGoalReplay = (match: MatchState) => {
+      if (match.phase !== 'goal' && match.phase !== 'paused') {
+        goalReplay.current = false;
+        return false;
+      }
+      const scoreKey = `${match.score[0]}-${match.score[1]}`;
+      // The watching side can miss the call itself and still see the celebration, so arm off
+      // the score rather than the event. The key stops a skip from rolling the same goal again.
+      if (match.phase === 'goal' && goalReplayWanted(match) && replayedGoal.current !== scoreKey)
+        goalReplay.current = true;
+      if (
+        goalReplay.current &&
+        match.phase === 'goal' &&
+        match.countdown <= RULES.goalSeconds - GOAL_REPLAY.celebrate &&
+        match.countdown > 0 &&
+        !hasActiveCelly(match) &&
+        startGoalReplay()
+      ) {
+        replayedGoal.current = scoreKey;
+        goalReplay.current = false;
+        return true;
+      }
+      return false;
+    };
     if (replay) {
       const dt = Math.min(delta, 0.05);
       // Play input keeps reading too, so buttons held on the way out aren't fresh presses.
@@ -215,6 +243,15 @@ function Simulation() {
       pending.current = [null, null];
       accumulator.current = 0;
       driveReplay(replay, replayInput, dt);
+      const net = runtime.net;
+      if (net?.isHost) {
+        // The sim is held, but the guest still needs the freeze-point — and a skip that
+        // zeros the countdown — or it never catches up enough to open or close its overlay.
+        net.publish(s, dt);
+      } else if (net) {
+        net.view(s, dt);
+        if (followLiveGoalReplay(s)) drainEvents(s);
+      }
       runtime.audio.updateSkating(viewMatch(), Math.min(1, viewTimeScale()), runtime.myTeam);
       tickPublish();
       return;
@@ -265,6 +302,7 @@ function Simulation() {
       if (net.view(s, Math.min(delta, 0.05)) && RECORDED.includes(s.phase))
         recordRagdollPoses(runtime.recorder.record(s));
       drainEvents(s);
+      rollGoalReplay(s);
       runtime.audio.updateSkating(s, 1, runtime.myTeam);
       tickPublish();
       return;
@@ -303,17 +341,7 @@ function Simulation() {
     }
     net?.publish(s, Math.min(delta, 0.05));
     drainEvents(s);
-    // Let the goal land live for a moment, then roll the replay.
-    if (s.phase !== 'goal' && s.phase !== 'paused') goalReplay.current = false;
-    else if (
-      goalReplay.current &&
-      s.phase === 'goal' &&
-      s.countdown <= RULES.goalSeconds - GOAL_REPLAY.celebrate &&
-      !hasActiveCelly(s)
-    ) {
-      goalReplay.current = false;
-      startGoalReplay();
-    }
+    if (rollGoalReplay(s)) net?.publish(s, 1);
     runtime.audio.updateSkating(s, 1, runtime.myTeam);
     tickPublish();
   };
