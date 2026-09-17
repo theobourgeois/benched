@@ -1,4 +1,10 @@
-import { Server, routePartykitRequest, type Connection, type ConnectionContext } from 'partyserver';
+import {
+  Server,
+  getServerByName,
+  routePartykitRequest,
+  type Connection,
+  type ConnectionContext,
+} from 'partyserver';
 import {
   IDLE_CLOSE_MS,
   ONLINE_MODES,
@@ -11,9 +17,14 @@ import {
   type ClientMessage,
   type MatchSetup,
   type Player,
+  type RoomListing,
   type ServerMessage,
 } from '../src/net/protocol';
 import type { GameMode } from '../src/game/types';
+import { Directory } from './directory';
+
+/** Deployed as one worker: the rooms, and the directory that lists the public ones. */
+export { Directory };
 
 /**
  * A room for two. It holds who is in it, which side they picked and whether they are ready, then
@@ -55,6 +66,16 @@ export class Room extends Server<Env> {
   private setup: MatchSetup | null = null;
   /** What the host has picked to play. */
   private mode: GameMode = ONLINE_MODES[0];
+  /**
+   * Listed for anyone to walk into. Quick play rooms are; a room made to send a friend the code
+   * is not, unless its host says so. The directory hears about it whenever anything changes.
+   */
+  private isPublic = false;
+  /** Whether the directory may still have this room on its list. */
+  private listed = false;
+  /** When the room last became somewhere anybody could walk into, for the queue's order. */
+  private openSince = 0;
+  private wasOpen = false;
   /** When each open socket last said anything, so one that has gone quiet can be let go. */
   private heard = new Map<Connection, number>();
   private sweeper: ReturnType<typeof setInterval> | null = null;
@@ -75,6 +96,8 @@ export class Room extends Server<Env> {
     this.seats = new Map(saved.seats);
     this.setup = saved.setup;
     this.mode = saved.mode;
+    this.isPublic = saved.public;
+    this.openSince = saved.openSince;
     for (const id of this.seats.keys())
       this.dropping.set(
         id,
@@ -202,6 +225,8 @@ export class Room extends Server<Env> {
           }
         }
       if (this.seats.size && now - this.savedAt > RECONNECT_GRACE_MS / 3) this.save();
+      // The directory forgets a room that stops repeating itself, restart or not.
+      if (this.isPublic) this.report();
     }, SWEEP_MS);
   }
 
@@ -217,6 +242,8 @@ export class Room extends Server<Env> {
       seats: [...this.seats],
       setup: this.setup,
       mode: this.mode,
+      public: this.isPublic,
+      openSince: this.openSince,
     };
     void this.ctx.storage.put(SAVED_KEY, saved);
   }
@@ -274,6 +301,10 @@ export class Room extends Server<Env> {
       case 'ready':
         seat.ready = !!message.ready;
         break;
+      case 'public':
+        if (!seat.host) return;
+        this.isPublic = !!message.public;
+        break;
       case 'start': {
         // Only the host drops the puck, and only once everybody is here and ready.
         if (!seat.host || this.seats.size < ROOM_CAPACITY) return;
@@ -317,7 +348,47 @@ export class Room extends Server<Env> {
     const players = this.players();
     const playing = this.setup !== null;
     for (const [id, socket] of this.sockets)
-      this.sendTo(socket, { t: 'room', you: id, players, mode: this.mode, playing });
+      this.sendTo(socket, {
+        t: 'room',
+        you: id,
+        players,
+        mode: this.mode,
+        playing,
+        public: this.isPublic,
+      });
+    this.report();
+  }
+
+  /**
+   * Tell the directory what this room is. Said after anything changes and again every sweep; a
+   * room that is private and was never listed has nothing to say. Only ever the room's own
+   * view, so nothing a browser sent reaches the directory unchecked.
+   */
+  private report() {
+    // A seat whose socket is down is nobody to walk in on: the room is off the list until they
+    // are back, however long it holds the seat for them.
+    const here = [...this.seats.keys()].every((id) => this.sockets.has(id));
+    const listable = this.isPublic && here;
+    const open = listable && this.seats.size === 1 && this.setup === null;
+    if (open && !this.wasOpen) this.openSince = Date.now();
+    this.wasOpen = open;
+    if (!listable && !this.listed) return;
+    this.listed = listable && this.seats.size > 0;
+    const host = [...this.seats.values()].find((seat) => seat.host);
+    const listing: RoomListing = {
+      code: this.name,
+      host: host?.name ?? 'Player 1',
+      mode: this.mode,
+      public: listable,
+      seats: this.seats.size,
+      playing: this.setup !== null,
+      since: this.openSince,
+    };
+    void getServerByName(this.env.Directory, DIRECTORY_NAME)
+      .then((directory) => directory.report(listing))
+      .catch(() => {
+        // The directory being unreachable costs a listing, not a game.
+      });
   }
   private sendTo(connection: Connection, message: ServerMessage) {
     try {
@@ -342,7 +413,11 @@ interface Saved {
   seats: [string, Seat][];
   setup: MatchSetup | null;
   mode: GameMode;
+  public: boolean;
+  openSince: number;
 }
+/** The directory is one object for everybody; this is its name. */
+const DIRECTORY_NAME = 'main';
 
 const toBuffer = (view: ArrayBufferView) =>
   view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength) as ArrayBuffer;
@@ -386,6 +461,7 @@ function cleanSetup(setup: unknown): MatchSetup | null {
 
 interface Env {
   Room: DurableObjectNamespace<Room>;
+  Directory: DurableObjectNamespace<Directory>;
 }
 
 export default {

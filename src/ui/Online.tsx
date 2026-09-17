@@ -9,19 +9,22 @@ import {
   type Club,
 } from '../game/clubs';
 import { modeInfo } from '../game/modes';
-import { connectToRoom, disconnect } from '../app/online';
+import { connectToRoom, disconnect, quickPlay } from '../app/online';
 import { useGame } from '../app/store';
 import type { GameMode, Team } from '../game/types';
-import { useNav } from '../input/menuNavigation';
+import { useNav, step } from '../input/menuNavigation';
+import { DirectorySession } from '../net/directory';
 import {
+  JOIN_WAIT_MS,
   normaliseCode,
   ONLINE_MODES,
   roomCode,
   type MatchSetup,
   type Player,
+  type QuickMode,
 } from '../net/protocol';
-import type { NetSession } from '../net/session';
-import { Glyph, Prompts, TeamLogo, TitleBar } from './kit';
+import { NetSession, ROOM_HOST } from '../net/session';
+import { Glyph, MenuItem, Prompts, TeamLogo, TitleBar } from './kit';
 
 /** Re-render whenever the room says anything. */
 function useRoom(session: NetSession | null) {
@@ -35,10 +38,41 @@ function useRoom(session: NetSession | null) {
   }, [session]);
 }
 
+/**
+ * The directory, for as long as the online screen is up: the live count, the open list, and
+ * where quick play sends you. Closed on the way out; a room is a different line.
+ */
+function useDirectory() {
+  // Made in the effect, not the state: React mounts an effect twice in development, and a line
+  // closed by the first cleanup would never be opened again.
+  const [directory, setDirectory] = useState<DirectorySession | null>(null);
+  const [, bump] = useState(0);
+  useEffect(() => {
+    const session = new DirectorySession(ROOM_HOST);
+    session.onChange = () => bump((n) => n + 1);
+    setDirectory(session);
+    return () => session.close();
+  }, []);
+  return directory;
+}
+
+const QUICK_MODE_KEY = 'benched.quickMode';
+const QUICK_MODES: QuickMode[] = ['any', ...ONLINE_MODES];
+function loadQuickMode(): QuickMode {
+  try {
+    const saved = localStorage.getItem(QUICK_MODE_KEY);
+    return QUICK_MODES.includes(saved as QuickMode) ? (saved as QuickMode) : 'any';
+  } catch {
+    return 'any';
+  }
+}
+const quickModeLabel = (mode: QuickMode) => (mode === 'any' ? 'Any' : modeInfo(mode).format);
+
 export function OnlineScreen({ onBack, join }: { onBack: () => void; join?: string }) {
-  const { net } = useGame();
+  const { net, quickJoin } = useGame();
   const [code, setCode] = useState(join ?? '');
   const [copied, setCopied] = useState(false);
+  const directory = useDirectory();
   useRoom(net);
 
   const connect = (room: string) => {
@@ -59,43 +93,129 @@ export function OnlineScreen({ onBack, join }: { onBack: () => void; join?: stri
     onBack();
   };
 
-  if (!net) return <Landing code={code} setCode={setCode} onJoin={connect} onBack={onBack} />;
+  if (!net)
+    return (
+      <Landing
+        code={code}
+        setCode={setCode}
+        directory={directory}
+        onJoin={connect}
+        onBack={onBack}
+      />
+    );
+  if (quickJoin) return <Found net={net} onLeave={disconnect} />;
   return <Lobby net={net} copied={copied} setCopied={setCopied} onLeave={leave} />;
 }
 
-/** Before a room: start one, or type the four letters somebody read out to you. */
+/**
+ * Before a room. Quick play first: the oldest open game, or a warm-up while you wait to be one.
+ * Under it, the open games by name for anyone who would rather pick. A private game and a typed
+ * code are still here for playing with somebody in particular.
+ */
 function Landing({
   code,
   setCode,
+  directory,
   onJoin,
   onBack,
 }: {
   code: string;
   setCode: (code: string) => void;
+  directory: DirectorySession | null;
   onJoin: (room: string) => void;
   onBack: () => void;
 }) {
   const field = useRef<HTMLInputElement>(null);
-  const create = () => onJoin(roomCode());
+  const [index, setIndex] = useState(0);
+  const [mode, setMode] = useState<QuickMode>(loadQuickMode);
+  /** Asked the directory and waiting on the answer. One press, one question. */
+  const [finding, setFinding] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const rooms = directory?.rooms ?? [];
+  const count = rooms.length + 1;
+  const at = Math.min(index, count - 1);
+
+  const go = async (room?: string) => {
+    if (finding || !directory) return;
+    setFinding(true);
+    setNotice(null);
+    const went = await quickPlay(directory, mode, room);
+    setFinding(false);
+    if (!went) setNotice('That game filled up. Pick another, or quick play.');
+  };
+  const select = () => (at === 0 ? void go() : void go(rooms[at - 1].code));
+  const createPrivate = () => onJoin(roomCode());
   const join = () => code.length === 4 && onJoin(code);
+  const cycleMode = () => {
+    const next = QUICK_MODES[(QUICK_MODES.indexOf(mode) + 1) % QUICK_MODES.length];
+    setMode(next);
+    try {
+      localStorage.setItem(QUICK_MODE_KEY, next);
+    } catch {
+      // Nothing to remember it with; the pick still holds for the screen.
+    }
+  };
   useNav((a) => {
     if (a === 'back') return onBack();
-    if (a === 'confirm') return create();
-    if (a === 'x') field.current?.focus();
+    if (a === 'confirm') return select();
+    if (a === 'x') return cycleMode();
+    if (a === 'y') return createPrivate();
+    if (a === 'lb') return field.current?.focus();
+    if (a === 'up' || a === 'down') setIndex(step(at, a === 'up' ? -1 : 1, count));
   });
+  const live = directory?.connected ?? false;
   return (
     <div className="screen online-screen">
       <div className="stage-frame narrow">
-        <TitleBar crumb="Main Menu" title="Play Online" />
-        <div className="plate online-plate">
-          <p className="online-lede">
-            One game, two people, wherever they are. Start a game and send the link, or type the
-            code somebody sent you.
-          </p>
-          <button className="cta" onClick={create}>
-            Create game
-            <i className="caret" aria-hidden="true" />
+        <TitleBar crumb="Main Menu" title="Play Online">
+          <button
+            className="cpu-chip"
+            onClick={cycleMode}
+            aria-label={`Mode: ${quickModeLabel(mode)}`}
+          >
+            <Glyph k="x" />
+            <span>Mode</span>
+            <strong>{quickModeLabel(mode)}</strong>
           </button>
+        </TitleBar>
+        <div className="plate online-plate">
+          <p className="online-count" role="status">
+            {directory && live ? (
+              <>
+                <b>{directory.browsing}</b> here · <b>{directory.waiting}</b> waiting ·{' '}
+                <b>{directory.playing}</b> playing
+              </>
+            ) : (
+              'Reaching the directory…'
+            )}
+          </p>
+          <nav className="menu-list online-list" aria-label="Games">
+            <MenuItem focused={at === 0} onFocus={() => setIndex(0)} onSelect={select}>
+              {finding ? 'Finding a game…' : 'Quick play'}
+              {finding && <Loader2 className="spin" size={20} aria-hidden="true" />}
+            </MenuItem>
+            {rooms.map((room, i) => (
+              <MenuItem
+                key={room.code}
+                focused={at === i + 1}
+                onFocus={() => setIndex(i + 1)}
+                onSelect={() => void go(room.code)}
+                className="online-room-item"
+              >
+                <span>{room.host}</span>
+                <small>
+                  {modeInfo(room.mode).format} · waiting <Waited since={room.since} />
+                </small>
+              </MenuItem>
+            ))}
+          </nav>
+          {rooms.length === 0 && (
+            <p className="online-lede">
+              Nobody is waiting right now. Quick play puts you on the ice against the AI while you
+              wait, and asks before anyone joins.
+            </p>
+          )}
+          {notice && <p className="room-notice">{notice}</p>}
           <div className="online-join">
             <label htmlFor="room-code">Join with a code</label>
             <div>
@@ -116,17 +236,91 @@ function Landing({
               <button className="ghost-button" onClick={join} disabled={code.length !== 4}>
                 Join
               </button>
+              <button className="ghost-button" onClick={createPrivate}>
+                Create private game
+              </button>
             </div>
           </div>
         </div>
       </div>
       <Prompts
         items={[
-          { k: 'confirm', label: 'Create', onClick: create },
-          { k: 'x', label: 'Enter a code', onClick: () => field.current?.focus() },
+          { k: 'confirm', label: at === 0 ? 'Quick play' : 'Join', onClick: select },
+          { k: 'x', label: 'Mode', onClick: cycleMode },
+          { k: 'y', label: 'Private game', onClick: createPrivate },
+          { k: 'lb', label: 'Enter a code', onClick: () => field.current?.focus() },
           { k: 'back', label: 'Back', onClick: onBack },
         ]}
       />
+    </div>
+  );
+}
+
+/** How long a host has been waiting, kept ticking without the directory saying anything. */
+function Waited({ since }: { since: number }) {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  const seconds = Math.max(0, Math.round((Date.now() - since) / 1000));
+  return <>{seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m`}</>;
+}
+
+/**
+ * Quick play sent us into somebody's warm-up. We are already ready; what is left is for them
+ * to say yes. If they take too long the session looks elsewhere on its own, so this only
+ * counts down and offers the way out.
+ */
+function Found({ net, onLeave }: { net: NetSession; onLeave: () => void }) {
+  const me = net.me;
+  const them = net.opponent;
+  const [since] = useState(() => performance.now());
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  const left = Math.max(0, Math.ceil((JOIN_WAIT_MS - (performance.now() - since)) / 1000));
+  useNav((a) => {
+    if (a === 'back') onLeave();
+  });
+  const info = modeInfo(net.mode);
+  return (
+    <div className="screen online-screen">
+      <div className="stage-frame">
+        <TitleBar
+          crumb="Quick play"
+          title={net.status === 'connecting' ? 'Connecting' : 'Game found'}
+        >
+          <span className="cpu-chip" aria-label={`Mode: ${info.format}`}>
+            <span>Mode</span>
+            <strong>{info.format}</strong>
+          </span>
+        </TitleBar>
+        <div className="plate online-room">
+          <div className="room-seats">
+            <Seat player={me} club={clubOf(me)} you mode={net.mode} />
+            <span className="versus" aria-hidden="true">
+              VS
+            </span>
+            {them ? (
+              <Seat player={them} club={clubOf(them)} mode={net.mode} />
+            ) : (
+              <div className="seat empty" role="status">
+                <Loader2 className="spin" size={22} aria-hidden="true" />
+                <strong>Finding them</strong>
+              </div>
+            )}
+          </div>
+          <p className="online-lede" role="status">
+            {them?.name ?? 'The host'} is finishing a warm-up. You are ready; the puck drops when
+            they say so — {left}s before we look elsewhere.
+          </p>
+          {net.notice && <p className="room-notice">{net.notice}</p>}
+        </div>
+      </div>
+      <Prompts items={[{ k: 'back', label: 'Leave', onClick: onLeave }]} />
     </div>
   );
 }
@@ -179,6 +373,8 @@ function Lobby({
   const unready = () => net.setReady(false);
   const cycleMode = () =>
     net.setMode(ONLINE_MODES[(ONLINE_MODES.indexOf(mode) + 1) % ONLINE_MODES.length]);
+  // Listed for anyone to walk into, or kept for whoever has the code. A setting, not a step.
+  const togglePublic = () => net.isHost && net.setPublic(!net.isPublic);
   const start = () => {
     if (!canStart || !me) return;
     const clubs: [string, string] = me.team === 0 ? [club.key, theirs.key] : [theirs.key, club.key];
@@ -207,6 +403,7 @@ function Lobby({
     if (a === 'start') return start();
     if (a === 'y') return copy();
     if (a === 'x') return net.isHost ? cycleMode() : undefined;
+    if (a === 'lb') return togglePublic();
     if (a === 'up') cycle(-1);
     else if (a === 'down') cycle(1);
     else if (a === 'left') pickSide(1);
@@ -240,6 +437,16 @@ function Lobby({
             <button className="ghost-button" onClick={copy}>
               {copied ? <Check size={15} /> : <Copy size={15} />}
               {copied ? 'Link copied' : 'Copy invite link'}
+            </button>
+            <button
+              className="ghost-button"
+              onClick={togglePublic}
+              disabled={!net.isHost}
+              aria-pressed={net.isPublic}
+              data-on={net.isPublic || undefined}
+            >
+              {net.isHost && <Glyph k="lb" />}
+              {net.isPublic ? 'Open to anyone' : 'Invite only'}
             </button>
           </div>
           <div className="room-seats">
@@ -279,6 +486,15 @@ function Lobby({
           { k: 'updown', label: 'Team' },
           { k: 'leftright', label: 'Side' },
           { k: 'y', label: 'Copy link', onClick: copy },
+          ...(net.isHost
+            ? [
+                {
+                  k: 'lb' as const,
+                  label: net.isPublic ? 'Make private' : 'Make public',
+                  onClick: togglePublic,
+                },
+              ]
+            : []),
           { k: 'back', label: me?.ready ? 'Not ready' : 'Leave', onClick: back },
         ]}
       />

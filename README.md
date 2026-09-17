@@ -34,11 +34,21 @@ pads the browser can actually see.
 
 ## Online
 
-**Online** opens a room for two. Create a game and you get a four-character code and an invite
-link; whoever opens the link lands straight in the lobby. Both players ready up and the host
-drops the puck: confirm readies you and, for the host, starts once both are ready; back takes
-you back to not ready, and out of the room after that. Exhibition, 3-on-3, 1-on-1 and shootout
-are playable online; free skate is practice and stays local.
+**Online** opens with **Quick play**. Nobody waits in a lobby for a stranger, so if somebody is
+already waiting you are sent into their room, and if nobody is you host one and play the AI
+while you wait — a warm-up, listed publicly. When somebody walks in, the host is asked over the
+warm-up rather than pulled off the ice; say yes and the puck drops for real, with the host
+keeping the side and club they were warming up in. A host who does not answer within half a
+minute is taken off the list and the joiner looks elsewhere. X picks the mode to look for (any,
+or one of the four), and the screen shows how many people are here, waiting and playing. Under
+quick play the open games are listed by name, for anyone who would rather pick.
+
+**Create private game** is for playing with somebody in particular: you get a four-character
+code and an invite link, and whoever opens the link lands straight in the lobby. A private
+room's host can open it to anyone from the lobby (LB), which puts it on the list. Both players
+ready up and the host drops the puck: confirm readies you and, for the host, starts once both
+are ready; back takes you back to not ready, and out of the room after that. Exhibition, 3-on-3,
+1-on-1 and shootout are playable online; free skate is practice and stays local.
 
 One browser runs the simulation and the other draws what it is told, so there is no second
 simulation to disagree with the first. The host has a small latency advantage, which is the
@@ -53,7 +63,11 @@ cannot reach each other directly fall back to the room relaying. The FPS counter
 trip and which of the two roads is in use.
 
 Rooms are a Cloudflare Worker (`workers/room.ts`) backed by a Durable Object. It holds who is in
-the room and relays bytes between them; it never simulates hockey. Each client pings the room
+the room and relays bytes between them; it never simulates hockey. A second Durable Object, the
+directory (`workers/directory.ts`), is the one place that knows which rooms exist: a public room
+reports itself there whenever anything about it changes, quick play asks it where to go, and
+the online screen keeps a socket to it for the live counts and the list. It writes nothing
+down; rooms repeat themselves every few seconds, so a restart has the list back in one sweep. Each client pings the room
 every five seconds and redials if a ping goes unanswered, because a socket can look open long
 after the network under it has died. A socket that drops reconnects to the same seat, and the
 room holds that seat for a minute. While somebody's line is down and nothing is getting through
@@ -149,10 +163,11 @@ src/
   app/
     store.ts       The runtime object (match, controllers, audio, session, settings) and React subscriptions
     loop.ts        The game loop: pads → fixed-step simulation → events → publish
-    online.ts      Opening, joining and leaving a room; starting the agreed match
+    online.ts      Opening, joining and leaving a room; quick play and the warm-up hand-off
   net/
     protocol.ts    Lobby messages and the binary tags, shared with the room worker
     session.ts     One side of an online match: room socket, direct link, input and snapshot flow
+    directory.ts   The online screen's line to the directory: live counts, the list, where to go
     snapshot.ts    Binary snapshot of a moment of a match, and posing a match from one
     view.ts        Guest-side interpolation a little behind the newest snapshot
     peer.ts        WebRTC data channel between the two browsers
@@ -180,7 +195,7 @@ src/
     kit.tsx        Shared pieces: menu items, option rows, button glyphs and prompts
     Menu.tsx       Main menu and screen routing
     TeamSelect.tsx Matchup: side, club, ready and jersey
-    Online.tsx     Create or join a room, and the lobby
+    Online.tsx     Quick play, the open list, private rooms, and the lobby
     Settings.tsx   Settings and the live controller test
     Hud.tsx        Score bug, player card, calls, pause and results
     Controls.tsx   Xbox and keyboard reference
@@ -191,6 +206,7 @@ src/
   style.css        Responsive UI
 workers/
   room.ts          The room: a Durable Object that seats two players and relays bytes
+  directory.ts     The directory: one Durable Object that lists public rooms and answers quick play
 scripts/
   fetch-nhl.ts     Refreshes the NHL snapshot and logos (npm run data:nhl)
   export-skater.mjs  Rebuilds the skater GLB from assets/skater.fbx (npm run model:skater)

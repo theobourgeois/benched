@@ -2714,6 +2714,68 @@ a {
   }
 }
 
+/* The landing's live line and the open games under quick play. */
+.online-count {
+  font-family: var(--display);
+  font-size: 14px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: #8fa6bd;
+}
+.online-count b {
+  color: var(--ice);
+}
+.online-list {
+  margin: 0 -24px;
+  padding: 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.online-list .menu-item > span {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+}
+.online-room-item {
+  font-size: 20px;
+}
+.online-room-item small {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  color: #7b91a7;
+}
+.ghost-button[data-on] {
+  color: var(--ice);
+  border-color: var(--accent);
+}
+.ghost-button[data-on]:hover {
+  color: var(--gloss-ink);
+}
+/* A warm-up is a wait for somebody: said once, in the corner, off the pad. */
+.queue-status {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px 5px 10px;
+  font-family: var(--display);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #b9cadb;
+  background: rgba(6, 16, 28, 0.62);
+  border: 1px solid var(--line);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+.queue-status em {
+  font-style: normal;
+  color: #7b91a7;
+}
 /* Online has no pause, so this sits over a game that is still running. */
 .online-overlay {
   z-index: 6;

@@ -33,6 +33,19 @@ export const runtime = {
   /** The room this client is in, while it is online. */
   net: null as NetSession | null,
   /**
+   * The public room this client is hosting while it warms up against the AI. Not `net`: the
+   * match on the ice is a local one and the loop never hears about this session. It becomes
+   * `net` when the puck drops for real.
+   */
+  queue: null as NetSession | null,
+  /**
+   * Somebody walked into the queued room. The warm-up carries on underneath until the host says
+   * yes; `missed` is that not happening in time, at which point the room went private.
+   */
+  found: null as { since: number; missed: boolean } | null,
+  /** Quick play sent us into somebody else's room: skip the lobby and wait for their puck drop. */
+  quickJoin: false,
+  /**
    * Online play has no pause, so the pause button asks whether you mean to leave instead. It
    * cannot stop the game — the other person is still playing it.
    */
@@ -129,6 +142,10 @@ export function continueGame() {
 }
 export function returnToMenu() {
   runtime.replay = null;
+  // Leaving the ice leaves the queue: nobody should be sent to a host who is on the menu.
+  runtime.queue?.close();
+  runtime.queue = null;
+  runtime.found = null;
   const { teams, jerseys } = runtime.match;
   runtime.match = createMatch(runtime.myTeam, 'exhibition', teams, jerseys);
   publish();

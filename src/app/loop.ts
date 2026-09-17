@@ -116,11 +116,13 @@ export class GameLoop {
       const now = performance.now();
       const delta = (now - last) / 1000;
       last = now;
-      if (document.hidden && runtime.net) this.advance(Math.min(delta, MAX_FRAME));
+      if (document.hidden && (runtime.net || runtime.queue))
+        this.advance(Math.min(delta, MAX_FRAME));
     };
-    // It only runs while it is needed: hidden, and with somebody on the other end.
+    // It only runs while it is needed: hidden, and with somebody on the other end, or somebody
+    // who might arrive at any moment while a warm-up is on.
     const sync = () => {
-      const wanted = document.hidden && !!runtime.net;
+      const wanted = document.hidden && !!(runtime.net || runtime.queue);
       last = performance.now();
       beat.postMessage(wanted ? 'start' : 'stop');
     };

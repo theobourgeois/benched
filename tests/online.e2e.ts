@@ -41,7 +41,7 @@ test('two browsers meet in a room, drop the puck, and play one match', async ({ 
   // The host opens a room and gets a code to hand out.
   await hostPage.goto('/');
   await hostPage.getByRole('button', { name: 'Online', exact: true }).click();
-  await hostPage.getByRole('button', { name: /Create game/ }).click();
+  await hostPage.getByRole('button', { name: /Create private game/ }).click();
   await expect(hostPage.getByRole('heading', { name: 'Game Lobby' })).toBeVisible({
     timeout: 20000,
   });
@@ -151,7 +151,7 @@ test('a room only seats two', async ({ browser }) => {
   );
   await pages[0].goto('/');
   await pages[0].getByRole('button', { name: 'Online', exact: true }).click();
-  await pages[0].getByRole('button', { name: /Create game/ }).click();
+  await pages[0].getByRole('button', { name: /Create private game/ }).click();
   await expect(pages[0].getByRole('heading', { name: 'Game Lobby' })).toBeVisible({
     timeout: 20000,
   });
@@ -173,7 +173,7 @@ test('a hidden host keeps the match running for the other player', async ({ brow
 
   await hostPage.goto('/');
   await hostPage.getByRole('button', { name: 'Online', exact: true }).click();
-  await hostPage.getByRole('button', { name: /Create game/ }).click();
+  await hostPage.getByRole('button', { name: /Create private game/ }).click();
   await expect(hostPage.getByRole('heading', { name: 'Game Lobby' })).toBeVisible({
     timeout: 20000,
   });
@@ -213,7 +213,7 @@ test('a socket that drops mid-match comes back to the same seat', async ({ brows
 
   await hostPage.goto('/');
   await hostPage.getByRole('button', { name: 'Online', exact: true }).click();
-  await hostPage.getByRole('button', { name: /Create game/ }).click();
+  await hostPage.getByRole('button', { name: /Create private game/ }).click();
   await expect(hostPage.getByRole('heading', { name: 'Game Lobby' })).toBeVisible({
     timeout: 20000,
   });
@@ -260,7 +260,7 @@ test('both ends watch a goal replay, and a host skip takes the guest overlay dow
   const guestPage = await (await browser.newContext()).newPage();
   await hostPage.goto('/');
   await hostPage.getByRole('button', { name: 'Online', exact: true }).click();
-  await hostPage.getByRole('button', { name: /Create game/ }).click();
+  await hostPage.getByRole('button', { name: /Create private game/ }).click();
   await expect(hostPage.getByRole('heading', { name: 'Game Lobby' })).toBeVisible({
     timeout: 20000,
   });
@@ -300,7 +300,7 @@ async function openMatch(browser: Browser) {
   const guestPage = await (await browser.newContext()).newPage();
   await hostPage.goto('/');
   await hostPage.getByRole('button', { name: 'Online', exact: true }).click();
-  await hostPage.getByRole('button', { name: /Create game/ }).click();
+  await hostPage.getByRole('button', { name: /Create private game/ }).click();
   await expect(hostPage.getByRole('heading', { name: 'Game Lobby' })).toBeVisible({
     timeout: 20000,
   });
@@ -413,6 +413,156 @@ test('an opponent who leaves ends the match, and the room plays again from the l
   await expect
     .poll(async () => (await state(guestPage)).tick, { timeout: 15000 })
     .toBeGreaterThan(30);
+
+  await hostPage.close();
+  await guestPage.close();
+});
+
+/** The queued room and what the host has been asked, as the runtime sees them. */
+const queue = (page: Page) =>
+  page.evaluate(`(() => { const r = window.__BENCHED__.runtime; const q = r.queue;
+    return { queued: !!q, public: q ? q.isPublic : null, players: q ? q.players.length : 0,
+      found: r.found ? { missed: r.found.missed } : null, net: !!r.net, quickJoin: r.quickJoin, phase: r.match.phase }; })()`);
+
+test('quick play warms up against the AI, and the puck drops when the host says yes', async ({
+  browser,
+}) => {
+  test.setTimeout(90_000);
+  const hostPage = await (await browser.newContext()).newPage();
+  const guestPage = await (await browser.newContext()).newPage();
+
+  // Nobody is waiting, so the first person hosts: on the ice at once, listed, with no opponent.
+  await hostPage.goto('/');
+  await hostPage.getByRole('button', { name: 'Online', exact: true }).click();
+  await expect(hostPage.getByRole('status').filter({ hasText: /waiting/ })).toBeVisible({
+    timeout: 20000,
+  });
+  await hostPage.getByRole('button', { name: /Quick play/ }).click();
+  await expect(live(hostPage)).toBeVisible({ timeout: 20000 });
+  await expect(
+    hostPage.getByRole('status').filter({ hasText: 'Looking for an opponent' }),
+  ).toBeVisible();
+  await expect.poll(async () => (await queue(hostPage)).public, { timeout: 20000 }).toBe(true);
+  expect(await queue(hostPage)).toMatchObject({ queued: true, net: false, found: null });
+  const warmup = await state(hostPage);
+  expect(warmup.sides.map((s: { human: boolean }) => s.human)).toEqual([true, false]);
+
+  // The next person is sent into that room, ready, and waits on the host.
+  await guestPage.goto('/');
+  await guestPage.getByRole('button', { name: 'Online', exact: true }).click();
+  await expect(guestPage.locator('.online-room-item')).toBeVisible({ timeout: 20000 });
+  await guestPage.getByRole('button', { name: /Quick play/ }).click();
+  await expect(guestPage.getByRole('heading', { name: 'Game found' })).toBeVisible({
+    timeout: 20000,
+  });
+  expect(await queue(guestPage)).toMatchObject({ quickJoin: true, net: true, queued: false });
+
+  // The host is asked over the warm-up, which carries on underneath.
+  await expect(hostPage.getByRole('heading', { name: 'Opponent found' })).toBeVisible({
+    timeout: 20000,
+  });
+  expect((await state(hostPage)).phase).not.toBe('menu');
+  await hostPage.getByRole('button', { name: 'Play now' }).click();
+
+  // Both ends land in the same match, and the queued session is now the online one.
+  await expect(live(hostPage)).toBeVisible({ timeout: 30000 });
+  await expect(live(guestPage)).toBeVisible({ timeout: 30000 });
+  await expect.poll(async () => (await queue(hostPage)).net, { timeout: 10000 }).toBe(true);
+  expect(await queue(hostPage)).toMatchObject({ queued: false, found: null });
+  expect(await queue(guestPage)).toMatchObject({ quickJoin: false });
+  const started = await state(hostPage);
+  expect(started.sides.map((s: { human: boolean }) => s.human)).toEqual([true, true]);
+  expect(started.myTeam).toBe(warmup.myTeam);
+  expect((await state(guestPage)).myTeam).not.toBe(started.myTeam);
+  expect((await net(hostPage))?.host).toBe(true);
+  expect((await net(guestPage))?.host).toBe(false);
+  await expect
+    .poll(async () => (await state(guestPage)).tick, { timeout: 15000 })
+    .toBeGreaterThan(30);
+
+  await hostPage.close();
+  await guestPage.close();
+});
+
+test('a private room opened to anyone is listed, and can be joined from the list', async ({
+  browser,
+}) => {
+  test.setTimeout(90_000);
+  const hostPage = await (await browser.newContext()).newPage();
+  const guestPage = await (await browser.newContext()).newPage();
+
+  await hostPage.goto('/');
+  await hostPage.getByRole('button', { name: 'Online', exact: true }).click();
+  await hostPage.getByRole('button', { name: /Create private game/ }).click();
+  await expect(hostPage.getByRole('heading', { name: 'Game Lobby' })).toBeVisible({
+    timeout: 20000,
+  });
+  const room = (await net(hostPage))!.room;
+
+  // Private by default: the list shows nothing.
+  await guestPage.goto('/');
+  await guestPage.getByRole('button', { name: 'Online', exact: true }).click();
+  await expect(guestPage.getByRole('status').filter({ hasText: /waiting/ })).toBeVisible({
+    timeout: 20000,
+  });
+  await expect(guestPage.locator('.online-room-item')).toHaveCount(0);
+
+  // Opened to anyone, it appears; joining from the list is the lobby, like an invite link.
+  await hostPage.getByRole('button', { name: 'Invite only' }).click();
+  await expect(hostPage.getByRole('button', { name: 'Open to anyone' })).toBeVisible();
+  await expect(guestPage.locator('.online-room-item')).toBeVisible({
+    timeout: 20000,
+  });
+  await guestPage.locator('.online-room-item').click();
+  await expect(guestPage.getByRole('heading', { name: 'Game Lobby' })).toBeVisible({
+    timeout: 20000,
+  });
+  expect((await net(guestPage))?.room).toBe(room);
+  await expect.poll(async () => (await net(hostPage))?.players).toBe(2);
+
+  await hostPage.close();
+  await guestPage.close();
+});
+
+test('a host who does not answer is taken off the list, and the joiner looks elsewhere', async ({
+  browser,
+}) => {
+  test.setTimeout(120_000);
+  const hostPage = await (await browser.newContext()).newPage();
+  const guestPage = await (await browser.newContext()).newPage();
+
+  await hostPage.goto('/');
+  await hostPage.getByRole('button', { name: 'Online', exact: true }).click();
+  await hostPage.getByRole('button', { name: /Quick play/ }).click();
+  await expect.poll(async () => (await queue(hostPage)).public, { timeout: 20000 }).toBe(true);
+
+  await guestPage.goto('/');
+  await guestPage.getByRole('button', { name: 'Online', exact: true }).click();
+  await expect(guestPage.locator('.online-room-item')).toBeVisible({ timeout: 20000 });
+  await guestPage.getByRole('button', { name: /Quick play/ }).click();
+  await expect(hostPage.getByRole('heading', { name: 'Opponent found' })).toBeVisible({
+    timeout: 20000,
+  });
+
+  // The host walked away. The clock is wound forward rather than waited out.
+  await hostPage.evaluate('window.__BENCHED__.runtime.found.since -= 60000');
+  await expect(hostPage.getByRole('heading', { name: 'Missed a game' })).toBeVisible({
+    timeout: 10000,
+  });
+  await expect.poll(async () => (await queue(hostPage)).public).toBe(false);
+
+  // The joiner gives up on them and, with nobody else waiting, hosts a warm-up of their own.
+  await expect(live(guestPage)).toBeVisible({ timeout: 60000 });
+  await expect.poll(async () => (await queue(guestPage)).queued, { timeout: 10000 }).toBe(true);
+  await expect.poll(async () => (await queue(hostPage)).players, { timeout: 10000 }).toBe(1);
+
+  // Looking again lists the host once more; keeping the warm-up leaves the queue for good.
+  await hostPage.getByRole('button', { name: 'Look again' }).click();
+  await expect.poll(async () => (await queue(hostPage)).public, { timeout: 10000 }).toBe(true);
+  await hostPage.keyboard.press('Escape');
+  await hostPage.getByRole('button', { name: 'Stop looking for a game' }).click();
+  expect(await queue(hostPage)).toMatchObject({ queued: false, net: false });
+  await expect(hostPage.getByRole('dialog', { name: 'Game paused' })).toBeVisible();
 
   await hostPage.close();
   await guestPage.close();

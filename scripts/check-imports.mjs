@@ -32,7 +32,10 @@ const ALLOWED = {
   app: ['*'],
   dev: ['*'],
 };
-/** The room worker is deployed alone, so it may only share the wire contract and plain types. */
+/**
+ * The room worker is deployed alone, so it may only share the wire contract and plain types.
+ * Its own files (the rooms and the directory that lists them) may of course use each other.
+ */
 const WORKER_ALLOWED = ['src/net/protocol', 'src/game/types', 'partyserver'];
 
 function* files(dir) {
@@ -84,7 +87,8 @@ for (const path of files(join(ROOT, 'src'))) {
 for (const path of files(join(ROOT, 'workers'))) {
   const rel = relative(ROOT, path);
   for (const spec of importsOf(readFileSync(path, 'utf8'))) {
-    const ok = WORKER_ALLOWED.some((a) => spec === a || spec.endsWith(`/${a}`));
+    const sibling = spec.startsWith('./');
+    const ok = sibling || WORKER_ALLOWED.some((a) => spec === a || spec.endsWith(`/${a}`));
     if (!ok)
       problems.push(`${rel} imports ${spec} (workers/ may only use ${WORKER_ALLOWED.join(', ')})`);
   }

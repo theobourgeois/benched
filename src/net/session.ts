@@ -93,10 +93,14 @@ export class NetSession {
   /** What the host has picked to play. */
   mode: GameMode = ONLINE_MODES[0];
   setup: MatchSetup | null = null;
+  /** Whether the room is listed for anyone to walk into. What the room says, not what we asked. */
+  isPublic = false;
   /** Something the player needs to be told: the room was full, or the other person left. */
   notice: string | null = null;
   /** Called whenever anything a screen draws has changed. */
   onChange: (() => void) | null = null;
+  /** The same, for code that is not a screen and must not be displaced by one. */
+  private watchers = new Set<() => void>();
   /** Called when the host drops the puck, on both ends. */
   onStart: ((setup: MatchSetup) => void) | null = null;
   readonly stats: NetStats = { rtt: 0, rate: 0, delay: 0, starved: 0, direct: false };
@@ -125,6 +129,8 @@ export class NetSession {
   private readonly link = new DirectLink((data) => this.send({ t: 'signal', data }));
   /** Host: who the line was last offered to, so a returning guest is offered a new one. */
   private offeredTo = '';
+  /** What we asked the room to be. Said again on every fresh socket, so a restart keeps it. */
+  private wantPublic: boolean | null = null;
   /** Host: the guest's frames, waiting to be taken one per simulation step. */
   private queue: InputFrame[] = [];
   /** Host: the last frame the guest sent, held while nothing new arrives. */
@@ -169,6 +175,7 @@ export class NetSession {
       this.pingSent = 0;
       this.heardAt = performance.now();
       this.send({ t: 'hello', name });
+      if (this.wantPublic !== null) this.send({ t: 'public', public: this.wantPublic });
       this.changed();
     });
     // The socket reconnects by itself, and the room keeps the seat for a while, so a drop is a
@@ -297,6 +304,7 @@ export class NetSession {
         this.you = message.you;
         this.players = message.players;
         this.mode = message.mode;
+        this.isPublic = message.public;
         const other = this.opponent;
         this.awaySince = other?.away ? this.awaySince || performance.now() : 0;
         if (this.setup && !message.playing) {
@@ -500,6 +508,11 @@ export class NetSession {
   setReady(ready: boolean) {
     this.send({ t: 'ready', ready });
   }
+  /** Host only: list the room for anyone to walk into, or take it off the list. */
+  setPublic(on: boolean) {
+    this.wantPublic = on;
+    this.send({ t: 'public', public: on });
+  }
   start(setup: MatchSetup) {
     this.send({ t: 'start', setup });
   }
@@ -518,8 +531,16 @@ export class NetSession {
   private send(message: ClientMessage) {
     if (this.socket.readyState === 1) this.socket.send(JSON.stringify(message));
   }
+  /** Hear about every change for as long as the returned function has not been called. */
+  watch(fn: () => void) {
+    this.watchers.add(fn);
+    return () => {
+      this.watchers.delete(fn);
+    };
+  }
   private changed() {
     this.onChange?.();
+    for (const fn of this.watchers) fn();
   }
 }
 

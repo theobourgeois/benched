@@ -1,4 +1,4 @@
-import { ArrowRight } from 'lucide-react';
+import { ArrowRight, Loader2 } from 'lucide-react';
 import { lazy, Suspense, useState, type CSSProperties } from 'react';
 import { attackDirection } from '../game/config';
 import { modeInfo } from '../game/modes';
@@ -12,7 +12,15 @@ import {
   runtime,
   useGame,
 } from '../app/store';
-import { askToLeave, leaveOnline, returnToLobby } from '../app/online';
+import {
+  askToLeave,
+  confirmFound,
+  leaveOnline,
+  leaveQueue,
+  lookAgain,
+  returnToLobby,
+} from '../app/online';
+import { FOUND_CONFIRM_MS } from '../net/protocol';
 import type { NetSession } from '../net/session';
 import { cameraUsesAttackUp, type MatchState, type Team } from '../game/types';
 
@@ -72,6 +80,8 @@ export function Hud() {
       )}
       {s.phase === 'playing' && !cameraUsesAttackUp(settings.camera) && <AttackArrow s={s} />}
       {runtime.net && <OnlineOverlay />}
+      {runtime.queue && !runtime.found && <QueueStatus />}
+      {runtime.found && <FoundOverlay />}
       {s.phase !== 'intermission' && s.phase !== 'final' && (
         <>
           <PlayerCard s={s} team={runtime.myTeam} />
@@ -322,6 +332,8 @@ function PauseMenu({
     { label: 'Settings', run: () => onPanel('settings') },
     { label: 'Controls', run: () => onPanel('controls') },
     ...(import.meta.env.DEV ? [{ label: 'Feel Tuner', run: onFeel }] : []),
+    // A warm-up can stop being one: the game stays, the listing goes.
+    ...(runtime.queue ? [{ label: 'Stop looking for a game', run: leaveQueue }] : []),
     { label: 'Quit to Menu', run: returnToMenu },
   ];
   const at = Math.min(index, items.length - 1);
@@ -361,6 +373,98 @@ function PauseMenu({
   );
 }
 
+/**
+ * Over a warm-up: a quiet word that this game is a wait for another one. No menu layer, so the
+ * pad stays with the skater.
+ */
+function QueueStatus() {
+  return (
+    <div className="queue-status" role="status">
+      <Loader2 className="spin" size={13} aria-hidden="true" />
+      <span>Looking for an opponent</span>
+      <em>Warm-up</em>
+    </div>
+  );
+}
+
+/**
+ * Somebody walked into the queued room. The warm-up carries on underneath; the host is asked
+ * rather than pulled off the ice. Left unanswered, the room goes private and the question
+ * changes to whether to look again. Mounted only while it shows, for the same reason as the
+ * online dialog: a hidden layer would own the pad.
+ */
+function FoundOverlay() {
+  const { queue: net, found } = useGame();
+  const [index, setIndex] = useState(0);
+  if (!net || !found) return null;
+  const them = net.opponent;
+  const confirmed = net.me?.ready ?? false;
+  const left = Math.max(
+    0,
+    Math.ceil((FOUND_CONFIRM_MS - (performance.now() - found.since)) / 1000),
+  );
+  const items = found.missed
+    ? [
+        { label: 'Look again', run: lookAgain },
+        { label: 'Keep warming up', run: leaveQueue },
+      ]
+    : confirmed
+      ? [{ label: 'Keep warming up', run: leaveQueue }]
+      : [
+          { label: 'Play now', run: confirmFound },
+          { label: 'Keep warming up', run: leaveQueue },
+        ];
+  const at = Math.min(index, items.length - 1);
+  useNav((a) => {
+    if (a === 'up' || a === 'down') setIndex(step(at, a === 'up' ? -1 : 1, items.length));
+    if (a === 'confirm') items[at].run();
+    if (a === 'back') leaveQueue();
+  });
+  const title = found.missed ? 'Missed a game' : confirmed ? 'Dropping the puck' : 'Opponent found';
+  return (
+    <div
+      className="screen online-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Opponent found"
+    >
+      <div className="stage-frame narrow">
+        <div className="plate">
+          <TitleBar crumb="Quick play" title={title} />
+          {found.missed ? (
+            <p className="room-notice">
+              Nobody answered, so the room was taken off the list. Look again to be listed, or keep
+              this game to yourself.
+            </p>
+          ) : confirmed ? (
+            <p className="online-lede" role="status">
+              Waiting for {them?.name ?? 'the other player'} to ready up. The game starts the moment
+              they do.
+            </p>
+          ) : (
+            <p className="online-lede" role="status">
+              {them?.name ?? 'Somebody'} is here to play {modeInfo(net.mode).format}. The warm-up
+              ends when you say so — {left}s before they are sent on.
+            </p>
+          )}
+          <nav className="menu-list" aria-label="Quick play options">
+            {items.map((item, i) => (
+              <MenuItem
+                key={item.label}
+                focused={i === at}
+                onFocus={() => setIndex(i)}
+                onSelect={item.run}
+              >
+                {item.label}
+              </MenuItem>
+            ))}
+          </nav>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Results({ s }: { s: MatchState }) {
   const [index, setIndex] = useState(0);
   const final = s.phase === 'final';
@@ -374,7 +478,10 @@ function Results({ s }: { s: MatchState }) {
         : 'You lose';
   const items = [
     final
-      ? { label: 'Rematch', run: () => beginGame(runtime.myTeam, s.mode) }
+      ? {
+          label: runtime.queue ? 'Another warm-up' : 'Rematch',
+          run: () => beginGame(runtime.myTeam, s.mode),
+        }
       : { label: `Start period ${s.period + 1}`, run: continueGame },
     { label: 'Quit to Menu', run: returnToMenu },
   ];

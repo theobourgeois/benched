@@ -30,12 +30,13 @@ src/
   data/    League snapshots (nhl.json) and their types.
   input/   Gamepad + keyboard → InputFrame; menu input layers.
   audio/   Web Audio: samples, synthesized signals, the goal soundtrack.
-  net/     Wire format, snapshots, guest interpolation, WebRTC link, room session.
+  net/     Wire format, snapshots, guest interpolation, WebRTC link, room and directory sessions.
   scene/   three.js rendering: arena, skater rig and pose, stick, ragdolls, cameras, effects.
   ui/      React screens: menu, matchup, online lobby, settings, HUD, replay overlay.
   app/     Composition: the runtime object, the game loop, the online lifecycle.
   dev/     Development tools: the animation lab and the feel tuner. Never in a production build.
-workers/   room.ts, the Durable Object. Deployed on its own; shares only net/protocol and game/types.
+workers/   room.ts and directory.ts, the Durable Objects. Deployed on their own; share only
+           net/protocol and game/types.
 tests/     *.test.ts are vitest (pure); *.e2e.ts are Playwright.
 scripts/   Data refresh, animation review, the import check.
 ```
@@ -127,11 +128,18 @@ vectors and objects once at module scope or in a `useRef`, never inside the fram
 Share geometries and materials across skaters where possible. Dev-only visualisation belongs
 behind `import.meta.env.DEV` reads of `labHooks` (see `src/scene/animationReview.ts`).
 
-**Public rooms** (planned). Rooms are Durable Objects keyed by a four-letter code, and nothing
-lists them. The shape that fits: a second Durable Object as a directory that rooms register
-with when a host marks them public and leave when they empty, a `list` request on the worker's
-`fetch`, and a browse screen under `src/ui/` that calls `connectToRoom(code)` like the invite
-link does. `Room` already knows its seats, mode and whether a match is on.
+**Public rooms and quick play.** `workers/directory.ts` is one Durable Object (named `main`)
+that `Room` reports to over RPC whenever anything changes and on every sweep while public; it
+keeps nothing on disk and prunes listings it stops hearing about. Quick play (`quickPlay` in
+`src/app/online.ts`) asks it for the oldest open room, or a fresh code to host. A host waits on
+the ice: the session sits in `runtime.queue`, not `runtime.net`, and a local match against the
+AI runs as a warm-up. When somebody arrives `runtime.found` raises the confirm overlay in the
+HUD; the host's yes readies them, the room's `start` moves the session into `runtime.net` and
+`beginOnlineMatch` replaces the match. A joiner is an ordinary `connectToRoom` with
+`runtime.quickJoin`, auto-ready, waiting for that start. Wire types for the directory live in
+`src/net/protocol.ts` (`DirectoryClientMessage`, `DirectoryServerMessage`), and its one
+decision, `chooseListing`, is pure and tested in `tests/directory.test.ts`. A new Durable Object
+class needs a binding and a migration tag in `wrangler.jsonc`.
 
 ## Pitfalls
 
@@ -147,6 +155,9 @@ link does. `Room` already knows its seats, mode and whether a match is on.
   read as a player.
 - Pause is resolved in the loop, not the engine, and does not exist online: the pause button
   asks whether to leave instead (`askToLeave`).
+- A queued session (`runtime.queue`) is not an online match. The loop never reads it, so the
+  warm-up pauses, replays and ends like any local game; only `runtime.net` makes a match online.
+  Anything that leaves the ice for the menu must close the queue (`returnToMenu` does).
 - Goal replays are a local overlay over a live match. Online, the guest does not own the clock,
   so it can only close its overlay, never skip the celebration.
 - `src/dev/feel.ts` applies saved tweaks from localStorage over the config tables in

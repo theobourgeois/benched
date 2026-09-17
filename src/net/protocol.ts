@@ -65,6 +65,63 @@ export interface Player {
   away: boolean;
 }
 
+/**
+ * What a room tells the directory about itself, whenever any of it changes and again every sweep
+ * so a directory that restarted hears about it within seconds. Only public rooms are listed; a
+ * room that goes private, or empties, reports once more so it is taken down.
+ */
+export interface RoomListing {
+  code: string;
+  /** The host's name, which is what the browse list shows. */
+  host: string;
+  mode: GameMode;
+  public: boolean;
+  seats: number;
+  playing: boolean;
+  /** When the room went public, so the oldest waiting host is served first. */
+  since: number;
+}
+/** A listing that anyone can walk into: public, one seat taken, no match on. */
+export interface OpenRoom {
+  code: string;
+  host: string;
+  mode: GameMode;
+  since: number;
+}
+/** What quick play asks for. `any` takes the oldest open room whatever it is playing. */
+export type QuickMode = GameMode | 'any';
+/**
+ * How long a room handed to one person stays off the list. Two people asking at once must not
+ * both be sent to the same seat; if the one it went to never shows up the room comes back.
+ */
+export const CLAIM_MS = 15_000;
+/** A listing the directory has not heard about for this long belongs to a room that is gone. */
+export const LISTING_STALE_MS = 30_000;
+/** How long a host in a warm-up has to say yes to somebody who arrived. */
+export const FOUND_CONFIRM_MS = 30_000;
+/** How long a quick-play joiner waits for the host's puck drop before looking elsewhere. */
+export const JOIN_WAIT_MS = 45_000;
+
+/**
+ * The room quick play sends somebody to: the one whose host has waited longest, among those
+ * that are open, playing what was asked for, and not handed to somebody else in the last few
+ * seconds. Pure, so the directory's one decision can be tested without a worker.
+ */
+export function chooseListing(
+  listings: Iterable<RoomListing & { claimedUntil: number }>,
+  mode: QuickMode,
+  now: number,
+): (RoomListing & { claimedUntil: number }) | null {
+  let best: (RoomListing & { claimedUntil: number }) | null = null;
+  for (const l of listings) {
+    if (!isOpen(l) || l.claimedUntil > now) continue;
+    if (mode !== 'any' && l.mode !== mode) continue;
+    if (!best || l.since < best.since) best = l;
+  }
+  return best;
+}
+export const isOpen = (l: RoomListing) => l.public && l.seats === 1 && !l.playing;
+
 /** Modes two people can play against each other. Free skate is practice, so it stays local. */
 export const ONLINE_MODES: GameMode[] = ['exhibition', 'threeOnThree', 'oneOnOne', 'shootout'];
 
@@ -104,6 +161,8 @@ export type ClientMessage =
   /** Host only: what will be played, so the other person's lobby says the same thing. */
   | { t: 'mode'; mode: GameMode }
   | { t: 'ready'; ready: boolean }
+  /** Host only: whether the room is listed for anyone to walk into. */
+  | { t: 'public'; public: boolean }
   | { t: 'start'; setup: MatchSetup }
   | { t: 'signal'; data: Signal }
   | { t: 'ping' }
@@ -114,12 +173,35 @@ export type ServerMessage =
    * Who is here. `playing` says whether the room still has a match on, so a client that was away
    * can tell whether the one on its screen was called off while it was gone.
    */
-  | { t: 'room'; you: string; players: Player[]; mode: GameMode; playing: boolean }
+  | {
+      t: 'room';
+      you: string;
+      players: Player[];
+      mode: GameMode;
+      playing: boolean;
+      public: boolean;
+    }
   | { t: 'full' }
   | { t: 'start'; setup: MatchSetup }
   | { t: 'signal'; from: string; data: Signal }
   | { t: 'pong' }
   | { t: 'gone'; id: string };
+
+/**
+ * What a browser on the online screen says to the directory. `quick` asks for somewhere to
+ * play: an open room, or a fresh code to host one in; with a `code` it asks for that room in
+ * particular, which is what picking one off the list does.
+ */
+export type DirectoryClientMessage = { t: 'quick'; mode: QuickMode; code?: string } | { t: 'ping' };
+/**
+ * `directory` is the live picture: who is looking, who is waiting and how many games are on.
+ * `go` answers a `quick`; `gone` says the room asked for is no longer open.
+ */
+export type DirectoryServerMessage =
+  | { t: 'directory'; rooms: OpenRoom[]; browsing: number; waiting: number; playing: number }
+  | { t: 'go'; code: string; host: boolean }
+  | { t: 'gone' }
+  | { t: 'pong' };
 
 /** The first byte of every binary message says what the rest of it is. */
 export const WIRE_INPUT = 1;
