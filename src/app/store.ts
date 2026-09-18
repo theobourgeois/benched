@@ -20,7 +20,10 @@ import {
 } from '../game/replay';
 import { leadHuman } from '../game/humans';
 import type { GameMode, Human, Jersey, MatchState, Settings, Team } from '../game/types';
-const SETTINGS_KEY = 'benched.settings';
+const SETTINGS_KEY = 'hcky.settings';
+// The game was called Benched before hcky.io; settings saved under that name still load until
+// the next save writes them under the new key.
+const LEGACY_SETTINGS_KEY = 'benched.settings';
 export const runtime = {
   match: createMatch(),
   /**
@@ -81,7 +84,9 @@ function loadSettings(): Settings {
     hints: true,
   };
   try {
-    const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') as Partial<Settings>;
+    const saved = JSON.parse(
+      localStorage.getItem(SETTINGS_KEY) ?? localStorage.getItem(LEGACY_SETTINGS_KEY) ?? '{}',
+    ) as Partial<Settings>;
     const next = { ...defaults, ...saved };
     next.masterVolume = readVolume(saved.masterVolume, defaults.masterVolume);
     next.sfxVolume = readVolume(saved.sfxVolume, defaults.sfxVolume);

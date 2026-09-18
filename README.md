@@ -1,4 +1,4 @@
-# BENCHED
+# hcky.io
 
 A playable, controller-first 3D hockey prototype with a close, end-to-end arena camera. Pick any two NHL teams, with real rosters, logos and colors, and play a local exhibition against the computer: five skaters and a goalie per side, three real-time five-minute periods, intermissions, alternating ends, and a final score. Tied games end as draws.
 
@@ -102,9 +102,9 @@ The game and the rooms are hosted separately. The split dates from when the skat
 53 MB FBX, over Cloudflare's 25 MiB per-file limit for static hosting; it is a 3 MB GLB now, so
 nothing stops both from living on one Cloudflare origin if that is ever simpler.
 
-- **The game** goes to GitHub Pages. Pushing `main` builds it and publishes it — see
-  `.github/workflows/pages.yml`. A project page is served from a subdirectory, so the workflow
-  passes `--base=/<repo>/`.
+- **The game** goes to GitHub Pages at [hcky.io](https://hcky.io). Pushing `main` builds it and
+  publishes it — see `.github/workflows/pages.yml`. The workflow asks Pages for the base path:
+  `/` on the custom domain, `/<repo>/` on github.io without one.
 - **The rooms** go to Cloudflare with `npm run rooms:deploy`.
 
 After a deploy, `tests/deployed.e2e.ts` checks that the shipped bundle really reaches the room
@@ -245,7 +245,7 @@ npm run format    # Format source, tests, and configuration
 
 Browser tests use installed Google Chrome (`channel: 'chrome'` in `playwright.config.ts`). They cover menu/settings and their persistence, NHL team selection, controller-driven menus with held-stick repeat and jersey selection, keyboard skating and shots, pause/help behavior, virtual Xbox input and disconnection, goal presentation, all three periods, rematches, and desktop/narrow layouts. The unit suite covers scoring direction, high/low shot trajectories, posts, boards, saves, stamina, passing, defensive input, carving and pivots, committed checks versus bumps, hits from behind, whiffs, hitstop, knockdowns and recovery, toe-drag gestures, and sustained play. Virtual controller tests do not replace physical hardware playtesting.
 
-For development inspection only, `window.__BENCHED__` exposes the runtime, publish and beginGame. Vite removes this hook from production builds.
+For development inspection only, `window.__HCKY__` exposes the runtime, publish and beginGame. Vite removes this hook from production builds.
 
 ## Prototype scope
 
@@ -255,4 +255,4 @@ Technical references: [React Three Fiber setup](https://r3f.docs.pmnd.rs/getting
 
 Controller/browser reference: [Gamepad visibility and interaction](https://developer.mozilla.org/en-US/docs/Web/API/Gamepad_API/Using_the_Gamepad_API). In Arc, use the live test to distinguish a controller that the browser has not exposed from a mapping issue. If Arc exposes no input after focusing the direct localhost page and pressing a face button, compare the same address in Chrome.
 
-Control reference: [EA NHL 22 Skill Stick manual](https://www.ea.com/able/resources/nhl/nhl-22/ps4/text-manual). The deke/pull-back gestures are adapted to this game; the separate LB high-shot modifier is specific to BENCHED.
+Control reference: [EA NHL 22 Skill Stick manual](https://www.ea.com/able/resources/nhl/nhl-22/ps4/text-manual). The deke/pull-back gestures are adapted to this game; the separate LB high-shot modifier is specific to hcky.io.

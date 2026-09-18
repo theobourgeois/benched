@@ -470,7 +470,7 @@ export default {
     if (new URL(request.url).pathname === '/health') return new Response('ok');
     return (
       (await routePartykitRequest(request, env as unknown as Record<string, unknown>)) ??
-      new Response('benched room server', { status: 404 })
+      new Response('hcky.io room server', { status: 404 })
     );
   },
 };

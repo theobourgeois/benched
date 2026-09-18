@@ -44,8 +44,11 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      # A project page is served from a subdirectory, so asset URLs need that prefix.
-      - run: npm run build -- --base=/${{ github.event.repository.name }}/
+      # Asset URLs need the path the site is served under: nothing on the hcky.io custom domain,
+      # the repository's subdirectory on github.io before one is set. Pages reports which.
+      - id: pages
+        uses: actions/configure-pages@v5
+      - run: npm run build -- --base=${{ steps.pages.outputs.base_path }}/
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

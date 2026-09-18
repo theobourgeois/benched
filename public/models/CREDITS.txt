@@ -1,4 +1,4 @@
-BENCHED — Model credits
+hcky.io — Model credits
 
 skater.glb (exported from assets/skater.fbx by scripts/export-skater.mjs)
 Mixamo character "Ch01" (non-PBR), T-pose, Mixamo humanoid rig (mixamorig12).

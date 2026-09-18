@@ -244,18 +244,8 @@ export function TitleBar({
 
 export function Brand() {
   return (
-    <div className="brand">
-      <span className="brand-mark" aria-hidden="true">
-        <i />
-        <i />
-      </span>
-      BENCHED{' '}
-      <span
-        style={{ fontSize: '25px', alignSelf: 'end', marginBottom: '10px' }}
-        className="brand-version"
-      >
-        v0.0.0.0.0.0.0.1
-      </span>
+    <div className="brand" style={{ fontSize: '130px', paddingBottom: '15px' }}>
+      hcky.io{' '}
     </div>
   );
 }

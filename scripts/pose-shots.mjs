@@ -14,11 +14,11 @@ const page = await browser.newPage({ viewport: { width: 900, height: 900 } });
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
 await page.goto('http://localhost:5173/');
-await page.waitForFunction(() => window.__BENCHED__);
-await page.evaluate(() => window.__BENCHED__.beginGame(0));
+await page.waitForFunction(() => window.__HCKY__);
+await page.evaluate(() => window.__HCKY__.beginGame(0));
 await page.locator('.hud[data-phase="playing"]').waitFor({ timeout: 30000 });
 await page.evaluate(() => {
-  const { runtime } = window.__BENCHED__;
+  const { runtime } = window.__HCKY__;
   runtime.settings.beginner = false;
   const s = runtime.match;
   s.controlled = 0;
@@ -160,7 +160,7 @@ const POSES = {
 for (const [pose, fields] of Object.entries(POSES)) {
   if (only.length && !only.some((o) => pose.startsWith(o))) continue;
   await page.evaluate((fields) => {
-    const s = window.__BENCHED__.runtime.match;
+    const s = window.__HCKY__.runtime.match;
     const id = fields.goalie ? s.skaters.findIndex((q) => q.role === 'G') : 0;
     s.controlled = id;
     s.skaters.forEach((q, i) => {

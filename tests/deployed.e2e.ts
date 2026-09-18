@@ -7,7 +7,7 @@ import { test, expect } from '@playwright/test';
  *   npm run build && npx vite preview --port 4173
  *   E2E_BASE_URL=http://localhost:4173 npx playwright test tests/deployed.e2e.ts
  *
- * It drives the screens only. `window.__BENCHED__` is a development convenience and is not in a
+ * It drives the screens only. `window.__HCKY__` is a development convenience and is not in a
  * production bundle, which is the point of checking one.
  */
 test.skip(!process.env.E2E_BASE_URL, 'point E2E_BASE_URL at a preview build');

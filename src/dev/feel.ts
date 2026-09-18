@@ -1192,7 +1192,7 @@ export const FEEL_PARAMS: FeelParam[] = [
   ),
 ];
 
-const STORAGE_KEY = 'benched-feel-v1';
+const STORAGE_KEY = 'hcky-feel-v1';
 let revision = 0;
 const listeners = new Set<() => void>();
 

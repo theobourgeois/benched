@@ -8,10 +8,10 @@ import { test, expect, type Browser, type Page } from '@playwright/test';
 
 const state = (page: Page) =>
   page.evaluate(
-    'JSON.parse(JSON.stringify({ ...window.__BENCHED__.runtime.match, myTeam: window.__BENCHED__.runtime.myTeam }))',
+    'JSON.parse(JSON.stringify({ ...window.__HCKY__.runtime.match, myTeam: window.__HCKY__.runtime.myTeam }))',
   );
 const net = (page: Page) =>
-  page.evaluate(`(() => { const n = window.__BENCHED__.runtime.net;
+  page.evaluate(`(() => { const n = window.__HCKY__.runtime.net;
     return n ? { status: n.status, room: n.room, host: n.isHost, team: n.team, players: n.players.length, direct: n.stats.direct, rtt: n.stats.rtt } : null; })()`);
 const live = (page: Page) => page.locator('.hud[data-phase="playing"]');
 
@@ -106,10 +106,10 @@ test('two browsers meet in a room, drop the puck, and play one match', async ({ 
 
   // The guest's stick moves the guest's skater, on the host's simulation.
   await hostPage.evaluate(
-    `(() => { const s = window.__BENCHED__.runtime.match;
+    `(() => { const s = window.__HCKY__.runtime.match;
       s.phase='playing'; s.countdown=0; s.puck.owner=null;
       s.skaters.forEach(p=>{p.cooldown=0;p.vx=0;p.vz=0});
-      window.__BENCHED__.publish(); })()`,
+      window.__HCKY__.publish(); })()`,
   );
   const guestTeam = guestStarted.myTeam;
   await guestPage.evaluate('window.pad.axes[1]=-1');
@@ -230,7 +230,7 @@ test('a socket that drops mid-match comes back to the same seat', async ({ brows
   // Each socket drops in turn, the way an idle line closed by a proxy would, and reconnects
   // on its own. The room hands the same seat back; nobody is told anybody left.
   for (const page of [guestPage, hostPage]) {
-    await page.evaluate('window.__BENCHED__.runtime.net.socket.reconnect()');
+    await page.evaluate('window.__HCKY__.runtime.net.socket.reconnect()');
     await expect.poll(async () => (await net(page))?.status, { timeout: 15000 }).toBe('playing');
   }
   await hostPage.waitForTimeout(1500);
@@ -275,11 +275,11 @@ test('both ends watch a goal replay, and a host skip takes the guest overlay dow
 
   // The same swept goal the local replay test uses, scored on the host's simulation.
   await hostPage.evaluate(
-    `(() => { const s = window.__BENCHED__.runtime.match;
+    `(() => { const s = window.__HCKY__.runtime.match;
       s.phase='playing'; s.countdown=0;
       for (const p of s.skaters) if (p.role === 'G') { p.x = 0; p.z = p.team ? -10 : 10; }
       Object.assign(s.puck, { owner: null, x: 25.8, z: 0.8, y: 0.4, vx: 44, vz: 0, vy: 0, lockout: 1 });
-      window.__BENCHED__.publish(); })()`,
+      window.__HCKY__.publish(); })()`,
   );
 
   const goalReplay = (page: Page) => page.getByRole('region', { name: 'Goal replay' });
@@ -324,7 +324,7 @@ test('a line that stays down holds the game for both, and it carries on when it 
 
   // The guest loses everything: the direct line and the room socket, and does not dial back.
   await guestPage.evaluate(
-    '(() => { const n = window.__BENCHED__.runtime.net; n.link.close(); n.socket.close(); })()',
+    '(() => { const n = window.__HCKY__.runtime.net; n.link.close(); n.socket.close(); })()',
   );
   await expect(guestPage.getByRole('heading', { name: 'Reconnecting' })).toBeVisible({
     timeout: 10000,
@@ -340,7 +340,7 @@ test('a line that stays down holds the game for both, and it carries on when it 
   expect((await state(hostPage)).tick).toBe(held);
 
   // Back again: same seats, same host, and the match moves on from where it held.
-  await guestPage.evaluate('window.__BENCHED__.runtime.net.socket.reconnect()');
+  await guestPage.evaluate('window.__HCKY__.runtime.net.socket.reconnect()');
   for (const page of [hostPage, guestPage])
     await expect(page.getByRole('dialog', { name: 'Online game' })).toHaveCount(0, {
       timeout: 15000,
@@ -368,7 +368,7 @@ test('a socket that goes silent is dropped and dialled again', async ({ browser 
     .poll(() => guestPage.evaluate('performance.now()'), { timeout: 15000 })
     .toBeGreaterThan(12000);
   await guestPage.evaluate(`(() => {
-    const n = window.__BENCHED__.runtime.net;
+    const n = window.__HCKY__.runtime.net;
     window.reopened = 0;
     n.socket.addEventListener('open', () => window.reopened++);
     n.pingSent = 1;
@@ -420,7 +420,7 @@ test('an opponent who leaves ends the match, and the room plays again from the l
 
 /** The queued room and what the host has been asked, as the runtime sees them. */
 const queue = (page: Page) =>
-  page.evaluate(`(() => { const r = window.__BENCHED__.runtime; const q = r.queue;
+  page.evaluate(`(() => { const r = window.__HCKY__.runtime; const q = r.queue;
     return { queued: !!q, public: q ? q.isPublic : null, players: q ? q.players.length : 0,
       found: r.found ? { missed: r.found.missed } : null, net: !!r.net, quickJoin: r.quickJoin, phase: r.match.phase }; })()`);
 
@@ -545,7 +545,7 @@ test('a host who does not answer is taken off the list, and the joiner looks els
   });
 
   // The host walked away. The clock is wound forward rather than waited out.
-  await hostPage.evaluate('window.__BENCHED__.runtime.found.since -= 60000');
+  await hostPage.evaluate('window.__HCKY__.runtime.found.since -= 60000');
   await expect(hostPage.getByRole('heading', { name: 'Missed a game' })).toBeVisible({
     timeout: 10000,
   });

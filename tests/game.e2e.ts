@@ -1,15 +1,15 @@
 import { test, expect, type Page } from '@playwright/test';
 async function state(page: Page) {
   return page.evaluate(
-    'JSON.parse(JSON.stringify({ ...window.__BENCHED__.runtime.match, myTeam: window.__BENCHED__.runtime.myTeam }))',
+    'JSON.parse(JSON.stringify({ ...window.__HCKY__.runtime.match, myTeam: window.__HCKY__.runtime.myTeam }))',
   );
 }
 async function settings(page: Page) {
-  return page.evaluate('JSON.parse(JSON.stringify(window.__BENCHED__.runtime.settings))');
+  return page.evaluate('JSON.parse(JSON.stringify(window.__HCKY__.runtime.settings))');
 }
 async function changeState(page: Page, code: string) {
   return page.evaluate(
-    `(() => { const {runtime,publish} = window.__BENCHED__; ${code}; publish(); })()`,
+    `(() => { const {runtime,publish} = window.__HCKY__; ${code}; publish(); })()`,
   );
 }
 const live = (page: Page) => page.locator('.hud[data-phase="playing"]');
@@ -189,7 +189,7 @@ test('virtual Xbox drives the menus, picks a jersey, skates, shoots, and safely 
   });
   await page.goto('/');
   await expect
-    .poll(() => page.evaluate('window.__BENCHED__.runtime.controller.status.connected'))
+    .poll(() => page.evaluate('window.__HCKY__.runtime.controller.status.connected'))
     .toBe(true);
   const pressPad = async (button: number) => {
     await page.evaluate(`window.testPad.buttons[${button}].pressed=true`);
@@ -500,12 +500,12 @@ test('feel tuner changes live physics, shows a readout, and resets', async ({ pa
   await expect(page.getByText(/Build to top speed/)).toBeVisible();
   await expect(page.getByText('Speed', { exact: true })).toBeVisible();
   await page.getByRole('slider', { name: 'Cruise speed' }).fill('14');
-  expect(await page.evaluate('window.__BENCHED__.PHYSICS.maxSpeed')).toBe(14);
+  expect(await page.evaluate('window.__HCKY__.PHYSICS.maxSpeed')).toBe(14);
   await expect(page.getByText(/changed from shipped/)).toBeVisible();
   await page.getByRole('tab', { name: 'Hitting' }).click();
   await expect(page.getByText(/Throw a loaded shoulder/)).toBeVisible();
   await page.getByRole('button', { name: 'Reset all' }).click();
-  expect(await page.evaluate('window.__BENCHED__.PHYSICS.maxSpeed')).toBe(9.6);
+  expect(await page.evaluate('window.__HCKY__.PHYSICS.maxSpeed')).toBe(9.6);
   await page.keyboard.press('Escape');
   await expect(page.getByRole('heading', { name: 'How it feels' })).toHaveCount(0);
 });
@@ -550,7 +550,7 @@ test('a goal rolls a skippable replay, and pause opens a scrubbable instant repl
   await page.getByRole('button', { name: 'Instant Replay' }).click();
   const deck = page.getByRole('region', { name: 'Replay controls' });
   await expect(deck).toBeVisible();
-  const replay = (path: string) => page.evaluate(`window.__BENCHED__.runtime.replay.${path}`);
+  const replay = (path: string) => page.evaluate(`window.__HCKY__.runtime.replay.${path}`);
   // Opens held: nothing moves until play.
   await expect(page.getByRole('button', { name: 'Play replay' })).toBeVisible();
   const time = (await replay('time')) as number;
@@ -595,7 +595,7 @@ test('two pads take a bench each and drive their own skater', async ({ page }) =
       page.evaluate(
         'JSON.stringify([runtime.controller.status.connected, runtime.controllerTwo.status.connected])'.replace(
           /runtime/g,
-          'window.__BENCHED__.runtime',
+          'window.__HCKY__.runtime',
         ),
       ),
     )
@@ -705,7 +705,7 @@ test('two people can share a bench against the CPU', async ({ page }) => {
   await page.getByRole('button', { name: 'Rematch' }).click();
   await expect
     .poll(() =>
-      page.evaluate('window.__BENCHED__.runtime.match.sides.map(s=>s.humans.length).join()'),
+      page.evaluate('window.__HCKY__.runtime.match.sides.map(s=>s.humans.length).join()'),
     )
     .toBe('2,0');
 });
@@ -735,7 +735,7 @@ test('two-player waits for a second pad and says why', async ({ page }) => {
   await page.getByRole('button', { name: 'Add player two' }).click();
   // One pad is seat one's. Seat two must not quietly share it.
   await expect
-    .poll(() => page.evaluate('window.__BENCHED__.runtime.controllerTwo.status.connected'))
+    .poll(() => page.evaluate('window.__HCKY__.runtime.controllerTwo.status.connected'))
     .toBe(false);
   await expect(page.getByRole('button', { name: /Connect P2 controller/ })).toBeVisible();
   await expect(page.getByText(/Press a button on the second controller/)).toBeVisible();

@@ -56,7 +56,7 @@ function useDirectory() {
   return directory;
 }
 
-const QUICK_MODE_KEY = 'benched.quickMode';
+const QUICK_MODE_KEY = 'hcky.quickMode';
 const QUICK_MODES: QuickMode[] = ['any', ...ONLINE_MODES];
 function loadQuickMode(): QuickMode {
   try {

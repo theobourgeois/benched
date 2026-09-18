@@ -23,7 +23,7 @@ if (import.meta.env.DEV) {
     /** scripts/export-skater.mjs rebuilds the skater GLB through this. */
     exportSkater: (url: string) => import('./dev/exportSkater').then((m) => m.exportSkater(url)),
   };
-  Object.assign(window, { __BENCHED__: hooks });
+  Object.assign(window, { __HCKY__: hooks });
   // Saved feel tweaks are applied over the config tables in development only.
   void import('./dev/feel').then((m) => {
     m.bootFeel();

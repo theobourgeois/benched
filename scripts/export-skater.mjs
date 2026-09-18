@@ -19,9 +19,9 @@ const browser = await chromium.launch({ channel: 'chrome', headless: true });
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.error('page error:', e.message));
 await page.goto(url);
-await page.waitForFunction('window.__BENCHED__?.exportSkater');
+await page.waitForFunction('window.__HCKY__?.exportSkater');
 const base64 = await page.evaluate(async (fbx) => {
-  const buffer = await window.__BENCHED__.exportSkater(fbx);
+  const buffer = await window.__HCKY__.exportSkater(fbx);
   const bytes = new Uint8Array(buffer);
   let text = '';
   for (let i = 0; i < bytes.length; i += 0x8000)

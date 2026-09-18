@@ -14,8 +14,8 @@ const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
 page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
 await page.goto('http://localhost:5173/');
-await page.waitForFunction(() => window.__BENCHED__);
-await page.evaluate(() => window.__BENCHED__.beginGame(0));
+await page.waitForFunction(() => window.__HCKY__);
+await page.evaluate(() => window.__HCKY__.beginGame(0));
 await page.locator('.hud[data-phase="playing"]').waitFor({ timeout: 30000 });
 await page.waitForTimeout(1500);
 
@@ -29,7 +29,7 @@ const TIMES = [0.05, 0.2, 0.4, 0.7, 1.1, 1.6, 2.1];
 for (const [name, sc] of Object.entries(SCENARIOS)) {
   if (only.length && !only.some((o) => name.startsWith(o))) continue;
   const victim = await page.evaluate((sc) => {
-    const { runtime } = window.__BENCHED__;
+    const { runtime } = window.__HCKY__;
     runtime.settings.beginner = false;
     const s = runtime.match;
     s.hitstop = 0;
@@ -63,7 +63,7 @@ for (const [name, sc] of Object.entries(SCENARIOS)) {
     await page.waitForTimeout((at - t) * 1000);
     t = at;
     await page.evaluate((id) => {
-      const p = window.__BENCHED__.runtime.match.skaters[id];
+      const p = window.__HCKY__.runtime.match.skaters[id];
       window.__CAMERA__ = {
         position: [p.x + 3.2, 1.9, p.z - 3.4],
         target: [p.x, 0.5, p.z],
@@ -80,7 +80,7 @@ for (const [name, sc] of Object.entries(SCENARIOS)) {
           // A fresh import can be a separate module copy, so use the app's own runtime and only
           // borrow the replay module's pure functions.
           const replay = await import('/src/game/replay.ts');
-          const { runtime, publish } = window.__BENCHED__;
+          const { runtime, publish } = window.__HCKY__;
           if (!runtime.replay) {
             runtime.replay = replay.startReplay(
               runtime.match,
@@ -110,7 +110,7 @@ for (const [name, sc] of Object.entries(SCENARIOS)) {
       await page.screenshot({ path: `${OUT}/${name}-replay-${String(at.toFixed(2)).replace('.', '_')}.png` });
     }
     await page.evaluate(() => {
-      const { runtime, publish } = window.__BENCHED__;
+      const { runtime, publish } = window.__HCKY__;
       runtime.replay = null;
       publish();
     });

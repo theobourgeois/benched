@@ -208,7 +208,7 @@ a {
 .menu-item .caret {
   opacity: 0;
 }
-.menu-item:hover:not(:disabled) {
+.menu-item:hover:not(:disabled, [data-focused]) {
   color: #fff;
 }
 .menu-item[data-focused] {
@@ -423,6 +423,21 @@ a {
 .main-column .brand {
   font-size: clamp(52px, 6vw, 76px);
   margin: 0 0 24px 2px;
+}
+
+/* Logo pucks tumbling down behind the main menu, in a canvas of their own. */
+.logo-pucks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.main-column {
+  position: relative;
+}
+@media (prefers-reduced-motion: reduce) {
+  .logo-pucks {
+    display: none;
+  }
 }
 
 /* Team select. */

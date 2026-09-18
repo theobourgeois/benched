@@ -1,6 +1,6 @@
-# Working on Benched
+# Working on hcky.io
 
-Benched is a controller-first 3D hockey game in the browser: React 19, TypeScript, Vite,
+hcky.io (said "hockey I-O") is a controller-first 3D hockey game in the browser: React 19, TypeScript, Vite,
 three.js through React Three Fiber, and a Cloudflare Durable Object for online rooms. The
 README is the player's manual and the deploy guide; this file is the map for changing the code.
 
@@ -113,7 +113,7 @@ relays it without reading it.
 
 **A setting.** Add it to `Settings` in `src/game/types.ts`, give it a default in
 `loadSettings` in `src/app/store.ts`, and a row in `src/ui/Settings.tsx`. Settings persist
-under the `benched.settings` localStorage key; unknown saved keys are ignored, so renames are
+under the `hcky.settings` localStorage key; unknown saved keys are ignored, so renames are
 safe.
 
 **A screen.** A React component under `src/ui/` that mounts `useNav` from
@@ -187,5 +187,5 @@ class needs a binding and a migration tag in `wrangler.jsonc`.
 - README.md: controls table, online design, deploy, validation scope.
 - docs/anim-lab.md: the animation lab and its scripted review (`scripts/anim-lab.mjs`).
 - docs/skating-playtest.md, docs/animation-rework.md: design notes behind skating and the rig.
-- `window.__BENCHED__` (dev only) exposes `runtime`, `publish`, `beginGame` and the config
+- `window.__HCKY__` (dev only) exposes `runtime`, `publish`, `beginGame` and the config
   tables; the e2e tests drive the game through it.

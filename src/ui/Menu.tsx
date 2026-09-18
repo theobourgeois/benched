@@ -9,6 +9,7 @@ import { SettingsScreen } from './Settings';
 import { TeamSelect, type Partner } from './TeamSelect';
 import { OnlineScreen } from './Online';
 import { normaliseCode } from '../net/protocol';
+import { LogoPucks } from '../scene/LogoPucks';
 
 /**
  * Invites are a query string rather than a path, because the game is a static build with no
@@ -114,6 +115,7 @@ function MainMenu({
   });
   return (
     <div className="screen main-menu">
+      <LogoPucks />
       <div className="main-column">
         <Brand />
         <nav className="plate menu-list" aria-label="Main menu">

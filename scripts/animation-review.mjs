@@ -33,8 +33,8 @@ const clips = [
 ].filter(([name]) => process.argv.length <= 2 || process.argv.slice(2).includes(name));
 try {
   await page.goto('http://localhost:5173');
-  await page.waitForFunction(() => window.__BENCHED__);
-  await page.evaluate(() => window.__BENCHED__.beginGame(0));
+  await page.waitForFunction(() => window.__HCKY__);
+  await page.evaluate(() => window.__HCKY__.beginGame(0));
   await page.locator('.hud[data-phase="playing"]').waitFor();
   await page.waitForTimeout(1000);
   await page.addStyleTag({ content: '.hud,.controls,.feel-hud { opacity: 0 !important; }' });
@@ -47,7 +47,7 @@ try {
         const { PHYSICS, PUCK } = await import('/src/game/config.ts');
         const { sampleDeke } = await import('/src/game/dekes.ts');
         const { SHOT_DOWNSWING, GOALIE_SAVE_TIME } = await import('/src/game/actionTiming.ts');
-        const { runtime } = window.__BENCHED__;
+        const { runtime } = window.__HCKY__;
         const s = runtime.match;
         const id = name.startsWith('goalie') ? s.skaters.findIndex((p) => p.role === 'G') : 0;
         s.controlled = id;
