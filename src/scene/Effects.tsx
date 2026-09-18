@@ -15,7 +15,7 @@ interface Particle {
 }
 /** A fixed particle pool keeps skate spray and impact bursts allocation-free during play. */
 /** Calls that kick up ice. */
-const SPRAYED = new Set(['shot', 'hit', 'save', 'post']);
+const SPRAYED = new Set(['shot', 'hit', 'stick', 'deflect', 'boards', 'save', 'post']);
 export function IceSpray() {
   const mesh = useRef<THREE.InstancedMesh>(null),
     cursor = useRef(0),

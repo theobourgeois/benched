@@ -316,7 +316,7 @@ test('all periods, goal presentation, final result, and rematch work', async ({ 
   const s = await state(page);
   expect(s.score).toEqual([0, 0]);
   expect(s.period).toBe(1);
-  expect(s.clock).toBe(300);
+  expect(s.clock).toBe(1200);
 });
 test('desktop and narrow layouts keep primary actions visible', async ({ page }) => {
   await page.goto('/');

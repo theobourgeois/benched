@@ -49,13 +49,13 @@ describe('match rules', () => {
     const s = createMatch();
     expect(s.skaters).toHaveLength(12);
     expect(s.skaters.filter((p) => p.role === 'G')).toHaveLength(2);
-    expect(s.clock).toBe(300);
+    expect(s.clock).toBe(RULES.periodSeconds);
   });
   it('keeps the period clock frozen during faceoff and pause', () => {
     const s = createMatch();
     startMatch(s);
     tick(s, 2);
-    expect(s.clock).toBe(300);
+    expect(s.clock).toBe(RULES.periodSeconds);
     expect(s.phase).toBe('faceoff');
     togglePause(s);
     const countdown = s.countdown;
@@ -64,13 +64,24 @@ describe('match rules', () => {
     togglePause(s);
     tick(s, 1.1);
     expect(s.phase).toBe('playing');
-    expect(s.clock).toBeLessThan(300);
+    expect(s.clock).toBeLessThan(RULES.periodSeconds);
   });
-  it('plays three five-minute periods, reverses ends and ends a tie as a draw', () => {
+  it('shows a full period on the clock and plays it in a few real minutes', () => {
+    const s = createMatch();
+    s.phase = 'playing';
+    tick(s, RULES.playSeconds - RULES.realTimeFinish);
+    expect(s.clock).toBeCloseTo(RULES.realTimeFinish, 1);
+    // The finish is real seconds.
+    tick(s, 5);
+    expect(s.clock).toBeCloseTo(RULES.realTimeFinish - 5, 1);
+    tick(s, 5.1);
+    expect(s.phase).toBe('intermission');
+  });
+  it('plays three periods, reverses ends and ends a tie as a draw', () => {
     const s = createMatch();
     for (let period = 1; period <= 3; period++) {
       expect(s.period).toBe(period);
-      expect(s.clock).toBe(300);
+      expect(s.clock).toBe(RULES.periodSeconds);
       s.phase = 'playing';
       s.clock = 0.01;
       tick(s, 0.02);
@@ -406,7 +417,7 @@ describe('skating and defense', () => {
     Object.assign(s.puck, { owner: 6, x: puck.x, z: puck.z });
     stepMatch(s, seat(s, { ...EMPTY_INPUT, poke: true }));
     expect(s.puck.owner).toBeNull();
-    expect(s.events.some((e) => e.type === 'hit')).toBe(true);
+    expect(s.events.some((e) => e.type === 'stick')).toBe(true);
   });
   /** A carrier skating up ice with a poker on their stick side, a little behind the puck. */
   function pokeOnHip() {
@@ -1408,7 +1419,7 @@ describe('free skate', () => {
   it('does not run the period clock or end the session', () => {
     const s = skate();
     tick(s, 2);
-    expect(s.clock).toBe(300);
+    expect(s.clock).toBe(RULES.periodSeconds);
     expect(s.phase).toBe('playing');
     s.clock = 0.01;
     tick(s, 0.05);
@@ -1458,7 +1469,7 @@ describe('small-ice modes', () => {
     const onIce = s.skaters.filter((p) => isOnIce(s, p));
     expect(onIce).toHaveLength(8);
     expect(onIce.filter((p) => p.role === 'G')).toHaveLength(2);
-    expect(s.clock).toBe(180);
+    expect(s.clock).toBe(RULES.periodSeconds);
     expect(onIce.every((p) => Math.abs(p.z) < 20)).toBe(true);
   });
   it('plays three three-minute periods in 3-on-3', () => {
@@ -1466,7 +1477,7 @@ describe('small-ice modes', () => {
     startMatch(s);
     for (let period = 1; period <= 3; period++) {
       expect(s.period).toBe(period);
-      expect(s.clock).toBe(180);
+      expect(s.clock).toBe(RULES.periodSeconds);
       s.phase = 'playing';
       s.clock = 0.01;
       tick(s, 0.02);
@@ -1481,7 +1492,7 @@ describe('small-ice modes', () => {
     expect(onIce).toHaveLength(4);
     expect(onIce.filter((p) => p.role === 'C')).toHaveLength(2);
     expect(s.sides[played(s)].humans[0].controlled).toBe(6);
-    expect(s.clock).toBe(180);
+    expect(s.clock).toBe(RULES.periodSeconds);
   });
 });
 

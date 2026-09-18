@@ -16,6 +16,11 @@ export type Blend =
   | 'lerp'
   /** A clock in seconds: lerped while it runs, snapped when it is restarted. */
   | 'time'
+  /**
+   * The period clock, which runs several game seconds a second (see `clockRate`): lerped while it
+   * runs, snapped when a new period restarts it.
+   */
+  | 'gameClock'
   /** Metres: lerped while a skater or puck moves, snapped when a faceoff puts them elsewhere. */
   | 'move'
   /** Radians, along the shorter way round. */
@@ -128,6 +133,8 @@ export const unit = (key: string): Field => ({ key, kind: 'i16', scale: 1000, bl
 
 /** Further than anything skates or is shot between two snapshots: it was put there. */
 const TELEPORT = 2.5;
+/** Game seconds the period clock can cover in a real one, with room to spare. */
+const GAME_CLOCK_REACH = 10;
 
 /**
  * The value of a field at a moment `t` of the way from `a` to `b`, which are `span` seconds
@@ -143,6 +150,8 @@ export function blendField(field: Field, a: unknown, b: unknown, t: number, span
     case 'time':
       // A clock moves a second a second. A bigger jump is a restart, drawn as one.
       return Math.abs(b - a) <= span * 1.5 + 0.005 ? a + (b - a) * t : nearer;
+    case 'gameClock':
+      return b <= a && a - b <= span * GAME_CLOCK_REACH + 0.005 ? a + (b - a) * t : nearer;
     case 'move':
       return Math.abs(b - a) <= TELEPORT ? a + (b - a) * t : nearer;
     case 'angle':

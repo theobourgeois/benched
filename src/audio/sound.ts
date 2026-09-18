@@ -1,5 +1,7 @@
 import { leadHuman } from '../game/humans';
+import { RINK } from '../game/config';
 import { clamp } from '../game/math';
+import { modeInfo } from '../game/modes';
 import type { GameEvent, GameMode, MatchState, Settings, Team } from '../game/types';
 import { GOAL_BEAT, playGoalImpact, playGoalTrack, type GoalTrack } from './goalTrack';
 import {
@@ -14,10 +16,17 @@ const SAMPLE_NAMES = [
   'shot',
   'slapshot',
   'wrist',
-  'pass',
   'pass2',
   'pass3',
-  'hit',
+  'receive',
+  'receive2',
+  'check',
+  'bighit',
+  'glass',
+  'glass2',
+  'glass3',
+  'glass4',
+  'stick',
   'boards',
   'post',
   'save',
@@ -31,6 +40,20 @@ const SAMPLE_NAMES = [
 const SFX_CEILING = 0.65;
 const MUSIC_CEILING = 0.42;
 const VOLUME_STEPS = 20;
+
+/** Metres from the boards inside which a big hit also rattles the glass. */
+const GLASS_REACH = 2.2;
+
+/** Whether a spot on the ice is up against the boards, corners included. */
+function byTheBoards(x: number, z: number) {
+  const cx = RINK.halfLength - RINK.corner,
+    cz = RINK.halfWidth - RINK.corner;
+  if (Math.abs(x) > cx && Math.abs(z) > cz)
+    return Math.hypot(Math.abs(x) - cx, Math.abs(z) - cz) > RINK.corner - GLASS_REACH;
+  return Math.abs(x) > RINK.halfLength - GLASS_REACH || Math.abs(z) > RINK.halfWidth - GLASS_REACH;
+}
+
+const GLASS = ['glass', 'glass2', 'glass3', 'glass4'];
 
 const asset = (path: string) => `${import.meta.env.BASE_URL}${path}`;
 
@@ -72,6 +95,8 @@ export class ArenaAudio {
   private cued: GoalSong | null = null;
   private playing: GoalSong | null = null;
   private lastSong: string | undefined;
+  /** The whole second the clock showed last frame, so each of the last ten beeps once. */
+  private clockSecond = Infinity;
   get enabled() {
     return this.active;
   }
@@ -138,10 +163,10 @@ export class ArenaAudio {
     source.start(ctx.currentTime + delay);
     return true;
   }
-  private pick(names: readonly string[], volume: number, rate = 1) {
+  private pick(names: readonly string[], volume: number, rate = 1, delay = 0) {
     const ready = names.filter((name) => this.samples.has(name));
     if (!ready.length) return false;
-    return this.sample(ready[Math.floor(Math.random() * ready.length)], volume, rate);
+    return this.sample(ready[Math.floor(Math.random() * ready.length)], volume, rate, delay);
   }
   /** `scale` quiets the skates in a slowed or held replay. */
   updateSkating(match: MatchState, scale = 1, team: Team = 0) {
@@ -176,6 +201,49 @@ export class ArenaAudio {
       ctx.currentTime,
       0.12,
     );
+  }
+  /**
+   * The last ten seconds of a period beep once a second, as EA's NHL games do. It is read off the
+   * clock rather than sent as an event, so a guest hears it on its own clock and a pause or a
+   * stoppage simply holds it.
+   */
+  updateClock(match: MatchState) {
+    const live =
+      match.phase === 'playing' && modeInfo(match.mode).timed && match.mode !== 'shootout';
+    const second = Math.ceil(match.clock);
+    if (live && match.clock > 0 && second <= 10 && second < this.clockSecond) this.beep();
+    this.clockSecond = second;
+  }
+  private beep() {
+    const ctx = this.context;
+    if (!this.active || !ctx || !this.sfx) return;
+    const now = ctx.currentTime,
+      gain = ctx.createGain();
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.32, now + 0.004);
+    gain.gain.setValueAtTime(0.32, now + 0.1);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
+    gain.connect(this.sfx);
+    // A scoreboard tone: a clean fundamental with a quieter octave above it for edge.
+    for (const [freq, level] of [
+      [1175, 1],
+      [2350, 0.18],
+    ] as const) {
+      const osc = ctx.createOscillator(),
+        partial = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      partial.gain.value = level;
+      osc.connect(partial);
+      partial.connect(gain);
+      osc.start(now);
+      osc.stop(now + 0.17);
+      osc.onended = () => {
+        osc.disconnect();
+        partial.disconnect();
+      };
+    }
+    window.setTimeout(() => gain.disconnect(), 400);
   }
   /** Loads a song and parks the playhead on the lead-in, so a goal can start it without a seek. */
   private cueGoalSong() {
@@ -304,6 +372,24 @@ export class ArenaAudio {
     }
     void this.context.resume();
   }
+  /**
+   * Body contact in three weights, so a shove does not sound like a knockdown: a shove is the
+   * heavy-bag hit played quiet and pitched up, a stagger plays it straight, and a knockdown is its
+   * own layered hit with a low boom and a board bang already in it. Along the boards the boards
+   * and glass shake behind it as well.
+   */
+  private hit(event: GameEvent, jitter: (span: number) => number) {
+    const power = event.power;
+    if (power < 0.45) {
+      this.sample('check', 0.22 + power * 0.5, jitter(0.12) * 1.18);
+      return;
+    }
+    const big = power >= 0.75;
+    if (big) this.sample('bighit', 0.9 + (power - 0.75) * 0.4, jitter(0.06));
+    else this.sample('check', 0.55 + power * 0.4, jitter(0.08));
+    if (event.x !== undefined && event.z !== undefined && byTheBoards(event.x, event.z))
+      this.pick(GLASS, big ? 0.5 : 0.45, jitter(0.08), 0.012);
+  }
   play(event: GameEvent, mode: GameMode, replay = false) {
     const jitter = (span: number) => 1 + (Math.random() - 0.5) * span;
     switch (event.type) {
@@ -315,11 +401,23 @@ export class ArenaAudio {
         );
         break;
       case 'pass':
-        this.pick(['pass', 'pass2', 'pass3'], 0.58, jitter(0.12));
+        this.pick(['pass2', 'pass3'], 0.58, jitter(0.12));
+        break;
+      case 'receive':
+        // Softer and a touch lower than the pass, so the two ends of one pass read apart.
+        this.pick(['receive', 'receive2'], 0.3 + event.power * 0.3, jitter(0.1) * 0.94);
         break;
       case 'hit':
-        if (event.power >= 0.3) this.pick(['hit'], 0.7 + event.power * 0.35, jitter(0.05));
-        else this.pick(['boards', 'save'], 0.45 + event.power, jitter(0.1));
+        this.hit(event, jitter);
+        break;
+      case 'stick':
+        this.sample('stick', 0.45 + event.power, jitter(0.14));
+        break;
+      case 'deflect':
+        this.sample('check', 0.25 + event.power * 0.4, jitter(0.2) * 1.3);
+        break;
+      case 'boards':
+        this.pick(['boards', 'save2'], 0.3 + event.power * 0.5, jitter(0.1));
         break;
       case 'post':
       case 'crossbar':

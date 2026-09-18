@@ -43,7 +43,16 @@ const GOAL_FREEZE = GOAL_BEAT / 2;
 /** A frame longer than this is clamped, so a stall never turns into a burst of catch-up steps. */
 const MAX_FRAME = 0.05;
 /** Calls that reach the pad and the camera as well as the speakers. */
-const FELT_EVENTS = new Set(['shot', 'hit', 'goal', 'post', 'crossbar', 'save']);
+const FELT_EVENTS = new Set([
+  'shot',
+  'hit',
+  'stick',
+  'deflect',
+  'goal',
+  'post',
+  'crossbar',
+  'save',
+]);
 /** Phases a person can pause from. */
 const PAUSABLE: Phase[] = ['playing', 'faceoff', 'goal'];
 
@@ -369,6 +378,7 @@ export class GameLoop {
       this.drainEvents(s);
       this.rollGoalReplay(s);
       runtime.audio.updateSkating(s, 1, runtime.myTeam);
+      runtime.audio.updateClock(s);
       this.tickPublish(delta);
       return;
     }
@@ -419,6 +429,7 @@ export class GameLoop {
     this.drainEvents(s);
     if (this.rollGoalReplay(s)) net?.publish(s, 1);
     runtime.audio.updateSkating(s, 1, runtime.myTeam);
+    runtime.audio.updateClock(s);
     this.tickPublish(delta);
   }
 }

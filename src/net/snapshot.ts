@@ -143,7 +143,7 @@ const HUMAN: readonly Field[] = [
 const MATCH: readonly Field[] = [
   { key: 'phase', kind: 'enum', values: PHASES },
   { key: 'period', kind: 'u8', scale: 1 },
-  { key: 'clock', kind: 'f32', blend: 'time' },
+  { key: 'clock', kind: 'f32', blend: 'gameClock' },
   { key: 'countdown', kind: 'f32', blend: 'time' },
   { key: 'scoreHome', kind: 'u8', scale: 1 },
   { key: 'scoreAway', kind: 'u8', scale: 1 },
@@ -184,6 +184,10 @@ const EVENT_KINDS = [
   'save',
   'faceoff',
   'horn',
+  'receive',
+  'stick',
+  'deflect',
+  'boards',
 ] as const;
 const EVENT: readonly Field[] = [
   { key: 'id', kind: 'f32' },

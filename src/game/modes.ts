@@ -23,7 +23,20 @@ export interface ModeInfo {
   timed: boolean;
   faceoff: boolean;
   periods: number;
+  /** What a period shows on the clock. */
   periodSeconds: number;
+  /** Real seconds a period takes. Less than `periodSeconds` makes the clock run fast, as EA's does. */
+  playSeconds: number;
+}
+
+/**
+ * Clock seconds per real second while the period is not in its last `realTimeFinish` seconds.
+ * The finish runs at real speed, so the rest of the period covers what is left.
+ */
+export function clockRate(info: ModeInfo) {
+  const finish = RULES.realTimeFinish;
+  if (info.playSeconds <= finish || info.periodSeconds <= finish) return 1;
+  return (info.periodSeconds - finish) / (info.playSeconds - finish);
 }
 
 export const SHOOTOUT_ROUNDS = 3;
@@ -35,7 +48,7 @@ export const MODES: ModeInfo[] = [
     title: 'SELECT TEAMS',
     eyebrow: 'EXHIBITION',
     format: '5 ON 5',
-    duration: '3 PERIODS · 5 MINUTES',
+    duration: '3 PERIODS · 3 MINUTES',
     tag: 'LOCAL MATCH',
     prompt: 'SELECT YOUR SIDE',
     play: 'PLAY GAME',
@@ -48,6 +61,7 @@ export const MODES: ModeInfo[] = [
     faceoff: true,
     periods: RULES.periods,
     periodSeconds: RULES.periodSeconds,
+    playSeconds: RULES.playSeconds,
   },
   {
     id: 'threeOnThree',
@@ -67,7 +81,8 @@ export const MODES: ModeInfo[] = [
     timed: true,
     faceoff: true,
     periods: 3,
-    periodSeconds: 180,
+    periodSeconds: RULES.periodSeconds,
+    playSeconds: 180,
   },
   {
     id: 'oneOnOne',
@@ -87,7 +102,8 @@ export const MODES: ModeInfo[] = [
     timed: true,
     faceoff: true,
     periods: 3,
-    periodSeconds: 180,
+    periodSeconds: RULES.periodSeconds,
+    playSeconds: 180,
   },
   {
     id: 'shootout',
@@ -108,6 +124,7 @@ export const MODES: ModeInfo[] = [
     faceoff: false,
     periods: 0,
     periodSeconds: 15,
+    playSeconds: 15,
   },
   {
     id: 'freeSkate',
@@ -128,6 +145,7 @@ export const MODES: ModeInfo[] = [
     faceoff: false,
     periods: 0,
     periodSeconds: RULES.periodSeconds,
+    playSeconds: RULES.playSeconds,
   },
 ];
 

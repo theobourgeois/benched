@@ -8,7 +8,12 @@ export const RINK = {
   goalHeight: 1.35,
 };
 export const RULES = {
-  periodSeconds: 300,
+  /** What a period shows on the clock. It runs faster than real time; see `clockRate`. */
+  periodSeconds: 1200,
+  /** Real seconds a 5-on-5 period takes to play. */
+  playSeconds: 180,
+  /** The last seconds of a period run at real speed, so a late rush is not over in a blink. */
+  realTimeFinish: 10,
   periods: 3,
   faceoffSeconds: 3,
   goalSeconds: 6,

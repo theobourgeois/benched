@@ -91,10 +91,18 @@ describe('snapshot round trip', () => {
       { id: 10, type: 'faceoff', power: 1 },
       { id: 11, type: 'hit', power: 0.8, x: 3.5, z: -2.25 },
       { id: 12, type: 'crossbar', power: 1, barDown: true },
+      { id: 13, type: 'receive', power: 0.4 },
+      { id: 14, type: 'boards', power: 0.6 },
     ];
     const guest = createMatch([0, 1]);
     applySnapshot(guest, encodeSnapshot(host));
-    expect(guest.events.map((e) => e.type)).toEqual(['faceoff', 'hit', 'crossbar']);
+    expect(guest.events.map((e) => e.type)).toEqual([
+      'faceoff',
+      'hit',
+      'crossbar',
+      'receive',
+      'boards',
+    ]);
     expect(guest.events[1].x).toBeCloseTo(3.5, 2);
     expect(guest.events[1].z).toBeCloseTo(-2.25, 2);
     expect(guest.events[2].barDown).toBe(true);
@@ -102,7 +110,7 @@ describe('snapshot round trip', () => {
     expect(guest.events[0].x).toBeUndefined();
     // Only what is new crosses, so nothing is played twice.
     applySnapshot(guest, encodeSnapshot(host, 11));
-    expect(guest.events.map((e) => e.id)).toEqual([12]);
+    expect(guest.events.map((e) => e.id)).toEqual([12, 13, 14]);
   });
 
   it('poses every skater onto a watching match within its quantisation', () => {

@@ -21,12 +21,6 @@ https://freesound.org/people/AudioAlchemyDesigns/sounds/826200/
 Creative Commons Attribution 4.0 International
 https://creativecommons.org/licenses/by/4.0/
 
-pass.mp3
-“Hockey Puck Slap” by jameb32, via SoundBible.
-https://soundbible.com/1556-Hockey-Puck-Slap.html
-Creative Commons Attribution 3.0 Unported
-https://creativecommons.org/licenses/by/3.0/
-
 pass2.mp3, pass3.mp3
 “Ice Hockey Sound Library_Stick Handles” by AudioAlchemyDesigns, via Freesound.
 https://freesound.org/people/AudioAlchemyDesigns/sounds/826199/
@@ -34,12 +28,48 @@ Creative Commons Attribution 4.0 International
 https://creativecommons.org/licenses/by/4.0/
 Changes: two individual stick taps extracted from the recording.
 
-hit.mp3
-“Hockey - Huge Body Check Hit Into Boards” by producerdan, via Freesound.
-https://freesound.org/people/producerdan/sounds/161996/
+receive.mp3, receive2.mp3
+“Ice Hockey Sound Library_Stick Handles” by AudioAlchemyDesigns, via Freesound.
+https://freesound.org/people/AudioAlchemyDesigns/sounds/826199/
+Creative Commons Attribution 4.0 International
+https://creativecommons.org/licenses/by/4.0/
+Changes: two further stick taps from the same take as the passes.
+
+check.mp3
+“Punching Bag Sound Effects” by qubodup, via Freesound.
+https://freesound.org/people/qubodup/sounds/53985/
 Creative Commons Zero 1.0 (CC0)
 https://creativecommons.org/publicdomain/zero/1.0/
-Changes: trimmed to the body-check impact.
+Changes: one hit extracted. Every body check plays it, pitched by how hard the hit was.
+
+bighit.mp3
+A knockdown, layered in-house from four CC0 recordings via Freesound, pitched down and saturated:
+“Punching Bag Sound Effects” by qubodup, https://freesound.org/people/qubodup/sounds/53985/
+“Hit_Impact” by gulfstreamav (low-passed), https://freesound.org/people/gulfstreamav/sounds/842508/
+“helmet clash” by Luisa_Sanchez, https://freesound.org/people/Luisa_Sanchez/sounds/816987/
+“skating rink outdoor teenagers play hockey bang boards2” by kyles, https://freesound.org/people/kyles/sounds/450741/
+Creative Commons Zero 1.0 (CC0)
+https://creativecommons.org/publicdomain/zero/1.0/
+
+glass.mp3, glass2.mp3
+“skating rink outdoor teenagers play hockey bang boards2” by kyles, via Freesound.
+https://freesound.org/people/kyles/sounds/450741/
+Creative Commons Zero 1.0 (CC0)
+https://creativecommons.org/publicdomain/zero/1.0/
+Changes: two board bangs extracted; they play behind a hit along the boards.
+
+glass3.mp3, glass4.mp3
+“door wood old with inlaid glass impact hit rattle from inside.wav” by kyles, via Freesound.
+https://freesound.org/people/kyles/sounds/452610/
+Creative Commons Zero 1.0 (CC0)
+https://creativecommons.org/publicdomain/zero/1.0/
+Changes: two impacts extracted; they play behind a hit along the boards.
+
+stick.mp3
+“hit-hockey” by Eelke, via Freesound.
+https://freesound.org/people/Eelke/sounds/266647/
+Creative Commons Attribution 4.0 International
+https://creativecommons.org/licenses/by/4.0/
 
 boards.mp3, save2.mp3
 “hockey outdoor puck hit board clean cu” by kyles, via Freesound.

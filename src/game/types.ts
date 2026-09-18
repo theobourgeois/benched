@@ -199,7 +199,25 @@ export type HumanFrames = readonly (InputFrame | null)[];
 export type SideInputs = [HumanFrames, HumanFrames];
 export interface GameEvent {
   id: number;
-  type: 'shot' | 'pass' | 'hit' | 'goal' | 'post' | 'crossbar' | 'save' | 'faceoff' | 'horn';
+  /**
+   * `hit` is always body on body; `stick` is a stick on the puck carrier's stick (poke, lift, chop),
+   * `deflect` a loose puck off a body or pad, `boards` a puck off the boards, and `receive` a moving
+   * puck settling on somebody's blade. Kept apart so each can sound like what it is.
+   */
+  type:
+    | 'shot'
+    | 'pass'
+    | 'receive'
+    | 'hit'
+    | 'stick'
+    | 'deflect'
+    | 'boards'
+    | 'goal'
+    | 'post'
+    | 'crossbar'
+    | 'save'
+    | 'faceoff'
+    | 'horn';
   power: number;
   /** Where it happened on the ice, when it was not the puck. */
   x?: number;

@@ -43,7 +43,7 @@ import {
 import { SHOT_DOWNSWING } from './actionTiming';
 import { clamp, constrainToRink, distance, hash01, normalized } from './math';
 import { createHuman, humanOn, MAX_HUMANS } from './humans';
-import { freeSkateTeam, isOnIce, modeInfo, SHOOTOUT_ROUNDS } from './modes';
+import { clockRate, freeSkateTeam, isOnIce, modeInfo, SHOOTOUT_ROUNDS } from './modes';
 import type {
   DekeSpecial,
   GameEvent,
@@ -996,7 +996,7 @@ function chopPuck(s: MatchState, p: Skater, input: InputFrame) {
   s.puck.passTo = null;
   p.cooldown = 0.4;
   p.stickReach += PHYSICS.pokeExtend;
-  emit(s, 'hit', 0.22);
+  emit(s, 'stick', 0.22);
   notice(s, 'CHOP');
 }
 function startDive(s: MatchState, p: Skater, input: InputFrame) {
@@ -1113,7 +1113,7 @@ function stickLift(s: MatchState, p: Skater) {
   s.puck.shot = false;
   s.puck.passTo = null;
   handOver(s, p);
-  emit(s, 'hit', 0.18);
+  emit(s, 'stick', 0.18);
   notice(s, 'STICK LIFT');
   return true;
 }
@@ -1379,7 +1379,7 @@ function pokeCheck(s: MatchState, p: Skater, aimX: number, aimZ: number, sweep =
   p.cooldown = 0.1;
   owner.cooldown = Math.max(owner.cooldown, PHYSICS.pokeRecover);
   clearDeke(owner);
-  emit(s, 'hit', 0.2);
+  emit(s, 'stick', 0.2);
   notice(s, 'POKE CHECK');
 }
 /**
@@ -1702,7 +1702,7 @@ function goalieStop(s: MatchState, g: Skater, contact: SaveContact) {
   p.lastTouch = g.team;
   p.lockout = 0.28;
   if (!shot) {
-    emit(s, 'hit', 0.15);
+    emit(s, 'deflect', 0.15);
     return;
   }
   notice(s, outcome.label);
@@ -1817,7 +1817,7 @@ function advancePuck(s: MatchState, dt: number) {
     if (dot < 0) {
       p.vx -= 1.72 * dot * normal.x;
       p.vz -= 1.72 * dot * normal.z;
-      if (Math.abs(dot) > 8) emit(s, 'hit', 0.15);
+      if (Math.abs(dot) > 8) emit(s, 'boards', clamp(-dot / 30, 0.15, 1));
     }
   }
   for (const player of s.skaters) {
@@ -1840,7 +1840,7 @@ function advancePuck(s: MatchState, dt: number) {
     p.shot = false;
     p.lockout = 0.18;
     p.passTo = null;
-    emit(s, 'hit', diving ? 0.35 : 0.22);
+    emit(s, 'deflect', diving ? 0.35 : 0.22);
     notice(s, diving ? 'DIVE BLOCK' : 'BLOCK');
     return;
   }
@@ -1891,10 +1891,12 @@ function advancePuck(s: MatchState, dt: number) {
         p.vz += (player.z > p.z ? -1 : 1) * 5;
         p.shot = false;
         p.lockout = 0.14;
-        emit(s, 'hit', 0.2);
+        emit(s, 'deflect', 0.2);
       }
     } else {
       if (incoming > 8 && !p.shot && p.lastTouch === player.team) player.passTimer = 0.42;
+      // A puck that arrives with pace makes a sound on the blade; one scooped off the ice does not.
+      if (incoming > 5) emit(s, 'receive', clamp(incoming / 24, 0.2, 1), player);
       p.owner = player.id;
       p.lastTouch = player.team;
       p.shot = false;
@@ -1954,7 +1956,12 @@ export function stepMatch(s: MatchState, inputs: SideInputs = [[], []], dt = RUL
     return;
   }
   if (s.phase !== 'goal' && modeInfo(s.mode).timed) {
-    s.clock = Math.max(0, s.clock - dt);
+    // Fast until the finish, then real seconds, and never skipping past the start of the finish.
+    const finish = RULES.realTimeFinish;
+    s.clock =
+      s.clock > finish
+        ? Math.max(finish, s.clock - dt * clockRate(modeInfo(s.mode)))
+        : Math.max(0, s.clock - dt);
     if (s.clock <= 0) {
       if (s.mode === 'shootout') {
         missShootout(s, 'TIME');
