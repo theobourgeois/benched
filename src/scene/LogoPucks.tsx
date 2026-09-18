@@ -7,7 +7,7 @@ import { LEAGUES } from '../game/clubs';
  * Logo pucks tumbling down behind the main menu. They get a canvas of their own, transparent over
  * the arena, so they never touch the match scene or its camera, and they unmount with the menu.
  * Press and hold one to pick it up and carry it; let go mid-swing and it is thrown, tumbling.
- * The wheel spins a held puck on the spot.
+ * The wheel spins a held puck on the spot, and pucks that touch bounce off each other.
  */
 
 const COUNT = 7;
@@ -329,6 +329,74 @@ const turn = new THREE.Quaternion();
 const rollAxis = new THREE.Vector3();
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
 
+/**
+ * How much of the diameter counts when two pucks touch. A tumbling puck shows anything from its
+ * full face to its edge, so a little under the radius reads as contact without early bounces.
+ */
+const CONTACT = 0.82;
+/** How much speed a bounce keeps along the line between the two. */
+const RESTITUTION = 0.8;
+
+/**
+ * Bounces pucks that overlap on screen. They fall at different depths, so they meet where they
+ * look like they meet: each is measured in screen units (world over half the view height at its
+ * depth), and the result is scaled back into its own plane. A held puck is an immovable object
+ * moving at the pointer's speed, so it knocks the others about and is never knocked itself.
+ */
+function collide(fallers: Faller[], grab: Grab | null) {
+  // A hand that has stopped is not still swinging, whatever speed it last had.
+  const swing = grab && performance.now() - grab.time < 80 ? 1 : 0;
+  for (let i = 0; i < fallers.length; i++) {
+    const a = fallers[i];
+    const ha = halfHeightAt(a.z);
+    const aHeld = grab?.index === i;
+    for (let j = i + 1; j < fallers.length; j++) {
+      const b = fallers[j];
+      const hb = halfHeightAt(b.z);
+      const bHeld = grab?.index === j;
+      const dx = (b.x + Math.sin(b.phase) * b.sway) / hb - (a.x + Math.sin(a.phase) * a.sway) / ha;
+      const dy = b.y / hb - a.y / ha;
+      const reach =
+        (RADIUS * CONTACT * a.scale * (1 + a.lift * 0.12)) / ha +
+        (RADIUS * CONTACT * b.scale * (1 + b.lift * 0.12)) / hb;
+      const distance = Math.hypot(dx, dy);
+      if (distance >= reach || distance < 1e-6) continue;
+      // Bigger means nearer and heavier; the held one does not give at all.
+      const invA = aHeld ? 0 : 1 / (a.scale * a.scale);
+      const invB = bHeld ? 0 : 1 / (b.scale * b.scale);
+      const invSum = invA + invB;
+      if (invSum === 0) continue;
+      const nx = dx / distance;
+      const ny = dy / distance;
+      // Push them apart first, so a slow graze cannot leave them stuck inside each other.
+      const overlap = reach - distance;
+      a.x -= nx * overlap * (invA / invSum) * ha;
+      a.y -= ny * overlap * (invA / invSum) * ha;
+      b.x += nx * overlap * (invB / invSum) * hb;
+      b.y += ny * overlap * (invB / invSum) * hb;
+      const avx = (aHeld ? grab!.vx * swing : a.vx) / ha;
+      const avy = (aHeld ? grab!.vy * swing : a.vy) / ha;
+      const bvx = (bHeld ? grab!.vx * swing : b.vx) / hb;
+      const bvy = (bHeld ? grab!.vy * swing : b.vy) / hb;
+      const closing = (bvx - avx) * nx + (bvy - avy) * ny;
+      if (closing >= 0) continue;
+      const impulse = (-(1 + RESTITUTION) * closing) / invSum;
+      if (!aHeld) knock(a, -nx * impulse * invA * ha, -ny * impulse * invA * ha);
+      if (!bHeld) knock(b, nx * impulse * invB * hb, ny * impulse * invB * hb);
+    }
+  }
+}
+
+/** Changes a puck's speed by a bounce and, if the hit was a real one, tumbles it that way. */
+function knock(f: Faller, dvx: number, dvy: number) {
+  f.vx += dvx;
+  f.vy += dvy;
+  const speed = Math.hypot(f.vx, f.vy);
+  if (Math.hypot(dvx, dvy) < 1.5 || speed < 1e-3) return;
+  f.axis.set(-f.vy, f.vx, 0).normalize();
+  f.spin = Math.min(MAX_SPIN, Math.max(Math.abs(f.spin), speed / RADIUS / 2));
+}
+
 /** The point under the pointer in the plane the puck falls in. */
 function pointerAt(canvas: HTMLCanvasElement, clientX: number, clientY: number, z: number) {
   const rect = canvas.getBoundingClientRect();
@@ -472,6 +540,7 @@ function Pucks() {
     // A backgrounded tab hands back one huge delta; do not let every puck jump the screen.
     const dt = Math.min(delta, 0.05);
     const ease = 1 - Math.exp(-dt / THROW_HOLD);
+    if (started.current) collide(fallers, grab.current);
     fallers.forEach((f, i) => {
       const mesh = meshes.current[i];
       if (!mesh) return;
