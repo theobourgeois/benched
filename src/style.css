@@ -429,7 +429,8 @@ a {
 .logo-pucks {
   position: absolute;
   inset: 0;
-  pointer-events: none;
+  /* The pucks can be grabbed; the menu column sits above this layer, so it still gets its clicks. */
+  touch-action: none;
 }
 .main-column {
   position: relative;
