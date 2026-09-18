@@ -323,7 +323,7 @@ export function GameScene() {
             />
             <directionalLight position={[-22, 16, -10]} intensity={1.1} color="#d6e6ff" />
             <Suspense fallback={null}>
-              <Arena />
+              <Arena iceLogo={match.teams[0].logoLight} />
               <Puck />
               <ShotAimHud marker={shotAim} />
               <PassAim seat={0} />

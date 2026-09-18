@@ -1,6 +1,7 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { memo, Suspense, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { useLoader } from '@react-three/fiber';
 import * as THREE from 'three';
-import { makeIceTexture } from './textures';
+import { makeIceTexture, SvgTextureLoader } from './textures';
 import { RINK } from '../game/config';
 function outline(extra = 0) {
   const points: THREE.Vector2[] = [],
@@ -219,9 +220,9 @@ function Goal({ sign }: { sign: number }) {
     </group>
   );
 }
-export const Arena = memo(function Arena() {
-  const ice = useMemo(() => makeIceTexture(), []);
-  useEffect(() => () => ice.dispose(), [ice]);
+export const Arena = memo(function Arena({ iceLogo }: { iceLogo: string }) {
+  const iceFallback = useMemo(() => makeIceTexture(), []);
+  useEffect(() => () => iceFallback.dispose(), [iceFallback]);
   const points = useMemo(() => outline(), []);
   const shape = useMemo(() => new THREE.Shape(points), [points]);
   return (
@@ -234,7 +235,10 @@ export const Arena = memo(function Arena() {
         <extrudeGeometry args={[shape, { depth: 0.25, bevelEnabled: false, steps: 1 }]} />
         <meshStandardMaterial color="#b6c5c5" />
       </mesh>
-      <IceSheet map={ice} />
+      {/* Bare ice until the crest arrives, so the rink never waits on a logo. */}
+      <Suspense fallback={<IceSheet map={iceFallback} />}>
+        <IceSheetWithLogo src={iceLogo} />
+      </Suspense>
       {/* Corner masks cover the rectangular ice texture outside the rounded playing surface. */}
       {[-1, 1].flatMap((x) => [-1, 1].map((z) => <CornerMask key={`${x}:${z}`} x={x} z={z} />))}
       <Rails points={points} />
@@ -279,6 +283,12 @@ function IceSheet({ map }: { map: THREE.Texture }) {
       <meshStandardMaterial map={map} roughness={0.28} metalness={0.12} />
     </mesh>
   );
+}
+function IceSheetWithLogo({ src }: { src: string }) {
+  const logo = useLoader(SvgTextureLoader, src);
+  const ice = useMemo(() => makeIceTexture(logo.image), [logo]);
+  useEffect(() => () => ice.dispose(), [ice]);
+  return <IceSheet map={ice} />;
 }
 function CornerMask({ x, z }: { x: number; z: number }) {
   const shape = useMemo(() => {

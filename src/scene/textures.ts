@@ -13,7 +13,7 @@ export function canvasTexture(
   texture.anisotropy = 8;
   return texture;
 }
-export function makeIceTexture() {
+export function makeIceTexture(logo?: CanvasImageSource) {
   return canvasTexture(2048, 1024, (ctx) => {
     ctx.fillStyle = '#e3edf3';
     ctx.fillRect(0, 0, 2048, 1024);
@@ -99,6 +99,18 @@ export function makeIceTexture() {
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
+    }
+    // The home crest at centre ice, turned to face the broadcast camera and let the lines show through.
+    if (logo) {
+      const iw = Number((logo as { width?: number }).width) || 960;
+      const ih = Number((logo as { height?: number }).height) || 640;
+      ctx.save();
+      ctx.globalAlpha = 0.58;
+      ctx.rotate(Math.PI / 2);
+      const width = 10;
+      const height = width * (ih / iw);
+      ctx.drawImage(logo, -width / 2, -height / 2, width, height);
+      ctx.restore();
     }
   });
 }

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
+import { LEAGUES } from '../game/clubs';
 
 /*
  * Logo pucks tumbling down behind the main menu. They get a canvas of their own, transparent over
@@ -15,6 +16,7 @@ const CAMERA_Z = 22;
 const FOV = 38;
 const HALF_TAN = Math.tan(THREE.MathUtils.degToRad(FOV / 2));
 const LOGO_FONT = 'italic 900 330px "Barlow Condensed"';
+const FACE_SIZE = 1024;
 
 /** Seeded so the scuffs are the same every visit; they are texture, not information. */
 function scuffs(seed: number) {
@@ -25,9 +27,9 @@ function scuffs(seed: number) {
   };
 }
 
-/** Black rubber face, worn pale towards the rim, with the wordmark across it. */
-function drawFace(ctx: CanvasRenderingContext2D, size: number, logo: boolean) {
-  const rand = scuffs(logo ? 7 : 13);
+/** Black rubber worn pale towards the rim: the face every print sits on. */
+function drawRubber(ctx: CanvasRenderingContext2D, size: number) {
+  const rand = scuffs(7);
   const c = size / 2;
   ctx.clearRect(0, 0, size, size);
   ctx.fillStyle = '#121314';
@@ -52,24 +54,101 @@ function drawFace(ctx: CanvasRenderingContext2D, size: number, logo: boolean) {
     ctx.lineTo(x + Math.cos(dir) * len, y + Math.sin(dir) * len);
     ctx.stroke();
   }
-  if (!logo) return;
+}
+
+/** Wears a print, so it sits in the rubber rather than floating over it. */
+function wear(ctx: CanvasRenderingContext2D, size: number) {
+  const rand = scuffs(13);
   ctx.save();
-  ctx.translate(c, c);
-  ctx.font = LOGO_FONT;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  const width = ctx.measureText('hcky.io').width;
-  const fit = Math.min(1, (size * 0.8) / width);
-  ctx.scale(fit, fit);
-  ctx.fillStyle = '#f4f6f7';
-  ctx.fillText('hcky.io', 0, size * 0.02);
-  // Wear the print too, so the letters sit in the rubber rather than float over it.
   ctx.globalCompositeOperation = 'source-atop';
-  for (let i = 0; i < 260; i++) {
-    ctx.fillStyle = `rgba(18,19,20,${0.2 + rand() * 0.5})`;
-    ctx.fillRect((rand() - 0.5) * width, (rand() - 0.5) * 360, 1 + rand() * 4, 1 + rand() * 3);
+  for (let i = 0; i < 700; i++) {
+    ctx.fillStyle = `rgba(18,19,20,${0.15 + rand() * 0.4})`;
+    ctx.fillRect(rand() * size, rand() * size, 1 + rand() * 4, 1 + rand() * 3);
   }
   ctx.restore();
+}
+
+function drawWordmark(ctx: CanvasRenderingContext2D, size: number) {
+  const print = layer(size);
+  print.save();
+  print.translate(size / 2, size / 2);
+  print.font = LOGO_FONT;
+  print.textAlign = 'center';
+  print.textBaseline = 'middle';
+  const fit = Math.min(1, (size * 0.8) / print.measureText('hcky.io').width);
+  print.scale(fit, fit);
+  print.fillStyle = '#f4f6f7';
+  print.fillText('hcky.io', 0, size * 0.02);
+  print.restore();
+  wear(print, size);
+  ctx.drawImage(print.canvas, 0, 0);
+}
+
+function drawCrest(ctx: CanvasRenderingContext2D, size: number, art: HTMLCanvasElement) {
+  const print = layer(size);
+  // As large as the face allows inside the worn rim: a circle's inscribed box, less a little.
+  const box = size * 0.66;
+  const aspect = art.width / art.height;
+  const w = aspect >= 1 ? box : box * aspect;
+  const h = aspect >= 1 ? box / aspect : box;
+  print.drawImage(art, (size - w) / 2, (size - h) / 2, w, h);
+  wear(print, size);
+  ctx.drawImage(print.canvas, 0, 0);
+}
+
+/** The crest SVGs pad their artwork generously; cut each down to the pixels it actually paints. */
+function trimmed(image: HTMLImageElement) {
+  const scan = Object.assign(document.createElement('canvas'), {
+    width: image.width,
+    height: image.height,
+  }).getContext('2d', { willReadFrequently: true })!;
+  scan.drawImage(image, 0, 0);
+  const { data, width, height } = scan.getImageData(0, 0, image.width, image.height);
+  let left = width,
+    right = -1,
+    top = height,
+    bottom = -1;
+  for (let y = 0; y < height; y++)
+    for (let x = 0; x < width; x++)
+      if (data[(y * width + x) * 4 + 3] > 8) {
+        if (x < left) left = x;
+        if (x > right) right = x;
+        if (y < top) top = y;
+        if (y > bottom) bottom = y;
+      }
+  if (right < left) return scan.canvas;
+  const out = Object.assign(document.createElement('canvas'), {
+    width: right - left + 1,
+    height: bottom - top + 1,
+  });
+  out.getContext('2d')!.drawImage(scan.canvas, -left, -top);
+  return out;
+}
+
+function layer(size: number) {
+  return Object.assign(document.createElement('canvas'), { width: size, height: size }).getContext(
+    '2d',
+  )!;
+}
+
+/**
+ * The league crests are SVGs with a viewBox but no size, which a canvas will not draw
+ * reliably, so each is fetched and given one before it is loaded as an image.
+ */
+async function loadCrest(url: string) {
+  const svg = await (await fetch(url)).text();
+  const box = /viewBox="[\d.-]+ [\d.-]+ ([\d.]+) ([\d.]+)"/.exec(svg);
+  const [w, h] = box ? [Number(box[1]), Number(box[2])] : [512, 512];
+  const sized = svg.replace('<svg', `<svg width="${w}" height="${h}"`);
+  const blob = URL.createObjectURL(new Blob([sized], { type: 'image/svg+xml' }));
+  try {
+    const image = new Image();
+    image.src = blob;
+    await image.decode();
+    return image;
+  } finally {
+    URL.revokeObjectURL(blob);
+  }
 }
 
 /** The side band: plain rubber with the knurled grip ring pressed into the middle of it. */
@@ -85,54 +164,100 @@ function drawSide(ctx: CanvasRenderingContext2D, w: number, h: number) {
   }
 }
 
-function usePuckMaterials() {
-  const materials = useMemo(() => {
-    const canvas = (w: number, h: number) =>
-      Object.assign(document.createElement('canvas'), { width: w, height: h });
-    const top = canvas(1024, 1024);
-    const bottom = canvas(512, 512);
-    const side = canvas(1024, 128);
-    const texture = (source: HTMLCanvasElement) => {
-      const t = new THREE.CanvasTexture(source);
-      t.colorSpace = THREE.SRGBColorSpace;
-      t.anisotropy = 4;
-      return t;
-    };
-    const topMap = texture(top);
-    const bottomMap = texture(bottom);
-    const sideMap = texture(side);
-    const draw = () => {
-      drawFace(top.getContext('2d')!, 1024, true);
-      drawFace(bottom.getContext('2d')!, 512, true);
-      drawSide(side.getContext('2d')!, 1024, 128);
-      topMap.needsUpdate = bottomMap.needsUpdate = sideMap.needsUpdate = true;
-    };
-    draw();
-    // The wordmark font may still be on its way; redraw once it is here.
-    document.fonts
-      .load(LOGO_FONT)
-      .then(draw)
-      .catch(() => {});
-    const rubber = (map: THREE.Texture, bumpMap?: THREE.Texture) =>
-      new THREE.MeshStandardMaterial({
-        map,
-        bumpMap,
-        bumpScale: 2,
-        roughness: 0.86,
-        metalness: 0,
-      });
-    // CylinderGeometry's groups: side, top cap, bottom cap.
-    return [rubber(sideMap, sideMap), rubber(topMap), rubber(bottomMap)];
+function canvasTexture(source: HTMLCanvasElement) {
+  const t = new THREE.CanvasTexture(source);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 4;
+  return t;
+}
+
+const rubber = (map: THREE.Texture, bumpMap?: THREE.Texture) =>
+  new THREE.MeshStandardMaterial({ map, bumpMap, bumpScale: 2, roughness: 0.86, metalness: 0 });
+
+/** A club's crest, fetched and trimmed once a session however many pucks wear it. */
+const crestArt = new Map<string, Promise<HTMLCanvasElement>>();
+function crestFor(url: string) {
+  let art = crestArt.get(url);
+  if (!art) {
+    art = loadCrest(url).then(trimmed);
+    // A failure should not stick: the next puck to pick this club tries again.
+    art.catch(() => crestArt.delete(url));
+    crestArt.set(url, art);
+  }
+  return art;
+}
+
+/** What a puck's faces carry: the wordmark, or the crest at this logo URL. */
+type Print = 'wordmark' | string;
+
+/** This share of pucks carry the wordmark; the rest wear a club's crest. */
+const WORDMARK_SHARE = 0.35;
+const CREST_URLS = LEAGUES.flatMap((league) => league.clubs.map((club) => club.logo));
+
+/** Any club at all, bar the ones already falling, so the same crest never shows twice at once. */
+function pickPrint(showing: readonly { face: { print: Print } }[]): Print {
+  if (Math.random() < WORDMARK_SHARE) return 'wordmark';
+  const free = CREST_URLS.filter((url) => !showing.some((other) => other.face.print === url));
+  const pool = free.length ? free : CREST_URLS;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+/**
+ * Each puck owns its face texture and repaints it when it comes back round the top with a new
+ * print, so every club in the league can turn up without keeping a texture for each. Both caps
+ * share the face; CylinderGeometry's groups are side, top, bottom.
+ */
+class Face {
+  readonly ctx = layer(FACE_SIZE);
+  readonly map = canvasTexture(this.ctx.canvas);
+  readonly material = rubber(this.map);
+  print: Print = '';
+  private token = 0;
+
+  show(print: Print) {
+    this.print = print;
+    const token = ++this.token;
+    drawRubber(this.ctx, FACE_SIZE);
+    if (print === 'wordmark') {
+      drawWordmark(this.ctx, FACE_SIZE);
+    } else {
+      crestFor(print)
+        .then((art) => {
+          // The puck may have gone round again while this crest loaded.
+          if (token !== this.token) return;
+          drawCrest(this.ctx, FACE_SIZE, art);
+          this.map.needsUpdate = true;
+        })
+        // A crest that fails to load leaves plain rubber, which is still a puck.
+        .catch(() => {});
+    }
+    this.map.needsUpdate = true;
+  }
+
+  dispose() {
+    this.map.dispose();
+    this.material.dispose();
+  }
+}
+
+function useSideMaterial() {
+  const side = useMemo(() => {
+    const ctx = Object.assign(document.createElement('canvas'), {
+      width: 1024,
+      height: 128,
+    }).getContext('2d')!;
+    drawSide(ctx, 1024, 128);
+    const map = canvasTexture(ctx.canvas);
+    return rubber(map, map);
   }, []);
   useEffect(
-    () => () =>
-      materials.forEach((m) => {
-        m.map?.dispose();
-        m.dispose();
-      }),
-    [materials],
+    () => () => {
+      side.map?.dispose();
+      side.dispose();
+    },
+    [side],
   );
-  return materials;
+  return side;
 }
 
 type Faller = {
@@ -146,6 +271,7 @@ type Faller = {
   axis: THREE.Vector3;
   spin: number;
   scale: number;
+  face: Face;
 };
 
 const halfHeightAt = (z: number) => (CAMERA_Z - z) * HALF_TAN;
@@ -170,12 +296,13 @@ const geometry = new THREE.CylinderGeometry(RADIUS, RADIUS, THICKNESS, 64, 1);
 const turn = new THREE.Quaternion();
 
 function Pucks() {
-  const materials = usePuckMaterials();
+  const side = useSideMaterial();
   const aspect = useThree((s) => s.size.width / Math.max(1, s.size.height));
   const meshes = useRef<(THREE.Mesh | null)[]>([]);
   // Spawned once; a resize only changes where later pucks appear.
-  const [fallers] = useState(() =>
-    Array.from({ length: COUNT }, () => {
+  const [fallers] = useState(() => {
+    const list: Faller[] = [];
+    for (let i = 0; i < COUNT; i++) {
       const f: Faller = {
         x: 0,
         y: 0,
@@ -187,11 +314,35 @@ function Pucks() {
         axis: new THREE.Vector3(),
         spin: 0,
         scale: 1,
+        face: new Face(),
       };
       spawn(f, aspect, true);
-      return f;
-    }),
+      f.face.show(pickPrint(list));
+      list.push(f);
+    }
+    return list;
+  });
+  const materials = useMemo(
+    () => fallers.map((f) => [side, f.face.material, f.face.material]),
+    [fallers, side],
   );
+  useEffect(() => {
+    // The wordmark font may still be on its way; repaint those faces once it is here.
+    let live = true;
+    document.fonts
+      .load(LOGO_FONT)
+      .then(() => {
+        if (!live) return;
+        fallers.forEach((f) => {
+          if (f.face.print === 'wordmark') f.face.show('wordmark');
+        });
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+      fallers.forEach((f) => f.face.dispose());
+    };
+  }, [fallers]);
   const started = useRef(false);
 
   useFrame((_, delta) => {
@@ -206,7 +357,11 @@ function Pucks() {
       }
       f.y -= f.fall * dt;
       f.phase += f.swayRate * dt;
-      if (f.y < -halfHeightAt(f.z) - 2) spawn(f, aspect, false);
+      if (f.y < -halfHeightAt(f.z) - 2) {
+        spawn(f, aspect, false);
+        // Off screen above, so the new print is painted before anyone sees it.
+        f.face.show(pickPrint(fallers));
+      }
       mesh.position.set(f.x + Math.sin(f.phase) * f.sway, f.y, f.z);
       mesh.scale.setScalar(f.scale);
       turn.setFromAxisAngle(f.axis, f.spin * dt);
@@ -224,7 +379,7 @@ function Pucks() {
             meshes.current[i] = m;
           }}
           geometry={geometry}
-          material={materials}
+          material={materials[i]}
         />
       ))}
     </>
