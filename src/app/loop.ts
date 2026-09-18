@@ -299,7 +299,7 @@ export class GameLoop {
         // zeros the countdown — or it never catches up enough to open or close its overlay.
         net.publish(s, dt);
       } else if (net) {
-        net.view(s, dt);
+        net.view(s, dt, runtime.myTeam);
         if (followLiveGoalReplay(s)) this.drainEvents(s);
       }
       runtime.audio.updateSkating(viewMatch(), Math.min(1, viewTimeScale()), runtime.myTeam);
@@ -363,7 +363,9 @@ export class GameLoop {
       // so there is no second version of the match to disagree with the host's.
       // Presses are kept until a frame actually goes out, so none is lost between sends.
       if (net.sendInput(mySeats[0] ?? EMPTY_INPUT)) mySeats[0] = noEdges(mySeats[0] ?? EMPTY_INPUT);
-      if (net.view(s, dt) && RECORDED.includes(s.phase)) this.record(s);
+      // The stick as it is this frame goes into the guess too, before it has even been sent.
+      if (net.view(s, dt, runtime.myTeam, mySeats[0] ?? null) && RECORDED.includes(s.phase))
+        this.record(s);
       this.drainEvents(s);
       this.rollGoalReplay(s);
       runtime.audio.updateSkating(s, 1, runtime.myTeam);

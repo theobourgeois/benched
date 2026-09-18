@@ -69,9 +69,13 @@ and the room worker compiles with only `src/net/protocol.ts` and `src/game/types
 
 Online: the host runs the loop as above and `net.publish`es a binary snapshot at 60 Hz; the
 guest runs no simulation, sends its `InputFrame`s, and `net.view` poses the match a few
-hundredths of a second behind the newest snapshot. Match events cross with snapshots, so the
-guest hears the whistle when the host does. `src/app/online.ts` is the only file that joins a
-`NetSession` to the runtime: every way into a room goes through `connectToRoom`.
+hundredths of a second behind the newest snapshot. Then `src/net/predict.ts` moves the guest's
+own skater ahead: it re-runs `predictSkater` (the skating-and-stick slice of a step) from the
+newest snapshot through every input the host's echo has not covered, and eases corrections in.
+Anything new that moves a controlled skater must be in that slice or the guest will feel it
+late. Match events cross with snapshots, so the guest hears the whistle when the host does.
+`src/app/online.ts` is the only file that joins a `NetSession` to the runtime: every way into a
+room goes through `connectToRoom`.
 
 ## Adding things
 

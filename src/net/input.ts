@@ -51,6 +51,8 @@ const FIELDS: readonly Field[] = [
 ];
 
 export const INPUT_BYTES = sizeOf(FIELDS);
+/** Input frames a second from the guest. The host steps at 120 and holds the last one between. */
+export const INPUT_HZ = 60;
 /** An input frame with the sender's clock and the snapshot stamp it is answering. */
 export interface StampedInput {
   stamp: number;

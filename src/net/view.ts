@@ -31,9 +31,14 @@ const STEPS_PER_SNAPSHOT = STEPS_PER_SECOND / SNAPSHOT_HZ;
 export const DELAY_MIN = 2 * STEPS_PER_SNAPSHOT;
 export const DELAY_START = 3 * STEPS_PER_SNAPSHOT;
 export const DELAY_MAX = 0.25 * STEPS_PER_SECOND;
-/** Steps the buffer grows by each time it runs dry, and shrinks by each second it does not. */
+/**
+ * Steps the buffer grows by each time it runs dry, and shrinks by each second it does not. The
+ * ease is quick on purpose: the whole climb from the floor to the ceiling comes back in under
+ * ten seconds, so one rough patch does not leave the guest a quarter of a second behind for
+ * the rest of the period. A line that keeps starving keeps re-growing it.
+ */
 const DELAY_GROW = STEPS_PER_SNAPSHOT;
-const DELAY_EASE = 0.5;
+const DELAY_EASE = 3;
 /** Further off than this and the view jumps to where it should be rather than racing there. */
 const RESYNC_STEPS = 0.5 * STEPS_PER_SECOND;
 /** Snapshots kept before the oldest are dropped, if the view somehow stops consuming them. */
@@ -75,6 +80,10 @@ export class SnapshotView {
   }
   get buffered() {
     return this.buffer.length;
+  }
+  /** The last thing the host said, whatever moment is being drawn. */
+  get newest(): Snapshot | null {
+    return this.buffer.at(-1)?.snap ?? null;
   }
 
   /** A new match is a new timeline: nothing heard about the old one applies to it. */

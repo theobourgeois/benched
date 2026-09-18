@@ -60,11 +60,14 @@ are ready; back takes you back to not ready, and out of the room after that. Exh
 1-on-1 and shootout are playable online; free skate is practice and stays local.
 
 One browser runs the simulation and the other draws what it is told, so there is no second
-simulation to disagree with the first. The host has a small latency advantage, which is the
-trade for never having to reconcile two versions of a match. The guest draws a few hundredths
-of a second behind the newest thing it has heard, blended between snapshots, so the match moves
-every frame rather than every packet. There is no pause online — the other person is still
-playing — so the pause button asks whether you mean to leave.
+simulation to disagree with the first. The guest draws a few hundredths of a second behind the
+newest thing it has heard, blended between snapshots, so the match moves every frame rather
+than every packet. The one thing the guest does work out for itself is its own skater: it runs
+the skating model forward from the host's newest word through the presses the host has not
+answered yet, so pushes, turns and the stick respond the moment the stick moves, as they do for
+the host. Contact, the puck and every call still come from the host, and when the host's word
+disagrees with the guess the difference is eased in over a few frames. There is no pause online
+— the other person is still playing — so the pause button asks whether you mean to leave.
 
 Play traffic goes straight between the two browsers when it can: the host offers a WebRTC data
 channel through the room, and once it opens the room drops out of the play. Two networks that
@@ -179,6 +182,7 @@ src/
     directory.ts   The online screen's line to the directory: live counts, the list, where to go
     snapshot.ts    Binary snapshot of a moment of a match, and posing a match from one
     view.ts        Guest-side interpolation a little behind the newest snapshot
+    predict.ts     Guest-side prediction of its own skater through the presses the host has not answered
     peer.ts        WebRTC data channel between the two browsers
     wire.ts        Field encoders
   input/

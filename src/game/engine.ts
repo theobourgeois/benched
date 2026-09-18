@@ -2158,5 +2158,57 @@ export function stepMatch(s: MatchState, inputs: SideInputs = [[], []], dt = RUL
   for (const p of s.skaters) if (p.pendingShot) advancePendingShot(s, p, dt);
   advancePuck(s, dt);
 }
+/**
+ * One person's own skating and stick for one step, on its own: what a watcher can work out
+ * about its skater before the host says. It is the slice of `stepMatch` that depends only on
+ * the stick in that person's hands, so run from the host's last word through the presses the
+ * host has not answered yet it lands where the host will. Nothing here touches anyone else,
+ * the puck, or fires an action: contact, shots and calls are the host's alone.
+ */
+export function predictSkater(
+  s: MatchState,
+  p: Skater,
+  input: InputFrame,
+  human: Human,
+  dt: number,
+  carrying: boolean,
+) {
+  if (p.role === 'G') return;
+  p.cooldown = Math.max(0, p.cooldown - dt);
+  if (p.checkTimer > 0) p.checkTimer = Math.max(0, p.checkTimer - dt);
+  p.downTimer = Math.max(0, p.downTimer - dt);
+  p.stumbleTimer = Math.max(0, p.stumbleTimer - dt);
+  p.diveTimer = Math.max(0, p.diveTimer - dt);
+  const drag = !!input.toeDrag && carrying;
+  const pull = drag ? clamp(input.stickY, 0, 1) : 0;
+  if (!p.pendingShot) advanceStick(p, input.stickX, pull, dt, carrying);
+  const grip = activeDeke(p)
+    ? PHYSICS.dekeGrip
+    : carrying
+      ? PHYSICS.edgeGrip - clamp(Math.abs(p.stickSideVel) * 0.6, 0, 4)
+      : PHYSICS.edgeGrip;
+  if (carrying && Math.hypot(p.vx, p.vz) < 2.8)
+    p.stride += dt * (1.8 + Math.abs(p.stickSide - STICK.restSide) * 1.2);
+  if (p.downTimer > 0 || p.diveTimer > 0 || cellyRagdoll(p)) {
+    moveSkater(p, 0, 0, false, false, dt);
+    if (p.downTimer > 0 || cellyRagdoll(p)) p.rush = 0;
+    return;
+  }
+  const skate = controlledSkate(s, p, input, human);
+  const scales = backcheckScales(s, p, skate.push, 1);
+  moveSkater(
+    p,
+    skate.x,
+    skate.z,
+    skate.hustle,
+    skate.backskate,
+    dt,
+    carrying && !isBreakawayRush(s),
+    grip,
+    scales.push,
+    scales.speed,
+  );
+  updateRush(p, dt);
+}
 export const isLivePhase = (phase: Phase) =>
   ['playing', 'faceoff', 'goal', 'paused'].includes(phase);

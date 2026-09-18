@@ -355,6 +355,23 @@ export function decodeSnapshot(buffer: ArrayBuffer): Snapshot {
 export const snapshotTick = (snap: Snapshot) => snap.match[MATCH_INDEX.tick] as number;
 export const snapshotStamp = (snap: Snapshot) => snap.match[MATCH_INDEX.stamp] as number;
 export const snapshotEcho = (snap: Snapshot) => snap.match[MATCH_INDEX.echo] as number;
+export const snapshotPhase = (snap: Snapshot) => snap.match[MATCH_INDEX.phase] as Phase;
+export const snapshotHitstop = (snap: Snapshot) => snap.match[MATCH_INDEX.hitstop] as number;
+const PUCK_INDEX = Object.fromEntries(PUCK_FIELDS.map((f, i) => [f.key, i]));
+const HUMAN_INDEX = Object.fromEntries(HUMAN.map((f, i) => [f.key, i]));
+export const snapshotPuckOwner = (snap: Snapshot) => {
+  const owner = snap.puck[PUCK_INDEX.owner] as number;
+  return owner < 0 ? null : owner;
+};
+/** Which skater a seat holds and whether it is auto-skating, or null when nobody sits there. */
+export function snapshotHuman(snap: Snapshot, team: Team, seat: number) {
+  const row = snap.sides[team].humans[seat];
+  if (!row) return null;
+  return {
+    controlled: row[HUMAN_INDEX.controlled] as number,
+    autoSkate: row[HUMAN_INDEX.autoSkate] as boolean,
+  };
+}
 
 const blendAll = (
   fields: readonly Field[],
@@ -468,28 +485,32 @@ export function poseSnapshot(s: MatchState, snap: Snapshot) {
   s.puck.lockout = puck.lockout as number;
   s.puck.shot = puck.shot as boolean;
   s.puck.passTo = (puck.passTo as number) < 0 ? null : (puck.passTo as number);
-  s.skaters.forEach((p, i) => {
-    const raw = snap.skaters[i];
-    if (!raw) return;
-    const values = byKey(SKATER, raw);
-    for (const field of SKATER) {
-      if (field.key.startsWith('pending')) continue;
-      (p as unknown as Record<string, unknown>)[field.key] = values[field.key];
-    }
-    p.pendingShot = values.pendingShot
-      ? {
-          timer: values.pendingTimer as number,
-          load: values.pendingLoad as number,
-          power: values.pendingPower as number,
-          aim: values.pendingAim as number,
-          height: values.pendingHeight as number,
-          tick: values.pendingTick as number,
-        }
-      : null;
-    // A buffered check is the host's own business; it never reaches the blade on a watcher.
-    p.queuedCheck = null;
-  });
+  s.skaters.forEach((p, i) => poseSkater(p, snap, i));
   s.events = snap.events;
+}
+
+/** Pose one skater on what a snapshot says about the roster slot `i`. False if it has no row. */
+export function poseSkater(p: Skater, snap: Snapshot, i: number): boolean {
+  const raw = snap.skaters[i];
+  if (!raw) return false;
+  const values = byKey(SKATER, raw);
+  for (const field of SKATER) {
+    if (field.key.startsWith('pending')) continue;
+    (p as unknown as Record<string, unknown>)[field.key] = values[field.key];
+  }
+  p.pendingShot = values.pendingShot
+    ? {
+        timer: values.pendingTimer as number,
+        load: values.pendingLoad as number,
+        power: values.pendingPower as number,
+        aim: values.pendingAim as number,
+        height: values.pendingHeight as number,
+        tick: values.pendingTick as number,
+      }
+    : null;
+  // A buffered check is the host's own business; it never reaches the blade on a watcher.
+  p.queuedCheck = null;
+  return true;
 }
 
 /** Pose a match straight onto what is in the buffer. */

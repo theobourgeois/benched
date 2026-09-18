@@ -2,7 +2,8 @@ import PartySocket from 'partysocket';
 import { EMPTY_INPUT } from '../game/config';
 import type { GameMode, InputFrame, MatchState, Team } from '../game/types';
 import { mergeEdges, noEdges } from '../input/frames';
-import { decodeInput, encodeInput } from './input';
+import { decodeInput, encodeInput, INPUT_HZ } from './input';
+import { Predictor } from './predict';
 import {
   decodeSnapshot,
   encodeSnapshot,
@@ -68,9 +69,7 @@ const LINK_RETRY_MS = 8_000;
 const LINK_RETRY_MAX_MS = 60_000;
 /** A handshake or a stalled line gets this long to settle before it is replaced. */
 const LINK_SETTLE_MS = 12_000;
-/** Input frames a second from the guest. The host steps at 120 and holds the last one between. */
-export const INPUT_HZ = 60;
-export { SNAPSHOT_HZ };
+export { INPUT_HZ, SNAPSHOT_HZ };
 
 /** What the corner of the screen can say about the connection. */
 export interface NetStats {
@@ -82,6 +81,8 @@ export interface NetStats {
   delay: number;
   /** Guest: times it caught up with the newest snapshot and had to wait, since the puck dropped. */
   starved: number;
+  /** Guest: how far ahead of the host's word its own skater is drawn, in milliseconds. */
+  ahead: number;
   /** Whether play traffic is going straight to the other browser rather than through the room. */
   direct: boolean;
 }
@@ -103,7 +104,7 @@ export class NetSession {
   private watchers = new Set<() => void>();
   /** Called when the host drops the puck, on both ends. */
   onStart: ((setup: MatchSetup) => void) | null = null;
-  readonly stats: NetStats = { rtt: 0, rate: 0, delay: 0, starved: 0, direct: false };
+  readonly stats: NetStats = { rtt: 0, rate: 0, delay: 0, starved: 0, ahead: 0, direct: false };
 
   private socket: PartySocket;
   /** Pings the room, checks the answers came back, and looks after the direct line. */
@@ -132,10 +133,13 @@ export class NetSession {
   /** What we asked the room to be. Said again on every fresh socket, so a restart keeps it. */
   private wantPublic: boolean | null = null;
   /** Host: the guest's frames, waiting to be taken one per simulation step. */
-  private queue: InputFrame[] = [];
+  private queue: { frame: InputFrame; stamp: number }[] = [];
   /** Host: the last frame the guest sent, held while nothing new arrives. */
   private held: InputFrame = EMPTY_INPUT;
-  /** Host: the guest's newest clock reading, sent back so it can time the round trip. */
+  /**
+   * Host: the stamp of the newest guest frame the simulation has stepped, sent back so the guest
+   * can time the round trip and knows which of its presses the snapshot already includes.
+   */
   private guestStamp = 0;
   /** Host: the newest input heard, so one that took the slow road after a faster one is dropped. */
   private newestInput = -1;
@@ -150,6 +154,8 @@ export class NetSession {
   private hostStamp = 0;
   /** Guest: what the host has said, and the moment of it being drawn. */
   private readonly snapshots = new SnapshotView();
+  /** Guest: where its own skater is ahead of the host's word. */
+  private readonly predictor = new Predictor();
   /** Arrivals in the last second, for the readout. */
   private arrivals = 0;
   private rateSince = 0;
@@ -364,6 +370,7 @@ export class NetSession {
   /** A new match is a new timeline: nothing heard about the old one applies to it. */
   private resetView() {
     this.snapshots.reset();
+    this.predictor.reset();
     this.queue = [];
     this.held = EMPTY_INPUT;
     this.newestInput = -1;
@@ -402,8 +409,7 @@ export class NetSession {
     )
       return;
     this.newestInput = stamp;
-    this.queue.push(frame);
-    this.guestStamp = stamp;
+    this.queue.push({ frame, stamp });
     this.timeRoundTrip(echo, now);
     this.countArrival(now);
   }
@@ -413,6 +419,7 @@ export class NetSession {
     const snap = decodeSnapshot(body);
     this.hostStamp = snapshotStamp(snap);
     this.timeRoundTrip(snapshotEcho(snap), now);
+    this.predictor.acknowledge(snapshotEcho(snap));
     this.countArrival(now);
     this.snapshots.push(snap);
   }
@@ -427,9 +434,12 @@ export class NetSession {
     // stall still delivers the shot somebody took during it.
     while (this.queue.length > JITTER_TARGET) {
       const next = this.queue.shift()!;
-      taken = taken ? mergeEdges(taken, next) : next;
+      taken = taken ? { frame: mergeEdges(taken.frame, next.frame), stamp: next.stamp } : next;
     }
-    if (taken) this.held = taken;
+    if (taken) {
+      this.held = taken.frame;
+      this.guestStamp = taken.stamp;
+    }
     const frame = this.held;
     // The step that sees a press consumes it. Without this the held frame would fire the same
     // shot on every step until the next packet landed.
@@ -459,7 +469,9 @@ export class NetSession {
     // Carry the remainder so a display near the send rate does not halve it, never owing more
     // than one.
     this.lastSend = Math.max(this.lastSend + interval, now - interval);
-    this.transmit(tagged(WIRE_INPUT, encodeInput(this.outbound, stampNow(now), this.hostStamp)));
+    const stamp = stampNow(now);
+    this.transmit(tagged(WIRE_INPUT, encodeInput(this.outbound, stamp, this.hostStamp)));
+    this.predictor.record(stamp, this.outbound);
     this.outbound = null;
     return true;
   }
@@ -486,10 +498,12 @@ export class NetSession {
    * Guest: pose the match on the moment being drawn, `delta` seconds after the last one. True
    * when the moment passed a snapshot, which is when its calls land in the match.
    */
-  view(s: MatchState, delta: number): boolean {
+  view(s: MatchState, delta: number, team: Team, current: InputFrame | null = null): boolean {
     const fresh = this.snapshots.pose(s, delta);
+    this.predictor.apply(s, this.snapshots.newest, current, team, delta);
     this.stats.delay = this.snapshots.delayMs;
     this.stats.starved = this.snapshots.starved;
+    this.stats.ahead = this.predictor.stats.aheadMs;
     return fresh;
   }
 
