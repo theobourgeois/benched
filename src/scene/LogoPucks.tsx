@@ -6,7 +6,8 @@ import { LEAGUES } from '../game/clubs';
 /*
  * Logo pucks tumbling down behind the main menu. They get a canvas of their own, transparent over
  * the arena, so they never touch the match scene or its camera, and they unmount with the menu.
- * Press and hold one to stop it and turn it over; let go with a flick and it spins off.
+ * Press and hold one to pick it up and carry it; let go mid-swing and it is thrown, tumbling.
+ * The wheel spins a held puck on the spot.
  */
 
 const COUNT = 7;
@@ -265,13 +266,16 @@ type Faller = {
   x: number;
   y: number;
   z: number;
+  /** World units a second. Falling is vy settling towards -fall; a throw sets both. */
+  vx: number;
+  vy: number;
   fall: number;
   sway: number;
   swayRate: number;
   phase: number;
   axis: THREE.Vector3;
   spin: number;
-  /** The drift spin it settles back to after a fling. */
+  /** The drift spin it settles back to after a throw. */
   baseSpin: number;
   scale: number;
   /** 0 falling, 1 held: eases between so a grab lifts the puck rather than snapping it. */
@@ -290,6 +294,8 @@ function spawn(f: Faller, aspect: number, anywhere: boolean) {
   f.y = anywhere ? (Math.random() * 2 - 1) * halfH : halfH + 2;
   // Slow, like something drifting through water rather than dropped.
   f.fall = 0.9 + Math.random() * 0.9;
+  f.vx = 0;
+  f.vy = -f.fall;
   f.sway = 0.2 + Math.random() * 0.5;
   f.swayRate = 0.3 + Math.random() * 0.4;
   f.phase = Math.random() * Math.PI * 2;
@@ -298,26 +304,50 @@ function spawn(f: Faller, aspect: number, anywhere: boolean) {
   f.baseSpin = f.spin;
 }
 
-/** Radians of turn per pixel dragged. */
-const DRAG_TURN = 0.012;
-/** A flick can set a puck spinning, but not into a blur. */
-const MAX_FLING = 14;
+/** A throw keeps its speed for about this long before the drift takes over again, in seconds. */
+const THROW_HOLD = 0.9;
+/** Fastest a throw can leave the hand, world units a second, and fastest it can spin. */
+const MAX_THROW = 45;
+const MAX_SPIN = 16;
+/** Radians of spin per wheel pixel while held. */
+const WHEEL_TURN = 0.006;
 
 type Grab = {
   index: number;
   pointer: number;
-  x: number;
-  y: number;
+  /** Where on the puck it was caught, so it does not jump its centre to the pointer. */
+  offsetX: number;
+  offsetY: number;
   time: number;
-  /** Angular velocity from the drag, about screen X and Y, smoothed over the last moves. */
-  wx: number;
-  wy: number;
+  /** The carry velocity, smoothed over the last few moves, in world units a second. */
+  vx: number;
+  vy: number;
 };
 
 const geometry = new THREE.CylinderGeometry(RADIUS, RADIUS, THICKNESS, 64, 1);
 const turn = new THREE.Quaternion();
-const X_AXIS = new THREE.Vector3(1, 0, 0);
+const rollAxis = new THREE.Vector3();
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
+
+/** The point under the pointer in the plane the puck falls in. */
+function pointerAt(canvas: HTMLCanvasElement, clientX: number, clientY: number, z: number) {
+  const rect = canvas.getBoundingClientRect();
+  const halfH = halfHeightAt(z);
+  const halfW = halfH * (rect.width / Math.max(1, rect.height));
+  return {
+    x: (((clientX - rect.left) / rect.width) * 2 - 1) * halfW,
+    y: -(((clientY - rect.top) / rect.height) * 2 - 1) * halfH,
+  };
+}
+
+/** Turns the puck as if it rolled that far along the screen: forward over the way it moved. */
+function roll(mesh: THREE.Object3D, dx: number, dy: number) {
+  const distance = Math.hypot(dx, dy);
+  if (distance < 1e-5) return;
+  rollAxis.set(-dy, dx, 0).normalize();
+  turn.setFromAxisAngle(rollAxis, distance / RADIUS);
+  mesh.quaternion.premultiply(turn);
+}
 
 function Pucks() {
   const side = useSideMaterial();
@@ -333,6 +363,8 @@ function Pucks() {
         x: 0,
         y: 0,
         z: 0,
+        vx: 0,
+        vy: 0,
         fall: 0,
         sway: 0,
         swayRate: 0,
@@ -373,26 +405,28 @@ function Pucks() {
   }, [fallers]);
   const started = useRef(false);
 
-  // Dragging follows the pointer anywhere on the page, not just over the puck.
+  // A held puck follows the pointer anywhere on the page, not just while over the puck.
   useEffect(() => {
     const move = (e: PointerEvent) => {
       const g = grab.current;
       const mesh = g && meshes.current[g.index];
       if (!g || !mesh || e.pointerId !== g.pointer) return;
-      const dx = e.clientX - g.x;
-      const dy = e.clientY - g.y;
+      const f = fallers[g.index];
+      const at = pointerAt(canvas, e.clientX, e.clientY, f.z);
+      // The sway is still part of where it is drawn, so carry the base position under it.
+      const x = at.x + g.offsetX - Math.sin(f.phase) * f.sway;
+      const y = at.y + g.offsetY;
+      const dx = x - f.x;
+      const dy = y - f.y;
       const dt = Math.max(0.001, (e.timeStamp - g.time) / 1000);
-      // Sideways turns it about the vertical, up and down about the horizontal, like a trackball.
-      turn.setFromAxisAngle(Y_AXIS, dx * DRAG_TURN);
-      mesh.quaternion.premultiply(turn);
-      turn.setFromAxisAngle(X_AXIS, dy * DRAG_TURN);
-      mesh.quaternion.premultiply(turn);
-      const blend = Math.min(1, dt * 12);
-      g.wx += ((dy * DRAG_TURN) / dt - g.wx) * blend;
-      g.wy += ((dx * DRAG_TURN) / dt - g.wy) * blend;
-      g.x = e.clientX;
-      g.y = e.clientY;
+      const blend = Math.min(1, dt * 14);
+      g.vx += (dx / dt - g.vx) * blend;
+      g.vy += (dy / dt - g.vy) * blend;
       g.time = e.timeStamp;
+      f.x = x;
+      f.y = y;
+      mesh.position.set(f.x + Math.sin(f.phase) * f.sway, f.y, f.z);
+      roll(mesh, dx, dy);
     };
     const release = (e: PointerEvent) => {
       const g = grab.current;
@@ -400,21 +434,36 @@ function Pucks() {
       grab.current = null;
       canvas.style.cursor = '';
       const f = fallers[g.index];
-      // A drag that stopped before letting go should not fling off the last stale motion.
+      // A hand that stopped before letting go drops the puck rather than throwing a stale motion.
       const still = e.timeStamp - g.time > 80;
-      const speed = still ? 0 : Math.hypot(g.wx, g.wy);
-      if (speed > 0.5) {
-        f.axis.set(g.wx, g.wy, 0).normalize();
-        f.spin = Math.min(speed, MAX_FLING);
+      const speed = still ? 0 : Math.hypot(g.vx, g.vy);
+      const scale = speed > MAX_THROW ? MAX_THROW / speed : 1;
+      f.vx = still ? 0 : g.vx * scale;
+      f.vy = still ? 0 : g.vy * scale;
+      if (speed > 1) {
+        // It leaves the hand tumbling the way it was carried, faster the harder it went.
+        f.axis.set(-f.vy, f.vx, 0).normalize();
+        f.spin = Math.min(MAX_SPIN, (speed * scale) / RADIUS / 2);
       }
+    };
+    const wheel = (e: WheelEvent) => {
+      const g = grab.current;
+      const mesh = g && meshes.current[g.index];
+      if (!mesh) return;
+      // Scrolling spins the held puck on the spot instead of scrolling the page.
+      e.preventDefault();
+      turn.setFromAxisAngle(Y_AXIS, (e.deltaY + e.deltaX) * WHEEL_TURN);
+      mesh.quaternion.premultiply(turn);
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', release);
     window.addEventListener('pointercancel', release);
+    window.addEventListener('wheel', wheel, { passive: false });
     return () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', release);
       window.removeEventListener('pointercancel', release);
+      window.removeEventListener('wheel', wheel);
       canvas.style.cursor = '';
     };
   }, [canvas, fallers]);
@@ -422,6 +471,7 @@ function Pucks() {
   useFrame((_, delta) => {
     // A backgrounded tab hands back one huge delta; do not let every puck jump the screen.
     const dt = Math.min(delta, 0.05);
+    const ease = 1 - Math.exp(-dt / THROW_HOLD);
     fallers.forEach((f, i) => {
       const mesh = meshes.current[i];
       if (!mesh) return;
@@ -432,17 +482,25 @@ function Pucks() {
       const held = grab.current?.index === i;
       f.lift += ((held ? 1 : 0) - f.lift) * Math.min(1, dt * 10);
       mesh.scale.setScalar(f.scale * (1 + f.lift * 0.12));
-      // A held puck hangs where it was caught and turns only as the pointer turns it.
+      // A held puck goes only where the pointer takes it.
       if (held) return;
-      f.y -= f.fall * dt;
+      // A throw fades back into the slow fall: sideways speed dies away, and a puck thrown
+      // upwards slows, turns and comes back down.
+      f.vx -= f.vx * ease;
+      f.vy += (-f.fall - f.vy) * ease;
+      f.x += f.vx * dt;
+      f.y += f.vy * dt;
       f.phase += f.swayRate * dt;
-      if (f.y < -halfHeightAt(f.z) - 2) {
+      const halfH = halfHeightAt(f.z);
+      const halfW = halfH * aspect;
+      // Gone out of the bottom or thrown off a side: a fresh one comes in at the top.
+      if (f.y < -halfH - 2 || Math.abs(f.x) > halfW + 3) {
         spawn(f, aspect, false);
         // Off screen above, so the new print is painted before anyone sees it.
         f.face.show(pickPrint(fallers));
       }
       mesh.position.set(f.x + Math.sin(f.phase) * f.sway, f.y, f.z);
-      // After a fling it winds back down to a drift over a couple of seconds.
+      // After a throw it winds back down to a drift over a couple of seconds.
       const settle = Math.sign(f.spin || 1) * Math.abs(f.baseSpin);
       f.spin += (settle - f.spin) * Math.min(1, dt * 0.9);
       turn.setFromAxisAngle(f.axis, f.spin * dt);
@@ -468,17 +526,19 @@ function Pucks() {
             if (!grab.current) canvas.style.cursor = '';
           }}
           onPointerDown={(e) => {
-            // Only the nearest puck under the pointer takes the grab.
+            // Only the nearest puck under the pointer is picked up.
             e.stopPropagation();
             if (grab.current) return;
+            const f = fallers[i];
+            const at = pointerAt(canvas, e.clientX, e.clientY, f.z);
             grab.current = {
               index: i,
               pointer: e.pointerId,
-              x: e.clientX,
-              y: e.clientY,
+              offsetX: f.x + Math.sin(f.phase) * f.sway - at.x,
+              offsetY: f.y - at.y,
               time: e.nativeEvent.timeStamp,
-              wx: 0,
-              wy: 0,
+              vx: 0,
+              vy: 0,
             };
             canvas.style.cursor = 'grabbing';
           }}
