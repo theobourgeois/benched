@@ -1,4 +1,4 @@
-import type { GameMode, Jersey, Team } from '../game/types';
+import type { GameMode, GameStyle, Jersey, RinkSize, Team } from '../game/types';
 
 /**
  * What the two browsers say to each other. The room is a relay: it keeps track of who is in it
@@ -132,7 +132,13 @@ export interface MatchSetup {
   clubs: [string, string];
   jerseys: [Jersey, Jersey];
   hostTeam: Team;
+  /** The host's game style and rink. A room from before these existed plays fast on the barn. */
+  style?: GameStyle;
+  rink?: RinkSize;
 }
+/** Enumerated here as well as in `game/config`, because the room checks them and cannot see that. */
+export const GAME_STYLES: readonly GameStyle[] = ['fast', 'classic'];
+export const RINK_SIZES: readonly RinkSize[] = ['barn', 'pro', 'olympic', 'bandy'];
 
 /**
  * One step of the handshake for a line straight between the two browsers, carried through the

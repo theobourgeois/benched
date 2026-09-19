@@ -84,6 +84,28 @@ mutable on purpose: the dev feel tuner writes into them. Add a `DEFAULT_*` entry
 table. If a number is worth tuning by hand, describe it in `src/dev/feel.ts` too
 (`tests/feel.test.ts` checks every entry names a real key).
 
+**A game style or a rink.** Both are settings (`style`, `rink`) that become fields on
+`MatchState` at `createMatch`, which points the shared tables at them through
+`adoptMatchTables`: `applyStyle` lays `STYLES[style]` over the fast numbers in `PHYSICS`, `STICK`
+and `GOALIE`, and `applyRink` copies `RINKS[size]` into the live `RINK`. There is one set of
+tables and the newest match owns them, so nothing may read `RINK` or `PHYSICS` at module scope.
+`DEFAULT_*` are the active style's numbers, not frozen constants: the feel tuner measures a
+tweak against them, and a number moved by hand survives a style change. A new style is an
+entry in `STYLES` (keep every value inside its `src/dev/feel.ts` range; `tests/feel.test.ts`
+checks) and a new rink is a `RinkSpec` in `RINKS`; add either to `GAME_STYLES` / `RINK_SIZES`
+in `src/net/protocol.ts` too, which is the list the room validates against, and to the option
+lists in `src/ui/Settings.tsx`. `pro` and `olympic` are the rule books' measurements and
+`tests/rinks.test.ts` holds them to it; a sheet carries either `hockey` or `bandy` paint. The net
+(`NET`) is the game's own size on every sheet, and the `GOALIE` widths, reaches and depth were
+fitted to it: resize the net and the goalie has to be measured again, or nothing from the slot
+goes in. The AI's
+spots stay written in barn coordinates and go through `deep`, `wide` and `zoneOf` in
+`src/game/ai.ts`; the arena, ice paint and cameras are built from the spec. In a local game a
+change of either setting takes hold at once (`retable` in `src/app/store.ts`): a new rink
+whistles play down and restarts from a faceoff on the new sheet. Camera maths that cares how
+close the play is to a net must measure from the goal line, never from centre ice. Online both belong
+to the host and cross in `MatchSetup`, so the worker must be redeployed for a new value.
+
 **A game mode.** Add it to `GameMode` in `src/game/types.ts`; the `never` checks in
 `src/game/modes.ts` (`modeInfo`, `isOnIce`) will then fail to compile until you describe it.
 Mode-specific behaviour in the engine keys off `modeInfo(s.mode)` flags first and `s.mode`

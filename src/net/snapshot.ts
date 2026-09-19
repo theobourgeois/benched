@@ -125,7 +125,13 @@ const PUCK_FIELDS: readonly Field[] = [
 ];
 
 /** A side, followed on the wire by `humans` rows of `HUMAN`: the people playing it, in seat order. */
-const SIDE: readonly Field[] = [{ key: 'humans', kind: 'u8', scale: 1 }, unit('drawInput')];
+const SIDE: readonly Field[] = [
+  { key: 'humans', kind: 'u8', scale: 1 },
+  unit('drawInput'),
+  { key: 'drawReady', kind: 'bool' },
+  unit('drawAimX'),
+  unit('drawAimZ'),
+];
 
 const HUMAN: readonly Field[] = [
   { key: 'controlled', kind: 'i16', scale: 1 },
@@ -262,7 +268,7 @@ export function encodeSnapshot(s: MatchState, sinceEvent = -1, stamp = 0, echo =
   for (const team of TEAMS) {
     const side = s.sides[team];
     const humans = side.humans.slice(0, MAX_HUMANS);
-    const values: Record<string, unknown> = { humans: humans.length, drawInput: side.drawInput };
+    const values: Record<string, unknown> = { ...side, humans: humans.length };
     for (const field of SIDE) at.write(field, values[field.key]);
     for (const human of humans) {
       const seat: Record<string, unknown> = {
@@ -460,7 +466,11 @@ export function poseSnapshot(s: MatchState, snap: Snapshot) {
   s.possession = [match.possessionHome as number, match.possessionAway as number];
   for (const team of TEAMS) {
     const side = s.sides[team];
-    side.drawInput = byKey(SIDE, snap.sides[team].side).drawInput as number;
+    const draw = byKey(SIDE, snap.sides[team].side);
+    side.drawInput = draw.drawInput as number;
+    side.drawReady = draw.drawReady as boolean;
+    side.drawAimX = draw.drawAimX as number;
+    side.drawAimZ = draw.drawAimZ as number;
     const seats = snap.sides[team].humans;
     side.humans.length = seats.length;
     seats.forEach((row, k) => {

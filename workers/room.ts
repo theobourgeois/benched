@@ -6,9 +6,11 @@ import {
   type ConnectionContext,
 } from 'partyserver';
 import {
+  GAME_STYLES,
   IDLE_CLOSE_MS,
   ONLINE_MODES,
   RECONNECT_GRACE_MS,
+  RINK_SIZES,
   ROOM_CAPACITY,
   SIGNAL_LIMIT,
   WIRE_INPUT,
@@ -20,7 +22,7 @@ import {
   type RoomListing,
   type ServerMessage,
 } from '../src/net/protocol';
-import type { GameMode } from '../src/game/types';
+import type { GameMode, GameStyle, RinkSize } from '../src/game/types';
 import { Directory } from './directory';
 
 /** Deployed as one worker: the rooms, and the directory that lists the public ones. */
@@ -440,7 +442,7 @@ function parse(raw: string): ClientMessage | null {
 /** The setup reaches the other browser and builds a match there, so it is checked field by field. */
 function cleanSetup(setup: unknown): MatchSetup | null {
   if (!setup || typeof setup !== 'object') return null;
-  const { mode, clubs, jerseys, hostTeam } = setup as MatchSetup;
+  const { mode, clubs, jerseys, hostTeam, style, rink } = setup as MatchSetup;
   const jerseyKinds = ['home', 'away'];
   if (!ONLINE_MODES.includes(mode)) return null;
   if (
@@ -456,7 +458,15 @@ function cleanSetup(setup: unknown): MatchSetup | null {
   )
     return null;
   if (hostTeam !== 0 && hostTeam !== 1) return null;
-  return { mode, clubs: [clubs[0], clubs[1]], jerseys: [jerseys[0], jerseys[1]], hostTeam };
+  // Both ends index tables with these, so anything unrecognised becomes the default, not a crash.
+  return {
+    mode,
+    clubs: [clubs[0], clubs[1]],
+    jerseys: [jerseys[0], jerseys[1]],
+    hostTeam,
+    style: GAME_STYLES.includes(style as GameStyle) ? style : 'fast',
+    rink: RINK_SIZES.includes(rink as RinkSize) ? rink : 'barn',
+  };
 }
 
 interface Env {

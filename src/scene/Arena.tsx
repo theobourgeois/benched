@@ -2,15 +2,19 @@ import { memo, Suspense, useEffect, useLayoutEffect, useMemo, useRef } from 'rea
 import { useLoader } from '@react-three/fiber';
 import * as THREE from 'three';
 import { makeIceTexture, SvgTextureLoader } from './textures';
-import { RINK } from '../game/config';
-function outline(extra = 0) {
+import { RINKS, type RinkSpec } from '../game/config';
+import type { RinkSize } from '../game/types';
+/** The boards, or a ring `extra` metres outside them, as a closed run of points. */
+function outline(rink: RinkSpec, extra = 0) {
   const points: THREE.Vector2[] = [],
-    r = RINK.corner + extra;
+    r = rink.corner + extra,
+    cx = rink.halfLength - rink.corner,
+    cz = rink.halfWidth - rink.corner;
   for (const [x, z, start] of [
-    [23, 6, 0],
-    [-23, 6, 90],
-    [-23, -6, 180],
-    [23, -6, 270],
+    [cx, cz, 0],
+    [-cx, cz, 90],
+    [-cx, -cz, 180],
+    [cx, -cz, 270],
   ]) {
     for (let i = 0; i <= 12; i++) {
       const a = ((start + i * 7.5) * Math.PI) / 180;
@@ -93,7 +97,12 @@ function Rails({ points }: { points: THREE.Vector2[] }) {
     </>
   );
 }
-function Crowd() {
+/** Length of the barn's crowd ring at a row, which the head counts below were chosen for. */
+const barnRing = (row: number) => {
+  const ring = outline(RINKS.barn, 3.7 + row * 1.25);
+  return new THREE.SplineCurve([...ring, ring[0]]).getLength();
+};
+function Crowd({ rink }: { rink: RinkSpec }) {
   const ref = useRef<THREE.InstancedMesh>(null),
     heads = useRef<THREE.InstancedMesh>(null),
     seats = useRef<THREE.InstancedMesh>(null);
@@ -101,11 +110,10 @@ function Crowd() {
     const result: { x: number; y: number; z: number; color: string }[] = [];
     const palette = ['#264267', '#993b4c', '#435665', '#60758a', '#212f3a', '#1f3251', '#a4afba'];
     for (let row = 0; row < 7; row++) {
-      const curve = new THREE.SplineCurve([
-        ...outline(3.7 + row * 1.25),
-        outline(3.7 + row * 1.25)[0],
-      ]);
-      const count = 180 + row * 12;
+      const ring = outline(rink, 3.7 + row * 1.25);
+      const curve = new THREE.SplineCurve([...ring, ring[0]]);
+      // As many people per metre of rail as the barn seats, however long the rail is.
+      const count = Math.round((180 + row * 12) * (curve.getLength() / barnRing(row)));
       for (let i = 0; i < count; i++) {
         const p = curve.getPointAt(i / count);
         result.push({
@@ -117,7 +125,7 @@ function Crowd() {
       }
     }
     return result;
-  }, []);
+  }, [rink]);
   useLayoutEffect(() => {
     const dummy = new THREE.Object3D();
     people.forEach((p, i) => {
@@ -164,66 +172,58 @@ function Crowd() {
     </>
   );
 }
-function Goal({ sign }: { sign: number }) {
+function Goal({ sign, rink }: { sign: number; rink: RinkSpec }) {
+  const w = rink.goalHalfWidth,
+    h = rink.goalHeight,
+    depth = 1.4;
   const segments = useMemo(() => {
     const vertices: number[] = [];
-    for (let z = -1.8; z <= 1.81; z += 0.22) {
-      vertices.push(1.4, 0, z, 1.4, 1.35, z, 0, 1.35, z, 1.4, 1.35, z);
-    }
-    for (let y = 0; y <= 1.36; y += 0.18)
-      vertices.push(1.4, y, -1.8, 1.4, y, 1.8, 0, y, -1.8, 1.4, y, -1.8, 0, y, 1.8, 1.4, y, 1.8);
-    for (let x = 0; x <= 1.41; x += 0.22)
-      vertices.push(
-        x,
-        0,
-        -1.8,
-        x,
-        1.35,
-        -1.8,
-        x,
-        0,
-        1.8,
-        x,
-        1.35,
-        1.8,
-        x,
-        1.35,
-        -1.8,
-        x,
-        1.35,
-        1.8,
-      );
+    // The mesh of the netting: back, top, then the two sides.
+    for (let z = -w; z <= w + 0.01; z += 0.22)
+      vertices.push(depth, 0, z, depth, h, z, 0, h, z, depth, h, z);
+    for (let y = 0; y <= h + 0.01; y += 0.18)
+      vertices.push(depth, y, -w, depth, y, w, 0, y, -w, depth, y, -w, 0, y, w, depth, y, w);
+    for (let x = 0; x <= depth + 0.01; x += 0.22)
+      vertices.push(x, 0, -w, x, h, -w, x, 0, w, x, h, w, x, h, -w, x, h, w);
     return new THREE.BufferGeometry().setAttribute(
       'position',
       new THREE.Float32BufferAttribute(vertices, 3),
     );
-  }, []);
+  }, [w, h]);
   return (
-    <group position={[sign * RINK.goalX, 0.05, 0]} rotation={[0, sign === -1 ? Math.PI : 0, 0]}>
+    <group position={[sign * rink.goalX, 0.05, 0]} rotation={[0, sign === -1 ? Math.PI : 0, 0]}>
       <lineSegments geometry={segments}>
         <lineBasicMaterial color="#f3fcfc" transparent opacity={0.55} />
       </lineSegments>
-      {[-1.8, 1.8].map((z) => (
-        <mesh key={z} position={[0, 0.675, z]} castShadow>
-          <cylinderGeometry args={[0.065, 0.065, 1.35, 10]} />
+      {[-w, w].map((z) => (
+        <mesh key={z} position={[0, h / 2, z]} castShadow>
+          <cylinderGeometry args={[0.065, 0.065, h, 10]} />
           <meshStandardMaterial color="#f24544" roughness={0.3} />
         </mesh>
       ))}
-      <mesh position={[0, 1.35, 0]} rotation={[Math.PI / 2, 0, 0]} castShadow>
-        <cylinderGeometry args={[0.065, 0.065, 3.7, 10]} />
+      <mesh position={[0, h, 0]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+        <cylinderGeometry args={[0.065, 0.065, w * 2 + 0.1, 10]} />
         <meshStandardMaterial color="#f24544" roughness={0.3} />
       </mesh>
-      <mesh position={[1.4, 0.05, 0]}>
-        <boxGeometry args={[0.1, 0.1, 3.6]} />
+      <mesh position={[depth, 0.05, 0]}>
+        <boxGeometry args={[0.1, 0.1, w * 2]} />
         <meshStandardMaterial color="#f24544" />
       </mesh>
     </group>
   );
 }
-export const Arena = memo(function Arena({ iceLogo }: { iceLogo: string }) {
-  const iceFallback = useMemo(() => makeIceTexture(), []);
+/**
+ * Everything here is built from the rink's spec rather than the live `RINK` table, so what is
+ * drawn depends only on the prop. The parent keys this by rink: the instanced boards and crowd
+ * are sized when they mount.
+ */
+export const Arena = memo(function Arena({ iceLogo, size }: { iceLogo: string; size: RinkSize }) {
+  const rink = RINKS[size];
+  const iceFallback = useMemo(() => makeIceTexture(rink), [rink]);
   useEffect(() => () => iceFallback.dispose(), [iceFallback]);
-  const points = useMemo(() => outline(), []);
+  const points = useMemo(() => outline(rink), [rink]);
+  const length = rink.halfLength * 2,
+    width = rink.halfWidth * 2;
   const shape = useMemo(() => new THREE.Shape(points), [points]);
   return (
     <group>
@@ -236,72 +236,82 @@ export const Arena = memo(function Arena({ iceLogo }: { iceLogo: string }) {
         <meshStandardMaterial color="#b6c5c5" />
       </mesh>
       {/* Bare ice until the crest arrives, so the rink never waits on a logo. */}
-      <Suspense fallback={<IceSheet map={iceFallback} />}>
-        <IceSheetWithLogo src={iceLogo} />
+      <Suspense fallback={<IceSheet rink={rink} map={iceFallback} />}>
+        <IceSheetWithLogo rink={rink} src={iceLogo} />
       </Suspense>
       {/* Corner masks cover the rectangular ice texture outside the rounded playing surface. */}
-      {[-1, 1].flatMap((x) => [-1, 1].map((z) => <CornerMask key={`${x}:${z}`} x={x} z={z} />))}
+      {[-1, 1].flatMap((x) =>
+        [-1, 1].map((z) => <CornerMask key={`${x}:${z}`} rink={rink} x={x} z={z} />),
+      )}
       <Rails points={points} />
       {Array.from({ length: 7 }, (_, row) => (
         <group key={row}>
           {[-1, 1].map((sign) => (
             <group key={sign}>
-              <mesh position={[0, row * 0.34, sign * (17 + row * 1.3)]} receiveShadow>
-                <boxGeometry args={[57 + row * 1.4, 0.6 + row * 0.68, 1.5]} />
+              <mesh
+                position={[0, row * 0.34, sign * (rink.halfWidth + 4 + row * 1.3)]}
+                receiveShadow
+              >
+                <boxGeometry args={[length - 3 + row * 1.4, 0.6 + row * 0.68, 1.5]} />
                 <meshStandardMaterial color={row % 2 ? '#182a30' : '#21343a'} />
               </mesh>
-              <mesh position={[sign * (34 + row * 1.3), row * 0.34, 0]}>
-                <boxGeometry args={[1.5, 0.6 + row * 0.68, 27 + row * 1.7]} />
+              <mesh position={[sign * (rink.halfLength + 4 + row * 1.3), row * 0.34, 0]}>
+                <boxGeometry args={[1.5, 0.6 + row * 0.68, width + 1 + row * 1.7]} />
                 <meshStandardMaterial color={row % 2 ? '#182a30' : '#21343a'} />
               </mesh>
             </group>
           ))}
         </group>
       ))}
-      <Crowd />
+      <Crowd rink={rink} />
       {[-1, 1].map((sign) => (
         <group key={sign}>
-          <mesh position={[0, 5.5, sign * 26.8]}>
-            <boxGeometry args={[76, 0.2, 0.15]} />
+          <mesh position={[0, 5.5, sign * (rink.halfWidth + 13.8)]}>
+            <boxGeometry args={[length + 16, 0.2, 0.15]} />
             <meshBasicMaterial color="#9cc5ed" />
           </mesh>
-          <mesh position={[sign * 43.8, 5.5, 0]}>
-            <boxGeometry args={[0.15, 0.2, 48]} />
+          <mesh position={[sign * (rink.halfLength + 13.8), 5.5, 0]}>
+            <boxGeometry args={[0.15, 0.2, width + 22]} />
             <meshBasicMaterial color="#9cc5ed" />
           </mesh>
         </group>
       ))}
-      <Goal sign={-1} />
-      <Goal sign={1} />
+      <Goal sign={-1} rink={rink} />
+      <Goal sign={1} rink={rink} />
     </group>
   );
 });
-function IceSheet({ map }: { map: THREE.Texture }) {
+function IceSheet({ rink, map }: { rink: RinkSpec; map: THREE.Texture }) {
   return (
     <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.012, 0]} receiveShadow>
-      <planeGeometry args={[60, 26]} />
+      <planeGeometry args={[rink.halfLength * 2, rink.halfWidth * 2]} />
       <meshStandardMaterial map={map} roughness={0.28} metalness={0.12} />
     </mesh>
   );
 }
-function IceSheetWithLogo({ src }: { src: string }) {
+function IceSheetWithLogo({ rink, src }: { rink: RinkSpec; src: string }) {
   const logo = useLoader(SvgTextureLoader, src);
-  const ice = useMemo(() => makeIceTexture(logo.image), [logo]);
+  const ice = useMemo(() => makeIceTexture(rink, logo.image), [rink, logo]);
   useEffect(() => () => ice.dispose(), [ice]);
-  return <IceSheet map={ice} />;
+  return <IceSheet rink={rink} map={ice} />;
 }
-function CornerMask({ x, z }: { x: number; z: number }) {
+function CornerMask({ rink, x, z }: { rink: RinkSpec; x: number; z: number }) {
+  const r = rink.corner;
   const shape = useMemo(() => {
     const s = new THREE.Shape();
-    s.moveTo(0, 7);
-    s.lineTo(7, 7);
-    s.lineTo(7, 0);
-    s.absarc(0, 0, 7, 0, Math.PI / 2, false);
+    s.moveTo(0, r);
+    s.lineTo(r, r);
+    s.lineTo(r, 0);
+    s.absarc(0, 0, r, 0, Math.PI / 2, false);
     s.closePath();
     return s;
-  }, []);
+  }, [r]);
   return (
-    <mesh position={[23 * x, 0.025, 6 * z]} rotation={[-Math.PI / 2, 0, 0]} scale={[x, -z, 1]}>
+    <mesh
+      position={[(rink.halfLength - r) * x, 0.025, (rink.halfWidth - r) * z]}
+      rotation={[-Math.PI / 2, 0, 0]}
+      scale={[x, -z, 1]}
+    >
       <shapeGeometry args={[shape]} />
       <meshStandardMaterial color="#0e2026" side={THREE.DoubleSide} />
     </mesh>

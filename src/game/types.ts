@@ -189,6 +189,11 @@ export interface SideState {
   humans: Human[];
   /** Faceoff countdown remaining when this side's centre struck; -1 if they have not. */
   drawInput: number;
+  /** The centre's right stick has been let go this draw, so a push now is a swing. */
+  drawReady: boolean;
+  /** Where the swing sent it, on the ice; zero is the usual draw back. */
+  drawAimX: number;
+  drawAimZ: number;
 }
 /** One frame per person on a side, in the order of `SideState.humans`. */
 export type HumanFrames = readonly (InputFrame | null)[];
@@ -245,6 +250,9 @@ export interface MatchState {
   jerseys: [Jersey, Jersey];
   /** How hard opposing CPUs play. The player's teammates stay All-Star. */
   difficulty: Difficulty;
+  /** The feel the match is played at, and the sheet it is played on. Settled at the puck drop. */
+  style: GameStyle;
+  rink: RinkSize;
   scoringTeam: Team | null;
   tick: number;
   /** Seconds the simulation holds still after a knockdown, for impact. */
@@ -265,6 +273,10 @@ export interface MatchState {
   shootoutTaken: [number, number];
 }
 export type Difficulty = 'rookie' | 'pro' | 'allStar' | 'legend';
+/** `fast` is the arcade pace the game was built at; `classic` is slower and heavier, nearer EA's NHL. */
+export type GameStyle = 'fast' | 'classic';
+/** The ice sheet: the house rink, the NHL's 200 × 85 ft, the IIHF's 60 × 30 m, or a bandy field. */
+export type RinkSize = 'barn' | 'pro' | 'olympic' | 'bandy';
 export type CameraMode = 'broadcast' | 'tight' | 'high' | 'wide';
 export function cameraUsesAttackUp(camera: CameraMode) {
   switch (camera) {
@@ -293,6 +305,8 @@ export interface Settings {
   /** Shot target in the net and pass-lane arrow. */
   beginner: boolean;
   difficulty: Difficulty;
+  style: GameStyle;
+  rink: RinkSize;
   /** Replay the build-up after a goal; any button skips it. */
   goalReplays: boolean;
   /** Drop a beat when a goal goes in. */

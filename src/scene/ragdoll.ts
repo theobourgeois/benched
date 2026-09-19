@@ -49,7 +49,29 @@ const groups = (member: number, filter: number) => ((member << 16) | filter) >>>
 function buildWorld(api: Rapier) {
   const w = new api.World({ x: 0, y: -9.81, z: 0 });
   w.timestep = STEP;
-  const ground = w.createRigidBody(api.RigidBodyDesc.fixed());
+  buildRink(api, w);
+  return w;
+}
+
+/** The one fixed body carrying the ice, boards and nets, and the sheet it was built for. */
+let rinkBody: RigidBody | null = null;
+const rinkBuilt = { halfLength: 0, halfWidth: 0, corner: 0, goalX: 0 };
+const rinkMoved = () =>
+  rinkBuilt.halfLength !== RINK.halfLength ||
+  rinkBuilt.halfWidth !== RINK.halfWidth ||
+  rinkBuilt.corner !== RINK.corner ||
+  rinkBuilt.goalX !== RINK.goalX;
+/**
+ * The boards move when a match starts on a different sheet. Standing skaters and ragdolls are
+ * bodies of their own, so only the fixed one is swapped.
+ */
+function buildRink(api: Rapier, w: World) {
+  if (rinkBody) w.removeRigidBody(rinkBody);
+  rinkBuilt.halfLength = RINK.halfLength;
+  rinkBuilt.halfWidth = RINK.halfWidth;
+  rinkBuilt.corner = RINK.corner;
+  rinkBuilt.goalX = RINK.goalX;
+  const ground = (rinkBody = w.createRigidBody(api.RigidBodyDesc.fixed()));
   const fixed = (desc: ColliderDesc) =>
     w.createCollider(desc.setCollisionGroups(groups(WORLD_BIT, 0xffff)), ground);
   fixed(
@@ -94,7 +116,6 @@ function buildWorld(api: Rapier) {
         .setFriction(0.3)
         .setRestitution(0.1),
     );
-  return w;
 }
 
 /** Same rounded rectangle the arena draws its boards along. */
@@ -121,8 +142,9 @@ let lastFrame = -1,
   accumulator = 0;
 /** Advances the shared world once per rendered frame, whichever skater asks first. */
 export function stepPhysics(frame: number, dt: number, live: boolean) {
-  if (!world || frame === lastFrame) return;
+  if (!world || !R || frame === lastFrame) return;
   lastFrame = frame;
+  if (rinkMoved()) buildRink(R, world);
   // Replays, pauses and hitstop hold every body where it is. With nobody down there is nothing
   // for the kinematic skater bodies to collide with, so the world is not stepped at all.
   if (!live || !slots.size) {

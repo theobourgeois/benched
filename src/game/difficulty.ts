@@ -80,6 +80,10 @@ export interface CpuTune {
   pass: number;
   /** How often they handle around a defender. */
   handle: number;
+  /** Seconds from the faceoff drop to the centre's swing, before a little random spread. */
+  draw: number;
+  /** Chance a draw is jumped: swung at before the puck leaves the linesman's hand. */
+  drawJump: number;
 }
 
 const ALL_STAR: CpuTune = {
@@ -98,6 +102,8 @@ const ALL_STAR: CpuTune = {
   wobble: 0.32,
   pass: 1,
   handle: 1,
+  draw: 0.25,
+  drawJump: 0.04,
 };
 
 const ROOKIE: CpuTune = {
@@ -116,6 +122,8 @@ const ROOKIE: CpuTune = {
   wobble: 0.58,
   pass: 0.55,
   handle: 0.35,
+  draw: 0.36,
+  drawJump: 0.14,
 };
 
 const PRO: CpuTune = {
@@ -134,6 +142,8 @@ const PRO: CpuTune = {
   wobble: 0.42,
   pass: 0.8,
   handle: 0.7,
+  draw: 0.3,
+  drawJump: 0.08,
 };
 
 const LEGEND: CpuTune = {
@@ -152,6 +162,8 @@ const LEGEND: CpuTune = {
   wobble: 0.1,
   pass: 1.28,
   handle: 1.2,
+  draw: 0.2,
+  drawJump: 0.02,
 };
 
 export function tuneFor(difficulty: Difficulty): CpuTune {

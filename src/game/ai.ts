@@ -1,4 +1,4 @@
-import { attackDirection, GOALIE, PHYSICS, RINK } from './config';
+import { attackDirection, GOALIE, PHYSICS, RINK, RINKS } from './config';
 import { cpuTune } from './difficulty';
 import { angleLine, committed, goalieFrame, onPads } from './goalie';
 import { clamp, distance, normalized } from './math';
@@ -56,6 +56,16 @@ const nearestGap = (s: MatchState, p: Skater) =>
   foes(s, p).reduce((d, o) => Math.min(d, distance(p, o)), 99);
 const attackNet = (team: number, period: number) => attackDirection(team, period) * RINK.goalX;
 const defendNet = (team: number, period: number) => -attackNet(team, period);
+/**
+ * The spots below were laid out on the barn, and stay written in its coordinates. `deep` slides
+ * one along the ice with the goal line, so the slot is the same distance from the net on every
+ * sheet; `wide` stretches a lane with the boards, so wingers use the room a wider sheet gives
+ * them. `zoneOf` is the other way round: how far up ice a skater is, read as if on the barn.
+ * On the barn all three change nothing.
+ */
+const deep = (x: number) => x + (RINK.goalX - RINKS.barn.goalX);
+const wide = (z: number) => z * (RINK.halfWidth / RINKS.barn.halfWidth);
+const zoneOf = (p: Vec2, dir: number) => dir * p.x - (RINK.goalX - RINKS.barn.goalX);
 const facing = (p: Skater, x: number, z: number) => Math.sin(p.angle) * x + Math.cos(p.angle) * z;
 function goalieOf(s: MatchState, team: number) {
   return s.skaters.find((p) => p.role === 'G' && p.team === team && isOnIce(s, p));
@@ -65,7 +75,7 @@ export function scoringLook(s: MatchState, p: Skater) {
   const dir = attackDirection(p.team, s.period),
     netX = attackNet(p.team, s.period);
   const dist = Math.hypot(netX - p.x, p.z);
-  if (dir * p.x < 12.5 || dist > 16 || dir * p.x > RINK.goalX - 0.4) return 0;
+  if (zoneOf(p, dir) < 12.5 || dist > 16 || dir * p.x > RINK.goalX - 0.4) return 0;
   const goalie = goalieOf(s, p.team === 0 ? 1 : 0);
   const farSide = goalie ? Math.abs(p.z - goalie.z) : 1.2;
   const pressure = Math.max(0, 2.8 - nearestGap(s, p)) * 0.12;
@@ -73,7 +83,7 @@ export function scoringLook(s: MatchState, p: Skater) {
   if (Math.abs(p.z) < 4.2 && dist < 11) look = 0.88;
   else if (Math.abs(p.z) < 6.6 && dist < 13.2) look = 0.56;
   else if (dist < 10) look = 0.3;
-  else if (dir * p.x > 16 && dist < 14) look = 0.18;
+  else if (zoneOf(p, dir) > 16 && dist < 14) look = 0.18;
   look += clamp(farSide - 0.55, 0, 0.35);
   return clamp(look - pressure, 0, 1);
 }
@@ -198,14 +208,14 @@ function carrierTarget(s: MatchState, p: Skater): Vec2 {
   const dir = attackDirection(p.team, s.period),
     lane = laneOf(p) || Math.sign(p.z || 1),
     press = nearestGap(s, p),
-    zone = p.x * dir;
+    zone = zoneOf(p, dir);
   if (zone < 8) {
     const wall = Math.abs(p.z) > 2.2 ? Math.sign(p.z) : lane;
-    return { x: dir * 16, z: clamp(wall * 7.4, -10, 10) };
+    return { x: dir * deep(16), z: clamp(wall * wide(7.4), -wide(10), wide(10)) };
   }
-  if (zone < 15) return { x: dir * 21, z: clamp(p.z * 0.28 + lane * 3.4, -7.6, 7.6) };
-  if (press < 2.1) return { x: dir * 23.2, z: Math.sign(p.z || lane) * 8.8 };
-  return { x: dir * 21.6, z: clamp(p.z * 0.22, -3.2, 3.2) };
+  if (zone < 15) return { x: dir * deep(21), z: clamp(p.z * 0.28 + lane * 3.4, -7.6, 7.6) };
+  if (press < 2.1) return { x: dir * deep(23.2), z: Math.sign(p.z || lane) * wide(8.8) };
+  return { x: dir * deep(21.6), z: clamp(p.z * 0.22, -3.2, 3.2) };
 }
 /** Toward the slot: take away the middle instead of matching a wide cut. */
 function insideOf(owner: Skater, fallback: number) {
@@ -261,20 +271,20 @@ function chaseTarget(s: MatchState, p: Skater, owner: Skater | null): Vec2 {
       const lead = ownerSpeed > 3 ? clamp(gap / PHYSICS.maxSpeed, 0.05, 0.2) * tune.lead : 0;
       return {
         x: owner.x + owner.vx * lead - dir * 0.75,
-        z: clamp(owner.z + side * 1.05 + owner.vz * lead * 0.2, -11, 11),
+        z: clamp(owner.z + side * 1.05 + owner.vz * lead * 0.2, -wide(11), wide(11)),
       };
     }
     const lead = clamp(gap / PHYSICS.maxSpeed, 0.08, 0.36) * tune.lead;
     return {
       x: owner.x + owner.vx * lead * 0.7 - dir * Math.min(0.35, gap * 0.04),
-      z: clamp(owner.z * 0.82 + owner.vz * 0.05 + inside * 0.7, -11, 11),
+      z: clamp(owner.z * 0.82 + owner.vz * 0.05 + inside * 0.7, -wide(11), wide(11)),
     };
   }
   // Still between them and the net: hold a gap and shade the slot, don't glue to their hip.
   const cushion = clamp(1.7 + Math.min(gap, 6) * 0.18, 1.7, 3.8) * tune.gap;
   return {
     x: owner.x - dir * cushion,
-    z: clamp(owner.z * 0.48 + owner.vz * 0.05, -8.2, 8.2),
+    z: clamp(owner.z * 0.48 + owner.vz * 0.05, -wide(8.2), wide(8.2)),
   };
 }
 
@@ -327,25 +337,25 @@ function supportTarget(s: MatchState, p: Skater, ours: boolean, hunters: Skater[
     lane = laneOf(p),
     defense = isDefense(p),
     netX = defendNet(p.team, s.period);
-  const inOwn = puck.x * dir < -7.5;
+  const inOwn = puck.x * dir < -deep(7.5);
   const owner = puck.owner === null ? null : s.skaters[puck.owner];
   if (ours) {
-    const oz = puck.x * dir > 11;
+    const oz = zoneOf(puck, dir) > 11;
     if (defense)
       return {
-        x: clamp(dir * (oz ? 12.5 : puck.x * dir - 5), -22, 22),
-        z: clamp(puck.z * 0.12 + lane * 6.8, -10, 10),
+        x: clamp(dir * (oz ? deep(12.5) : puck.x * dir - 5), -deep(22), deep(22)),
+        z: clamp(puck.z * 0.12 + lane * wide(6.8), -wide(10), wide(10)),
       };
     if (!oz)
       return {
-        x: clamp(puck.x + dir * (p.role === 'C' ? 8 : 12.5), -22, 23),
-        z: clamp(lane * 7.2, -10, 10),
+        x: clamp(puck.x + dir * (p.role === 'C' ? 8 : 12.5), -deep(22), deep(23)),
+        z: clamp(lane * wide(7.2), -wide(10), wide(10)),
       };
-    if (p.role === 'C') return { x: dir * 22.2, z: clamp(puck.z * 0.12, -2.2, 2.2) };
+    if (p.role === 'C') return { x: dir * deep(22.2), z: clamp(puck.z * 0.12, -2.2, 2.2) };
     const strong = Math.sign(puck.z || lane) === lane || lane === 0;
     return strong
-      ? { x: dir * 21.2, z: clamp(lane * 8.2, -10, 10) }
-      : { x: dir * 22.4, z: clamp(lane * 4.2, -10, 10) };
+      ? { x: dir * deep(21.2), z: clamp(lane * wide(8.2), -wide(10), wide(10)) }
+      : { x: dir * deep(22.4), z: clamp(lane * 4.2, -10, 10) };
   }
   if (puck.shot && puck.vx * dir < 0 && Math.abs(puck.x - netX) < 14) {
     return {
@@ -357,35 +367,40 @@ function supportTarget(s: MatchState, p: Skater, ours: boolean, hunters: Skater[
     // Protect a useful gap and the middle of the rink while the other defender pressures.
     const depth = clamp(3 + Math.max(0, -owner.vx * dir) * 0.32, 3, 6);
     return {
-      x: clamp(owner.x - dir * depth, -22, 22),
-      z: clamp(owner.z * 0.62 + lane * 2.1, -8.5, 8.5),
+      x: clamp(owner.x - dir * depth, -deep(22), deep(22)),
+      z: clamp(owner.z * 0.62 + lane * 2.1, -wide(8.5), wide(8.5)),
     };
   }
   if (inOwn)
     return {
-      x: clamp(netX + dir * (defense ? 4.2 : 7.5), -23, 23),
-      z: clamp(puck.z * 0.42 + lane * (defense ? 3.2 : 5.4), -8.2, 8.2),
+      x: clamp(netX + dir * (defense ? 4.2 : 7.5), -deep(23), deep(23)),
+      z: clamp(puck.z * 0.42 + lane * (defense ? 3.2 : 5.4), -wide(8.2), wide(8.2)),
     };
   if (hunters[1]?.id === p.id)
     return {
-      x: clamp(puck.x - dir * 3.2, -22, 22),
-      z: clamp(puck.z * 0.38 + lane * 3.4, -9, 9),
+      x: clamp(puck.x - dir * 3.2, -deep(22), deep(22)),
+      z: clamp(puck.z * 0.38 + lane * 3.4, -wide(9), wide(9)),
     };
   if (defense)
     return {
-      x: clamp(puck.x - dir * 8.5, -22, 22),
-      z: clamp(puck.z * 0.28 + lane * 5.1, -9.2, 9.2),
+      x: clamp(puck.x - dir * 8.5, -deep(22), deep(22)),
+      z: clamp(puck.z * 0.28 + lane * wide(5.1), -wide(9.2), wide(9.2)),
     };
   return {
-    x: clamp(-dir * 3.5 + puck.x * 0.2, -20, 20),
-    z: clamp(lane * 6.4 + puck.z * 0.12, -10, 10),
+    x: clamp(-dir * 3.5 + puck.x * 0.2, -deep(20), deep(20)),
+    z: clamp(lane * wide(6.4) + puck.z * 0.12, -wide(10), wide(10)),
   };
 }
 function crashNet(s: MatchState, p: Skater): Vec2 | null {
   const dir = attackDirection(p.team, s.period),
     puck = s.puck;
-  if (puck.owner !== null || !puck.shot || puck.vx * dir <= 2 || dir * puck.x < 12) return null;
-  if (isDefense(p)) return { x: dir * 13.5, z: clamp(puck.z * 0.2 + laneOf(p) * 6, -9, 9) };
+  if (puck.owner !== null || !puck.shot || puck.vx * dir <= 2 || zoneOf(puck, dir) < 12)
+    return null;
+  if (isDefense(p))
+    return {
+      x: dir * deep(13.5),
+      z: clamp(puck.z * 0.2 + laneOf(p) * wide(6), -wide(9), wide(9)),
+    };
   return {
     x: dir * (RINK.goalX - 2.15),
     z: clamp(puck.z * 0.5 + laneOf(p) * 1.35, -2.6, 2.6),
@@ -410,7 +425,7 @@ function breakawayMove(s: MatchState, p: Skater): BreakawayMove {
 /** In-tight shootout rush: cut, toe-drag, delay, or fake before releasing. */
 function shootoutBreakaway(s: MatchState, p: Skater, decision: AIDecision): Vec2 {
   const dir = attackDirection(p.team, s.period),
-    zone = dir * p.x,
+    zone = zoneOf(p, dir),
     goalie = goalieOf(s, p.team === 0 ? 1 : 0),
     move = breakawayMove(s, p),
     side = move === 'wideDrive' || move === 'delay' ? -1 : 1;
@@ -422,60 +437,60 @@ function shootoutBreakaway(s: MatchState, p: Skater, decision: AIDecision): Vec2
   let target: Vec2;
   switch (move) {
     case 'cutIn':
-      if (zone < 13) target = { x: dir * 17.5, z: side * 4.2 };
+      if (zone < 13) target = { x: dir * deep(17.5), z: side * 4.2 };
       else if (zone < 19.2) {
-        target = { x: dir * 21.8, z: -side * 1.1 };
+        target = { x: dir * deep(21.8), z: -side * 1.1 };
         decision.stickX = -side * 0.82;
       } else {
-        target = { x: dir * 23.4, z: -side * 0.45 };
+        target = { x: dir * deep(23.4), z: -side * 0.45 };
         decision.stickX = -side;
       }
       decision.shotHeight = 0.74;
       break;
     case 'toeDrag':
-      if (zone < 14.5) target = { x: dir * 19, z: side * 2.4 };
+      if (zone < 14.5) target = { x: dir * deep(19), z: side * 2.4 };
       else if (zone < 20.6) {
-        target = { x: dir * 22.2, z: side * 2.9 };
+        target = { x: dir * deep(22.2), z: side * 2.9 };
         decision.stickX = side * 0.72;
         decision.toeDrag = true;
       } else {
-        target = { x: dir * 23.5, z: -side * 1.15 };
+        target = { x: dir * deep(23.5), z: -side * 1.15 };
         decision.stickX = -side * 0.95;
       }
       decision.shotHeight = 0.16;
       decision.shotPower = 0.32;
       break;
     case 'delay':
-      if (zone < 15.5) target = { x: dir * 18.2, z: side * 1.4 };
+      if (zone < 15.5) target = { x: dir * deep(18.2), z: side * 1.4 };
       else if (zone < 20.2) {
         target = { x: p.x + dir * 1.1, z: -side * 0.55 };
         decision.hustle = false;
         decision.stickX = side * 0.55;
       } else {
-        target = { x: dir * 23.6, z: -side * 1 };
+        target = { x: dir * deep(23.6), z: -side * 1 };
         decision.stickX = -side * 0.88;
         decision.hustle = p.stamina > 0.2;
       }
       decision.shotHeight = 0.68;
       break;
     case 'wideDrive':
-      if (zone < 13.5) target = { x: dir * 16.5, z: side * 7.6 };
+      if (zone < 13.5) target = { x: dir * deep(16.5), z: side * 7.6 };
       else if (zone < 19.8) {
-        target = { x: dir * 21.2, z: side * 6.4 };
+        target = { x: dir * deep(21.2), z: side * 6.4 };
         decision.stickX = side * 0.45;
       } else {
-        target = { x: dir * 23.2, z: side * 1.3 };
+        target = { x: dir * deep(23.2), z: side * 1.3 };
         decision.stickX = -side * 0.92;
       }
       decision.shotAim = -side * 0.7;
       break;
     case 'shelfFake':
-      if (zone < 14.8) target = { x: dir * 18.8, z: side * 0.6 };
+      if (zone < 14.8) target = { x: dir * deep(18.8), z: side * 0.6 };
       else if (zone < 20) {
-        target = { x: dir * 22, z: side * 2.3 };
+        target = { x: dir * deep(22), z: side * 2.3 };
         decision.stickX = side;
       } else {
-        target = { x: dir * 23.5, z: -side * 1.7 };
+        target = { x: dir * deep(23.5), z: -side * 1.7 };
         decision.stickX = -side;
       }
       decision.shotHeight = 0.84;
@@ -546,7 +561,7 @@ export function decideAI(s: MatchState, p: Skater): AIDecision {
     const look = scoringLook(s, p),
       press = nearestGap(s, p),
       outlet = bestOutlet(s, p),
-      zone = dir * p.x;
+      zone = zoneOf(p, dir);
     target = carrierTarget(s, p);
     const facingNet = facing(p, dir, 0) > 0.08;
     if (s.mode === 'shootout') target = shootoutBreakaway(s, p, decision);

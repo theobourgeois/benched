@@ -1,9 +1,17 @@
 import { useSyncExternalStore } from 'react';
-import { createMatch, nextPeriod, startMatch, togglePause } from '../game/engine';
+import {
+  adoptMatchTables,
+  createMatch,
+  nextPeriod,
+  resetFormation,
+  startMatch,
+  togglePause,
+} from '../game/engine';
 import { ArenaAudio, readVolume } from '../audio/sound';
 import { Controller, type ReplayInput } from '../input/controller';
 import type { NetSession } from '../net/session';
 import type { Club } from '../game/clubs';
+import { RINKS, STYLES } from '../game/config';
 import { DEFAULT_DIFFICULTY } from '../game/difficulty';
 import { modeInfo } from '../game/modes';
 import {
@@ -24,8 +32,10 @@ const SETTINGS_KEY = 'hcky.settings';
 // The game was called Benched before hcky.io; settings saved under that name still load until
 // the next save writes them under the new key.
 const LEGACY_SETTINGS_KEY = 'benched.settings';
+const settings = loadSettings();
 export const runtime = {
-  match: createMatch(),
+  // The rink behind the menu is the one the next game will be played on.
+  match: createMatch(0, 'exhibition', undefined, undefined, settings),
   /**
    * The side this client is watching: camera, HUD and stick mapping all take its point of view.
    * The match itself has no "you" — both sides are just sides — so this lives here, not in state.
@@ -65,7 +75,7 @@ export const runtime = {
   recorder: new ReplayBuffer(),
   /** The replay on screen, if any. The live match holds still underneath it. */
   replay: null as ReplaySession | null,
-  settings: loadSettings(),
+  settings,
 };
 runtime.audio.apply(runtime.settings);
 function loadSettings(): Settings {
@@ -78,6 +88,8 @@ function loadSettings(): Settings {
     quality: 'high',
     beginner: true,
     difficulty: DEFAULT_DIFFICULTY,
+    style: 'fast',
+    rink: 'barn',
     goalReplays: true,
     goalMusic: true,
     showFps: true,
@@ -91,6 +103,9 @@ function loadSettings(): Settings {
     next.masterVolume = readVolume(saved.masterVolume, defaults.masterVolume);
     next.sfxVolume = readVolume(saved.sfxVolume, defaults.sfxVolume);
     next.musicVolume = readVolume(saved.musicVolume, defaults.musicVolume);
+    // These two index tables, so a value from an older or newer build must not get through.
+    if (!(next.style in STYLES)) next.style = defaults.style;
+    if (!(next.rink in RINKS)) next.rink = defaults.rink;
     return next;
   } catch {
     return defaults;
@@ -152,7 +167,13 @@ export function beginGame(
   runtime.replay = null;
   runtime.myTeam = team;
   runtime.seatTwo = seatTwo;
-  runtime.match = createMatch(seatTwo === null ? team : [team, seatTwo], mode, teams, jerseys);
+  runtime.match = createMatch(
+    seatTwo === null ? team : [team, seatTwo],
+    mode,
+    teams,
+    jerseys,
+    runtime.settings,
+  );
   runtime.match.difficulty = runtime.settings.difficulty;
   startMatch(runtime.match);
   publish();
@@ -172,19 +193,51 @@ export function returnToMenu() {
   runtime.queue = null;
   runtime.found = null;
   const { teams, jerseys } = runtime.match;
-  runtime.match = createMatch(runtime.myTeam, 'exhibition', teams, jerseys);
+  runtime.match = createMatch(runtime.myTeam, 'exhibition', teams, jerseys, runtime.settings);
   publish();
 }
 export function updateSettings(settings: Partial<Settings>) {
   Object.assign(runtime.settings, settings);
   runtime.audio.apply(runtime.settings);
   if (settings.difficulty) runtime.match.difficulty = settings.difficulty;
+  retable(settings);
   try {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(runtime.settings));
   } catch {
     // Private windows can refuse storage; the settings still hold for this session.
   }
   publish();
+}
+/**
+ * Style and rink belong to a match, not to the client: online they are the host's and are settled
+ * at the puck drop. In a local game both take hold at once. A new style is only new numbers; a
+ * new rink moves the boards and the goal lines under everybody, so play is whistled down and
+ * restarts from a faceoff at centre on the new sheet, with the score and the clock as they were.
+ */
+function retable({ style, rink }: Partial<Settings>) {
+  const s = runtime.match;
+  if (runtime.net || (!style && !rink)) return;
+  const resurface = !!rink && rink !== s.rink;
+  if (style) s.style = style;
+  if (resurface) s.rink = rink;
+  adoptMatchTables(s);
+  if (!resurface) return;
+  // What was recorded happened on the other sheet, and would replay through these boards.
+  runtime.replay = null;
+  runtime.recorder.clear();
+  const paused = s.phase === 'paused',
+    phase = paused ? s.previousPhase : s.phase;
+  // A shootout attempt that has just ended is counted when its celebration runs out, and lines
+  // up on the new sheet then.
+  if (s.mode === 'shootout' && phase === 'goal') return;
+  resetFormation(s);
+  if (phase !== 'playing' && phase !== 'faceoff' && phase !== 'goal') return;
+  startMatch(s);
+  // Settings are reached through the pause menu: come back to the draw, not to open play.
+  if (paused) {
+    s.previousPhase = s.phase;
+    s.phase = 'paused';
+  }
 }
 export const canInstantReplay = () => runtime.recorder.length >= REPLAY_HZ;
 export function openInstantReplay() {

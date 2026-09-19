@@ -9,7 +9,14 @@ import {
 import { createMatch, startMatch } from '../game/engine';
 import type { GameMode, Team } from '../game/types';
 import type { DirectorySession } from '../net/directory';
-import { FOUND_CONFIRM_MS, JOIN_WAIT_MS, type MatchSetup, type QuickMode } from '../net/protocol';
+import {
+  FOUND_CONFIRM_MS,
+  GAME_STYLES,
+  JOIN_WAIT_MS,
+  RINK_SIZES,
+  type MatchSetup,
+  type QuickMode,
+} from '../net/protocol';
 import { NetSession, ROOM_HOST } from '../net/session';
 import { beginGame, publish, returnToMenu, runtime } from './store';
 
@@ -79,7 +86,12 @@ export function beginOnlineMatch(setup: MatchSetup, myTeam: Team) {
     clubByKey(setup.clubs[0]) ?? DEFAULT_MATCHUP[0],
     clubByKey(setup.clubs[1]) ?? DEFAULT_MATCHUP[1],
   ];
-  runtime.match = createMatch([0, 1], setup.mode, clubs, setup.jerseys);
+  // The host's style and rink, never this client's own: both ends have to be on the same ice.
+  // A value this build does not know (a newer host) falls back rather than indexing nothing.
+  runtime.match = createMatch([0, 1], setup.mode, clubs, setup.jerseys, {
+    style: GAME_STYLES.includes(setup.style!) ? setup.style : 'fast',
+    rink: RINK_SIZES.includes(setup.rink!) ? setup.rink : 'barn',
+  });
   startMatch(runtime.match);
   publish();
 }
@@ -105,7 +117,14 @@ export function setupFor(net: NetSession, mine: Club, across: Club): MatchSetup 
   const picked = them?.club ? clubByKey(them.club) : undefined;
   const theirs = picked && picked.key !== mine.key ? picked : across;
   const clubs: [string, string] = myTeam === 0 ? [mine.key, theirs.key] : [theirs.key, mine.key];
-  return { mode: net.mode, clubs, jerseys: jerseysFor(myTeam, 'home'), hostTeam: myTeam };
+  return {
+    mode: net.mode,
+    clubs,
+    jerseys: jerseysFor(myTeam, 'home'),
+    hostTeam: myTeam,
+    style: runtime.settings.style,
+    rink: runtime.settings.rink,
+  };
 }
 
 /**

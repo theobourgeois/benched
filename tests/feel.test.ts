@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_PHYSICS, DEFAULT_STICK, PHYSICS, STICK } from '../src/game/config';
+import { DEFAULT_PHYSICS, DEFAULT_STICK, PHYSICS, STICK, STYLES } from '../src/game/config';
 import { copyFeelTweaks, FEEL_PARAMS, formatFeel } from '../src/dev/feel';
 
 describe('feel tuner coverage', () => {
@@ -21,6 +21,15 @@ describe('feel tuner coverage', () => {
     expect(PHYSICS).toEqual(DEFAULT_PHYSICS);
     expect(STICK).toEqual(DEFAULT_STICK);
     expect(copyFeelTweaks()).toMatch(/No feel tweaks/);
+  });
+  it('can reach every number a game style sets, so a style can be tuned by hand', () => {
+    for (const [style, tables] of Object.entries(STYLES))
+      for (const param of FEEL_PARAMS) {
+        const value = (tables[param.table] as Record<string, number | undefined>)[param.key];
+        if (value === undefined) continue;
+        expect(value, `${style} ${param.key}`).toBeGreaterThanOrEqual(param.min);
+        expect(value, `${style} ${param.key}`).toBeLessThanOrEqual(param.max);
+      }
   });
   it('formats slider values from the step size', () => {
     expect(formatFeel(9.6, 0.1)).toBe('9.6');

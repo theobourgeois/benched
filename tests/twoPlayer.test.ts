@@ -9,7 +9,7 @@ import {
   stickTip,
 } from '../src/game/engine';
 import { cpuTune } from '../src/game/difficulty';
-import { EMPTY_INPUT, GOALIE, RULES } from '../src/game/config';
+import { attackDirection, EMPTY_INPUT, FACEOFF, GOALIE, RULES } from '../src/game/config';
 import { isOnIce } from '../src/game/modes';
 import { createView, REPLAY_HZ, ReplayBuffer, sampleReplay } from '../src/game/replay';
 import { decodeSnapshot, encodeSnapshot, poseSnapshot } from '../src/net/snapshot';
@@ -99,27 +99,156 @@ describe('two people on the ice', () => {
 });
 
 describe('the draw with two people swinging', () => {
+  // Countdown left at the release: anything above it jumped the drop.
+  const release = FACEOFF.fall + FACEOFF.late;
   const drawWith = (homeStrike: number, awayStrike: number) => {
     const s = createMatch([0, 1]);
     s.sides[0].drawInput = homeStrike;
     s.sides[1].drawInput = awayStrike;
     return drawWinner(s);
   };
-  it('gives it to the side that timed the drop', () => {
+  it('gives it to the side that swung at the drop', () => {
     expect(drawWith(0.2, -1)).toBe(0);
     expect(drawWith(-1, 0.2)).toBe(1);
   });
-  it('gives it to whoever struck closest to the drop when both timed it', () => {
-    expect(drawWith(0.05, 0.3)).toBe(0);
-    expect(drawWith(0.3, 0.05)).toBe(1);
+  it('gives it to whoever swung first after the release', () => {
+    expect(drawWith(release - 0.1, release - 0.3)).toBe(0);
+    expect(drawWith(release - 0.3, release - 0.1)).toBe(1);
+  });
+  it('ties up two sticks that arrive together', () => {
+    expect(drawWith(0.3, 0.3 - FACEOFF.tie / 2)).toBeNull();
   });
   it('punishes jumping it, even against a side that never swung', () => {
-    expect(drawWith(0.9, -1)).toBe(1);
-    expect(drawWith(-1, 0.9)).toBe(0);
+    expect(drawWith(release + 0.2, -1)).toBe(1);
+    expect(drawWith(-1, release + 0.2)).toBe(0);
+    expect(drawWith(release + 0.2, 0.1)).toBe(1);
   });
-  it('is decided by the least early swing when both jumped it', () => {
-    expect(drawWith(0.6, 0.9)).toBe(0);
-    expect(drawWith(0.9, 0.6)).toBe(1);
+  it('leaves it loose when both jumped or nobody swung', () => {
+    expect(drawWith(release + 0.2, release + 0.4)).toBeNull();
+    expect(drawWith(-1, -1)).toBeNull();
+  });
+});
+
+describe('taking a draw with the right stick', () => {
+  /** Two people at centre ice, steps until the linesman lets go. */
+  const setUp = () => {
+    const s = createMatch([0, 1]);
+    startMatch(s);
+    return s;
+  };
+  const release = FACEOFF.fall + FACEOFF.late;
+  const untilDrop = (s: MatchState, inputs: SideInputs = both({}, {})) => {
+    while (s.countdown > release) stepMatch(s, inputs);
+  };
+  const back = (s: MatchState, team: Team) => ({ stickIceX: -attackDirection(team, s.period) });
+
+  it('holds the puck up until the drop, then lets it fall to the ice', () => {
+    const s = setUp();
+    expect(s.puck.y).toBeGreaterThan(1);
+    untilDrop(s);
+    expect(s.puck.y).toBeGreaterThan(1);
+    run(s, both({}, {}), FACEOFF.fall);
+    expect(s.puck.y).toBeLessThan(0.1);
+  });
+
+  it('does not drop on the same beat every time', () => {
+    const waits = [0, 1, 2, 3].map((goals) => {
+      const s = createMatch([0, 1]);
+      s.score = [goals, 0];
+      startMatch(s);
+      return s.countdown;
+    });
+    expect(new Set(waits.map((w) => w.toFixed(3))).size).toBeGreaterThan(2);
+  });
+
+  it('wins it back to a defenceman for whoever pulls the stick back first', () => {
+    const s = setUp();
+    untilDrop(s);
+    run(s, both(back(s, 0), {}), 0.15);
+    run(s, both(back(s, 0), back(s, 1)), 0.5);
+    expect(s.phase).toBe('playing');
+    expect(s.puck.lastTouch).toBe(0);
+    const to = s.skaters[s.puck.passTo ?? s.puck.owner ?? 0];
+    expect(to.team).toBe(0);
+    expect(['LD', 'RD']).toContain(to.role);
+    expect(s.sides[0].humans[0].controlled).toBe(to.id);
+  });
+
+  it('sends it to a winger when the stick goes to the side', () => {
+    const s = setUp();
+    untilDrop(s);
+    run(s, both({ stickIceZ: 1 }, {}), 0.6);
+    const to = s.skaters[s.puck.passTo ?? s.puck.owner ?? 0];
+    expect(to.team).toBe(0);
+    expect(['LW', 'RW']).toContain(to.role);
+  });
+
+  it('loses the draw for jumping it', () => {
+    const s = setUp();
+    run(s, both({}, {}), 0.1);
+    stepMatch(s, both(back(s, 0), {}));
+    untilDrop(s);
+    run(s, both({}, back(s, 1)), 0.6);
+    expect(s.puck.lastTouch).toBe(1);
+  });
+
+  it('leaves the left stick out of it: skating input is not a swing', () => {
+    const s = setUp();
+    untilDrop(s);
+    run(s, both({ moveX: -1, moveZ: 1 }, {}), 0.1);
+    expect(s.sides[0].drawInput).toBe(-1);
+  });
+
+  it('shows the swing on the stick when it is thrown, early, on time or late', () => {
+    const swung = (s: MatchState) => s.skaters[0].shotTimer;
+    const early = setUp();
+    run(early, both({}, {}), 0.1);
+    stepMatch(early, both(back(early, 0), {}));
+    expect(early.countdown).toBeGreaterThan(release);
+    expect(swung(early)).toBeGreaterThan(0.3);
+    // It plays out while the linesman is still holding the puck, not at the drop.
+    const before = swung(early);
+    run(early, both({}, {}), 0.1);
+    expect(swung(early)).toBeLessThan(before);
+
+    const onTime = setUp();
+    untilDrop(onTime);
+    expect(swung(onTime)).toBe(0);
+    stepMatch(onTime, both(back(onTime, 0), {}));
+    expect(swung(onTime)).toBeGreaterThan(0.3);
+
+    // Beaten to it: the second swing loses the draw and is still seen.
+    const late = setUp();
+    untilDrop(late);
+    stepMatch(late, both({}, back(late, 1)));
+    run(late, both({}, {}), FACEOFF.tie * 2);
+    if (late.phase === 'faceoff') {
+      stepMatch(late, both(back(late, 0), {}));
+      expect(swung(late)).toBeGreaterThan(0.3);
+    }
+    expect(late.skaters[6].shotTimer).toBeGreaterThan(0);
+  });
+
+  it('does not count a stick still held from before the whistle as a swing', () => {
+    const s = setUp();
+    untilDrop(s, both(back(s, 0), {}));
+    expect(s.sides[0].drawInput).toBe(-1);
+  });
+
+  it('lets the better CPU centre win more of the draws', () => {
+    let legend = 0;
+    for (let i = 0; i < 40; i++) {
+      const s = createMatch([0]);
+      s.tick = i * 997;
+      s.difficulty = 'rookie';
+      startMatch(s);
+      untilDrop(s, both({}, {}));
+      // A person reacting like a Legend CPU, against a Rookie one.
+      const swing = s.countdown - 0.2;
+      while (s.phase === 'faceoff') stepMatch(s, both(s.countdown <= swing ? back(s, 0) : {}, {}));
+      if (s.puck.lastTouch === 0) legend++;
+    }
+    expect(legend).toBeGreaterThan(28);
   });
 });
 

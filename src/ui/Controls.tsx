@@ -70,7 +70,13 @@ const PAD: Group[] = [
       ['A', 'Hand the puck to your goalie'],
     ],
   },
-  { title: 'Faceoffs', rows: [['RT / RB', 'Win the draw as the puck drops']] },
+  {
+    title: 'Faceoffs',
+    rows: [
+      ['Right stick', 'Snap it as the puck drops: back to your D, sideways to a wing'],
+      ['RT / RB', 'Swing at the drop and draw it back'],
+    ],
+  },
   {
     title: 'After a goal',
     rows: [
@@ -147,7 +153,13 @@ const KEYBOARD: Group[] = [
       ['Q', 'Hand the puck to your goalie'],
     ],
   },
-  { title: 'Faceoffs', rows: [['Space / E', 'Win the draw as the puck drops']] },
+  {
+    title: 'Faceoffs',
+    rows: [
+      ['Arrow keys', 'Press as the puck drops: back to your D, sideways to a wing'],
+      ['Space / E', 'Swing at the drop and draw it back'],
+    ],
+  },
   {
     title: 'After a goal',
     rows: [

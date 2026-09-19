@@ -163,6 +163,21 @@ describe('snapshot round trip', () => {
     }
   });
 
+  it("carries a draw in progress: the raised puck and each centre's swing", () => {
+    const host = createMatch([0, 1]);
+    startMatch(host);
+    play(host, [[], []], 0.2);
+    play(host, [[{ ...EMPTY_INPUT, stickIceZ: -1 }], []], 0.05);
+    const guest = createMatch([0, 1]);
+    applySnapshot(guest, encodeSnapshot(host));
+    expect(guest.phase).toBe('faceoff');
+    expect(guest.puck.y).toBeCloseTo(host.puck.y, 2);
+    expect(guest.sides[0].drawInput).toBeCloseTo(host.sides[0].drawInput, 2);
+    expect(guest.sides[0].drawReady).toBe(true);
+    expect(guest.sides[0].drawAimZ).toBeCloseTo(-1, 2);
+    expect(guest.sides[1].drawInput).toBe(-1);
+  });
+
   it('keeps the match object it was given, because the scene reads identity as a cut', () => {
     const guest = createMatch([0, 1]);
     const skater = guest.skaters[3],

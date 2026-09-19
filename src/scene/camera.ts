@@ -1,4 +1,4 @@
-import { attackDirection, RINK } from '../game/config';
+import { attackDirection, RINK, RINKS } from '../game/config';
 import { leadHuman } from '../game/humans';
 import { clamp } from '../game/math';
 import type { CameraMode, MatchState, Settings, Team } from '../game/types';
@@ -75,6 +75,22 @@ const ANGLES: Record<Exclude<CameraMode, 'wide'>, TrackingAngle> = {
   },
 };
 
+/**
+ * The angles were framed on the barn. A wider sheet pushes the camera up and back by the same
+ * share, so the side boards sit where they always did on screen, but only so far: past
+ * `MAX_PULL` the skaters would be specks, so on a bandy field the camera stops rising and pans
+ * across with the puck instead.
+ */
+const MAX_PULL = 1.35;
+/** Metres the camera leads the play by once it is in on net, so the goal is in the frame. */
+const NET_LEAD = 5;
+const sheetScale = () => Math.min(MAX_PULL, RINK.halfWidth / RINKS.barn.halfWidth);
+/**
+ * How far off the middle the camera may slide: the width the pull-back does not already show,
+ * and half as much again, so a skater on the far wing sits inside the frame, not on its edge.
+ */
+const panRoom = () => Math.max(0, RINK.halfWidth - RINKS.barn.halfWidth * MAX_PULL) * 1.5;
+
 type Framing = {
   position: readonly [number, number, number];
   target: readonly [number, number, number];
@@ -98,8 +114,11 @@ export function cameraFraming(
   if (match.phase === 'menu')
     return { position: [35, 39, 45] as const, target: [0, 0, -1] as const, fov: 43 };
   switch (camera) {
-    case 'wide':
-      return { position: [3, 47, 53] as const, target: [0, 0, 0] as const, fov: 43 };
+    case 'wide': {
+      // The one camera that shows the whole sheet, so it goes as far back as the sheet needs.
+      const k = RINK.halfWidth / RINKS.barn.halfWidth;
+      return { position: [3, 47 * k, 53 * k] as const, target: [0, 0, 0] as const, fov: 43 };
+    }
     case 'broadcast':
     case 'tight':
     case 'high':
@@ -137,19 +156,29 @@ function trackingFraming(match: MatchState, aspect: number, angle: TrackingAngle
   const human = leadHuman(match, anchor);
   const direction = attackDirection(anchor, match.period),
     player = match.skaters[followed(match, anchor)];
-  const attackX = player.x * direction;
+  // Closing on the net is measured from the goal line, as far from centre as that is on this
+  // sheet. Written against centre ice, a long sheet reads as "in on net" from its own blue line
+  // and the camera runs on ahead of the play.
+  const shift = RINK.goalX - RINKS.barn.goalX;
+  const attackX = player.x * direction - shift;
   const netView = clamp((attackX - 8) / 14, 0, 1);
   const attackLook = clamp((match.puck.x * direction + 16) / 24, 0, 1);
   const lift = human && match.puck.owner === human.controlled ? human.shotLift : 0;
   const x = clamp(
-    match.puck.x * (1 - angle.follow - netView * 0.22) +
-      player.x * angle.follow +
-      direction * (angle.attackBias + netView * (RINK.goalX - 21)),
-    -23,
-    23,
+    match.puck.x * (1 - angle.follow) +
+      player.x * angle.follow -
+      netView * 0.22 * (match.puck.x - direction * shift) +
+      direction * (angle.attackBias + netView * NET_LEAD),
+    3 - RINK.goalX,
+    RINK.goalX - 3,
   );
-  const z = clamp(match.puck.z * 0.22 + (human?.shotAim ?? 0) * netView * 0.55, -3.4, 3.4);
-  const scale = clamp(1.45 / aspect, 1, 2.6);
+  const pan = panRoom();
+  const z = clamp(
+    match.puck.z * Math.max(0.22, pan / RINK.halfWidth) + (human?.shotAim ?? 0) * netView * 0.55,
+    -Math.max(3.4, pan),
+    Math.max(3.4, pan),
+  );
+  const scale = clamp(1.45 / aspect, 1, 2.6) * sheetScale();
   const height = (angle.height - netView * angle.heightDrop - lift * 1.8) * scale;
   const back = (angle.back + netView * angle.backIn) * scale;
   return {

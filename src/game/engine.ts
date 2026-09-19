@@ -1,6 +1,9 @@
 import {
+  applyRink,
+  applyStyle,
   attackDirection,
   EMPTY_INPUT,
+  FACEOFF,
   GET_UP,
   GOALIE,
   GOALIE_STICK,
@@ -48,12 +51,14 @@ import type {
   DekeSpecial,
   GameEvent,
   GameMode,
+  GameStyle,
   Human,
   InputFrame,
   MatchState,
   Jersey,
   Phase,
   Puck,
+  RinkSize,
   Skater,
   SideInputs,
   SideState,
@@ -68,6 +73,9 @@ function createSide(team: Team, seats: number): SideState {
   return {
     humans: Array.from({ length: Math.min(seats, MAX_HUMANS) }, () => createHuman(team * 6)),
     drawInput: -1,
+    drawReady: false,
+    drawAimX: 0,
+    drawAimZ: 0,
   };
 }
 /** What a person's stick carries between whistles: nothing. */
@@ -148,8 +156,10 @@ export function createMatch(
   mode: GameMode = 'exhibition',
   teams: [Club, Club] = DEFAULT_MATCHUP,
   jerseys: [Jersey, Jersey] = ['home', 'away'],
+  { style = 'fast', rink = 'barn' }: { style?: GameStyle; rink?: RinkSize } = {},
 ): MatchState {
   const played = Array.isArray(humans) ? humans : [humans];
+  adoptMatchTables({ style, rink });
   const s: MatchState = {
     mode,
     phase: 'menu',
@@ -181,6 +191,8 @@ export function createMatch(
     teams,
     jerseys,
     difficulty: DEFAULT_DIFFICULTY,
+    style,
+    rink,
     scoringTeam: null,
     tick: 0,
     hitstop: 0,
@@ -251,6 +263,15 @@ export function createMatch(
   resetFormation(s);
   return s;
 }
+/**
+ * Point the config tables at a match's style and rink. There is one set of tables and one match
+ * on the ice at a time, so the newest match owns them; a client following somebody else's match
+ * calls this with what that match was set up as.
+ */
+export function adoptMatchTables(s: Pick<MatchState, 'style' | 'rink'>) {
+  applyStyle(s.style);
+  applyRink(s.rink);
+}
 export function resetFormation(s: MatchState) {
   const positions = [
     [-1.6, 0],
@@ -258,7 +279,7 @@ export function resetFormation(s: MatchState) {
     [-3, 7],
     [-11, -5],
     [-11, 5],
-    [-25, 0],
+    [1 - RINK.goalX, 0],
   ];
   for (const p of s.skaters) {
     const dir = attackDirection(p.team, s.period),
@@ -351,13 +372,20 @@ export function startMatch(s: MatchState) {
     return;
   }
   s.phase = 'faceoff';
-  s.countdown = RULES.faceoffSeconds;
+  s.countdown = FACEOFF.set + FACEOFF.hold * hash01(s.tick, s.score[0] * 31 + s.score[1]) + DROP;
+  s.puck.y = FACEOFF.height;
   clearDraw(s);
 }
+/** Countdown left when the linesman lets go: the fall, then the grace for a late swing. */
+const DROP = FACEOFF.fall + FACEOFF.late;
 /** Nobody has swung at the next drop yet. */
 function clearDraw(s: MatchState) {
-  s.sides[0].drawInput = -1;
-  s.sides[1].drawInput = -1;
+  for (const side of s.sides) {
+    side.drawInput = -1;
+    side.drawReady = false;
+    side.drawAimX = 0;
+    side.drawAimZ = 0;
+  }
 }
 function givePuck(s: MatchState, p: Skater) {
   s.puck.owner = p.id;
@@ -585,46 +613,168 @@ function tryStartDeke(p: Skater, input: InputFrame) {
 function puckReach(player: Skater, puck: { x: number; z: number }) {
   return Math.min(distance(stickTip(player), puck), distance(player, puck) + 0.12);
 }
+/** Swung before the puck left the linesman's hand. */
+const jumped = (drawInput: number) => drawInput > DROP;
+/** Swung after the release: a real swing at the puck. */
+const clean = (drawInput: number) => drawInput >= 0 && drawInput <= DROP;
 /**
- * How good a side's strike at the draw was, lower being better: on time, then not swinging at
- * all, then jumping it. Ties inside a tier go to whoever struck closest to the drop.
+ * Who takes the draw, or null when nobody does and the puck is left loose. The first clean swing
+ * wins, unless the other came so close behind that the sticks tie up. A side that jumped it loses
+ * to anyone who did not, swing or no swing; two that jumped, or two that never swung, scramble.
  */
-function drawTier(drawInput: number) {
-  if (drawInput < 0) return 1;
-  return drawInput <= 0.42 ? 0 : 2;
+export function drawWinner(s: MatchState): Team | null {
+  const [home, away] = [s.sides[0].drawInput, s.sides[1].drawInput];
+  if (clean(home) && clean(away))
+    return Math.abs(home - away) < FACEOFF.tie ? null : home > away ? 0 : 1;
+  if (clean(home) || clean(away)) return clean(home) ? 0 : 1;
+  if (jumped(home) !== jumped(away)) return jumped(home) ? 1 : 0;
+  return null;
+}
+/** The draw is settled once the puck is down and nobody still swinging could change it. */
+function drawSettled(s: MatchState) {
+  if (s.countdown <= 0) return true;
+  if (s.countdown > FACEOFF.late) return false;
+  const [home, away] = [s.sides[0].drawInput, s.sides[1].drawInput];
+  if (home >= 0 && away >= 0) return true;
+  const first = Math.max(home, away);
+  return clean(first) && first - s.countdown >= FACEOFF.tie;
 }
 /**
- * Who takes the draw. Timing the drop beats not swinging, which beats jumping it; inside a tier
- * the stick that arrived closest to the puck wins. Two sides that did the same thing — most often
- * two CPUs, neither of which swings — fall back to the coin flip this has always been.
+ * A CPU centre reads the drop: it swings a moment after the release, a better one sooner, and now
+ * and then guesses and jumps it. Rolled per step from the tick, so the simulation stays repeatable.
  */
-export function drawWinner(s: MatchState): Team {
-  const [home, away] = [s.sides[0].drawInput, s.sides[1].drawInput];
-  const tiers = [drawTier(home), drawTier(away)];
-  if (tiers[0] !== tiers[1]) return tiers[0] < tiers[1] ? 0 : 1;
-  if (home !== away) return home < away ? 0 : 1;
-  return Math.sin(s.tick * 12.989) > 0 ? 0 : 1;
+function cpuSwings(s: MatchState, t: Team, dt: number) {
+  const tune = cpuTune(s, s.skaters[t * 6]),
+    sinceDrop = DROP - s.countdown,
+    roll = hash01(s.tick, 91 + t);
+  const spread = 0.06;
+  if (sinceDrop < 0) return sinceDrop > -0.25 && roll < (tune.drawJump * dt) / 0.25;
+  return sinceDrop >= tune.draw - spread && roll < dt / spread;
+}
+/** How long a centre's swing at the draw shows on their stick. */
+const DRAW_SWING = 0.35;
+/**
+ * A centre swings, and is seen to: the stick goes the moment it is thrown, whether that was
+ * before the puck left the hand, on it, or too late, so whoever threw it can see which.
+ */
+function swingAtDraw(s: MatchState, t: Team) {
+  const centre = s.skaters[t * 6];
+  s.sides[t].drawInput = s.countdown;
+  centre.shotTimer = centre.shotDuration = DRAW_SWING;
+  centre.shotStyle = 'pass';
+  centre.shotSide = centre.stickSide;
+  centre.shotReach = centre.stickReach;
+  centre.shotLoad = 0;
+}
+/**
+ * The centres get set and swing. Only the person on a side's centre takes its draw; a CPU centre
+ * swings on its own. The draw is on the right stick, the one that holds the blade everywhere
+ * else: it has to be let go before a push counts, so a stick still held from the last whistle is
+ * not a swing.
+ */
+function stepFaceoff(s: MatchState, inputs: SideInputs, dt: number) {
+  for (const t of TEAMS) {
+    const side = s.sides[t],
+      centre = s.skaters[t * 6];
+    // Nothing else steps during a draw, so the swing's own clock runs here.
+    centre.shotTimer = Math.max(0, centre.shotTimer - dt);
+    if (side.drawInput >= 0) continue;
+    const seat = side.humans.findIndex((h) => h.controlled === t * 6);
+    if (seat < 0) {
+      if (cpuSwings(s, t, dt)) swingAtDraw(s, t);
+      continue;
+    }
+    const input = frameFor(t, seat, inputs),
+      push = Math.hypot(input.stickIceX, input.stickIceZ);
+    if (push < FACEOFF.neutral) side.drawReady = true;
+    const swing =
+      input.pass || input.poke || input.shoot || (side.drawReady && push > FACEOFF.push);
+    if (!swing) continue;
+    swingAtDraw(s, t);
+    const aim =
+      push > FACEOFF.neutral ? normalized(input.stickIceX, input.stickIceZ) : { x: 0, z: 0 };
+    side.drawAimX = aim.x;
+    side.drawAimZ = aim.z;
+  }
+  const held = s.countdown > DROP;
+  s.countdown -= dt;
+  if (held && s.countdown <= DROP) emit(s, 'faceoff');
+  const fallen = clamp((DROP - s.countdown) / FACEOFF.fall, 0, 1);
+  s.puck.y = PUCK.restY + (FACEOFF.height - PUCK.restY) * (1 - fallen * fallen);
+  if (!drawSettled(s)) return;
+  resolveFaceoff(s);
+  s.phase = 'playing';
+  s.countdown = 0;
+}
+/**
+ * Play the draw where the winner swung it: back to a teammate if one is in that direction, or
+ * tapped into space to skate onto. With the stick let go it goes back, the way most draws do.
+ */
+function drawPuck(s: MatchState, p: Skater, aimX: number, aimZ: number) {
+  const dir = attackDirection(p.team, s.period);
+  const aim = aimX || aimZ ? { x: aimX, z: aimZ } : { x: -dir, z: 0 };
+  const lane = passLane(s, p, aim.x, aim.z);
+  releasePuck(
+    s,
+    p,
+    lane.target ? lane.dx : aim.x,
+    lane.target ? lane.dz : aim.z,
+    lane.target ? PHYSICS.passSpeed * FACEOFF.pass : FACEOFF.tap,
+    0,
+    false,
+    { x: 0, z: 0, y: PUCK.restY },
+  );
+  // The swing that won it is usually still on their stick; a win handed over by the other side
+  // jumping it, long after their own, gets one now.
+  if (p.shotTimer <= 0) {
+    p.shotTimer = p.shotDuration = DRAW_SWING;
+    p.shotStyle = 'pass';
+    p.shotSide = p.stickSide;
+    p.shotReach = p.stickReach;
+    p.shotLoad = 0;
+  }
+  // Tapped past the other centre, it is theirs to chase; won back, it is the receiver's.
+  p.cooldown = lane.target ? 0.3 : 0.12;
+  if (lane.target) {
+    s.puck.passTo = lane.target.id;
+    handOver(s, lane.target, humanOn(s, p));
+  }
+  emit(s, 'stick', 0.5);
 }
 function resolveFaceoff(s: MatchState) {
   const won = drawWinner(s);
-  const winner = s.skaters[won * 6],
-    loser = s.skaters[(1 - won) * 6];
-  s.puck.owner = winner.id;
-  s.puck.lastTouch = winner.team;
-  s.puck.shot = false;
-  s.puck.passTo = null;
-  s.puck.lockout = 0;
-  const tip = stickTip(winner);
-  s.puck.x = tip.x;
-  s.puck.z = tip.z;
-  s.puck.vx = winner.vx;
-  s.puck.vz = winner.vz;
-  handOver(s, winner);
-  winner.cooldown = 0.1;
-  loser.cooldown = 0.32;
-  s.sides[0].drawInput = -1;
-  s.sides[1].drawInput = -1;
-  notice(s, 'DRAW', winner.team);
+  const cheat = TEAMS.find((t) => jumped(s.sides[t].drawInput));
+  const centres = TEAMS.map((t) => s.skaters[t * 6]);
+  if (won === null) {
+    // Nobody won it clean. Sticks that met squirt it off somewhere; untouched, it just sits.
+    const swung = s.sides.some((side) => side.drawInput >= 0);
+    const angle = hash01(s.tick, 17) * Math.PI * 2,
+      speed = swung ? 2.4 : 0.4;
+    Object.assign(s.puck, {
+      x: 0,
+      z: 0,
+      y: PUCK.restY,
+      vx: Math.cos(angle) * speed,
+      vz: Math.sin(angle) * speed,
+      vy: 0,
+      owner: null,
+      lastTouch: null,
+      shot: false,
+      passTo: null,
+      lockout: 0.1,
+    });
+    for (const c of centres) c.cooldown = 0.12;
+    notice(s, cheat !== undefined ? 'BOTH JUMPED' : swung ? 'TIE-UP' : 'LOOSE PUCK');
+  } else {
+    const winner = centres[won],
+      loser = centres[1 - won];
+    const side = s.sides[won];
+    drawPuck(s, winner, side.drawAimX, side.drawAimZ);
+    // Long enough that a draw tapped past them is not simply theirs.
+    loser.cooldown = 0.45;
+    notice(s, cheat === 1 - won ? 'JUMPED' : 'DRAW', cheat === 1 - won ? (cheat as Team) : won);
+  }
+  clearDraw(s);
 }
 /** Lower is better: sit in the lane between the puck and our net, not chasing from behind. */
 function switchCost(p: Skater, from: { x: number; z: number }, netX: number) {
@@ -1924,20 +2074,7 @@ export function stepMatch(s: MatchState, inputs: SideInputs = [[], []], dt = RUL
   s.tick++;
   s.noticeTimer = Math.max(0, s.noticeTimer - dt);
   if (s.phase === 'faceoff') {
-    // A side's draw is taken by whoever is on its centre. Anybody else's swing is not at the dot.
-    for (const t of TEAMS) {
-      const side = s.sides[t];
-      const seat = side.humans.findIndex((h) => h.controlled === t * 6);
-      if (seat < 0) continue;
-      const input = frameFor(t, seat, inputs);
-      if (side.drawInput < 0 && (input.pass || input.poke)) side.drawInput = s.countdown;
-    }
-    s.countdown -= dt;
-    if (s.countdown <= 0) {
-      resolveFaceoff(s);
-      s.phase = 'playing';
-      emit(s, 'faceoff');
-    }
+    stepFaceoff(s, inputs, dt);
     return;
   }
   if (s.phase === 'goal') {

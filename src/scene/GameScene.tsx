@@ -19,7 +19,7 @@ import { recordRagdollPoses } from './ragdoll';
 import { replayFraming } from './replayCamera';
 import { cameraFraming } from './camera';
 import { playerLocator } from './locator';
-import { PUCK } from '../game/config';
+import { PUCK, RINKS } from '../game/config';
 import { labHooks } from './animationReview';
 /** Dev-only animation lab: drives the subject, the close-up camera, overlays and captures. */
 const LabScene = import.meta.env.DEV
@@ -280,6 +280,12 @@ class SceneBoundary extends Component<{ children: ReactNode }, { error: boolean 
 }
 export function GameScene() {
   const { match, settings } = useGame();
+  const sheet = RINKS[match.rink];
+  // How much further the far boards are than the barn's, for fog that was set by eye on the barn.
+  const reach = Math.max(
+    sheet.halfLength / RINKS.barn.halfLength,
+    sheet.halfWidth / RINKS.barn.halfWidth,
+  );
   const shotAim = useRef<HTMLDivElement>(null),
     locator = useRef<HTMLDivElement>(null),
     locatorTwo = useRef<HTMLDivElement>(null);
@@ -291,7 +297,7 @@ export function GameScene() {
           <Canvas
             shadows={settings.quality === 'high'}
             dpr={settings.quality === 'high' ? [1, 1.75] : 1}
-            camera={{ position: [35, 39, 45], fov: 43, near: 0.1, far: 250 }}
+            camera={{ position: [35, 39, 45], fov: 43, near: 0.1, far: 600 }}
             gl={{ antialias: true, powerPreference: 'high-performance' }}
             onCreated={({ gl }) => {
               gl.setClearColor('#071316');
@@ -304,32 +310,35 @@ export function GameScene() {
               </div>
             }
           >
-            <fog attach="fog" args={['#071316', 65, 135]} />
+            {/* The far end of a bigger sheet is further off than the barn's fog allows. */}
+            <fog attach="fog" args={['#071316', 65 * reach, 135 * reach]} />
             <ambientLight intensity={0.8} color="#bcd6e0" />
             <hemisphereLight args={['#d4ecf8', '#254545', 1.2]} />
+            {/* Keyed by rink: a shadow camera keeps the frustum it was made with. */}
             <directionalLight
+              key={match.rink}
               position={[6, 25, 12]}
               intensity={2.2}
               color="#f2f6ff"
               castShadow={settings.quality === 'high'}
               shadow-mapSize={[2048, 2048]}
-              shadow-camera-left={-36}
-              shadow-camera-right={36}
-              shadow-camera-top={24}
-              shadow-camera-bottom={-24}
+              shadow-camera-left={-sheet.halfLength - 6}
+              shadow-camera-right={sheet.halfLength + 6}
+              shadow-camera-top={sheet.halfWidth + 11}
+              shadow-camera-bottom={-sheet.halfWidth - 11}
               shadow-normalBias={0.04}
               shadow-radius={3}
               shadow-bias={-0.0002}
             />
             <directionalLight position={[-22, 16, -10]} intensity={1.1} color="#d6e6ff" />
             <Suspense fallback={null}>
-              <Arena iceLogo={match.teams[0].logoLight} />
+              <Arena key={match.rink} iceLogo={match.teams[0].logoLight} size={match.rink} />
               <Puck />
               <ShotAimHud marker={shotAim} />
               <PassAim seat={0} />
               <PassAim seat={1} />
               <IceSpray />
-              <GoalLamp />
+              <GoalLamp key={`lamp:${match.rink}`} />
             </Suspense>
             <Suspense fallback={null}>
               {/* Keyed by matchup so jerseys are rebuilt when the clubs or uniforms change. */}

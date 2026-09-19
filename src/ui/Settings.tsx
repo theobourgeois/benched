@@ -3,7 +3,7 @@ import { Fragment, useEffect, useState } from 'react';
 import { formatVolume, stepVolume } from '../audio/sound';
 import { DIFFICULTIES, difficultyInfo } from '../game/difficulty';
 import { publish, updateSettings, useGame } from '../app/store';
-import type { Settings } from '../game/types';
+import type { GameStyle, RinkSize, Settings } from '../game/types';
 import { step, useNav } from '../input/menuNavigation';
 import { CAMERA_OPTIONS } from '../scene/camera';
 import { OptionRow, Prompts, TitleBar, type OptionKind } from './kit';
@@ -24,6 +24,36 @@ interface Row {
   slide?: (value: number) => void;
 }
 type Toggle = { [K in keyof Settings]: Settings[K] extends boolean ? K : never }[keyof Settings];
+
+const STYLE_OPTIONS: { id: GameStyle; label: string; hint: string }[] = [
+  { id: 'fast', label: 'Fast', hint: 'Arcade pace: quick feet, sharp cuts, a hard, fast puck.' },
+  {
+    id: 'classic',
+    label: 'Classic',
+    hint: 'Slower and heavier. Speed takes building, turns run wide, and a sprint has to be saved for when it counts.',
+  },
+];
+const RINK_OPTIONS: { id: RinkSize; label: string; hint: string }[] = [
+  {
+    id: 'barn',
+    label: 'Barn',
+    hint: 'The house rink: 60 × 26 m, tight corners, room behind the net.',
+  },
+  { id: 'pro', label: 'Pro', hint: 'NHL ice: 200 × 85 ft, 28 ft corners, goal lines 11 ft out.' },
+  {
+    id: 'olympic',
+    label: 'Olympic',
+    hint: 'International ice: 60 × 30 m. Four metres wider, so more room on the wings.',
+  },
+  {
+    id: 'bandy',
+    label: 'Bandy',
+    hint: 'A bandy field: 100 × 60 m of open ice, no zones, and the net against the end boards.',
+  },
+];
+/** Moving the boards mid-game stops play; online, both are the host's call. */
+const RESTARTS_PLAY = ' Changing it now restarts play from a faceoff.';
+const HOSTS_CALL = ' Online, the host decides.';
 
 const cycle = <T,>(list: readonly T[], current: T, dir: number) =>
   list[(list.indexOf(current) + dir + list.length) % list.length];
@@ -50,6 +80,9 @@ export function SettingsScreen({ crumb, onClose }: { crumb: string; onClose: () 
   const fullscreen = useFullscreen();
   const status = controller.status;
   const difficulty = difficultyInfo(settings.difficulty);
+  const style = STYLE_OPTIONS.find((o) => o.id === settings.style) ?? STYLE_OPTIONS[0];
+  const rink = RINK_OPTIONS.find((o) => o.id === settings.rink) ?? RINK_OPTIONS[0];
+  const onIce = runtime.match.phase !== 'menu';
   const camera = CAMERA_OPTIONS.find((o) => o.value === settings.camera) ?? CAMERA_OPTIONS[0];
   const [cameraName, cameraDetail = ''] = camera.label.split(' · ');
 
@@ -69,6 +102,8 @@ export function SettingsScreen({ crumb, onClose }: { crumb: string; onClose: () 
   };
   const setDifficulty = (dir: 1 | -1) =>
     updateSettings({ difficulty: cycle(DIFFICULTIES, difficulty, dir).id });
+  const setStyle = (dir: 1 | -1) => updateSettings({ style: cycle(STYLE_OPTIONS, style, dir).id });
+  const setRink = (dir: 1 | -1) => updateSettings({ rink: cycle(RINK_OPTIONS, rink, dir).id });
   const setCamera = (dir: 1 | -1) =>
     updateSettings({ camera: cycle(CAMERA_OPTIONS, camera, dir).value });
   const setQuality = () =>
@@ -104,6 +139,24 @@ export function SettingsScreen({ crumb, onClose }: { crumb: string; onClose: () 
       hint: difficulty.hint,
       select: () => setDifficulty(1),
       step: setDifficulty,
+    },
+    {
+      id: 'style',
+      label: 'Game style',
+      kind: 'cycle',
+      value: style.label,
+      hint: style.hint + (runtime.net ? HOSTS_CALL : ''),
+      select: () => setStyle(1),
+      step: setStyle,
+    },
+    {
+      id: 'rink',
+      label: 'Rink size',
+      kind: 'cycle',
+      value: rink.label,
+      hint: rink.hint + (runtime.net ? HOSTS_CALL : onIce ? RESTARTS_PLAY : ''),
+      select: () => setRink(1),
+      step: setRink,
     },
     toggle(
       'beginner',

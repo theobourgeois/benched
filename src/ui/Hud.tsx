@@ -1,6 +1,6 @@
 import { ArrowRight, Loader2 } from 'lucide-react';
 import { lazy, Suspense, useState, type CSSProperties } from 'react';
-import { attackDirection } from '../game/config';
+import { attackDirection, FACEOFF } from '../game/config';
 import { modeInfo } from '../game/modes';
 import {
   beginGame,
@@ -33,6 +33,7 @@ function noticeText(s: MatchState, you: Team) {
   if (s.noticeTeam === null) return s.notice;
   const mine = s.noticeTeam === you;
   if (s.notice === 'DRAW') return mine ? 'DRAW WON' : 'DRAW LOST';
+  if (s.notice === 'JUMPED') return mine ? 'YOU JUMPED IT' : 'THEY JUMPED IT';
   if (s.notice === 'SHOT') return mine ? 'YOUR SHOT' : 'THEIR SHOT';
   return s.notice;
 }
@@ -294,12 +295,18 @@ function PlayerCard({
   );
 }
 
+/**
+ * No count: the linesman drops it whenever, and the puck falling is the cue. The whistle goes
+ * the moment it leaves the hand, so nothing here can be timed off a HUD that redraws at 12 Hz.
+ */
 function Faceoff({ s }: { s: MatchState }) {
-  const count = Math.ceil(s.countdown) || 1;
+  const held = s.countdown > FACEOFF.fall + FACEOFF.late;
+  if (!held) return null;
   return (
     <div className="faceoff">
       <span>{periodMark(s.period)} period</span>
-      <strong key={count}>{count}</strong>
+      <strong className="faceoff-set">Faceoff</strong>
+      <em>Snap the right stick at the drop · back to your D, sideways to a wing</em>
     </div>
   );
 }

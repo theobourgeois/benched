@@ -17,6 +17,7 @@ import {
 import {
   attackDirection,
   EMPTY_INPUT,
+  FACEOFF,
   GET_UP,
   IRON,
   PHYSICS,
@@ -69,12 +70,23 @@ describe('match rules', () => {
   it('shows a full period on the clock and plays it in a few real minutes', () => {
     const s = createMatch();
     s.phase = 'playing';
-    tick(s, RULES.playSeconds - RULES.realTimeFinish);
+    // Seconds the clock was actually running: a goal or the freeze on a big hit stops it, and
+    // whether the CPUs manage either in three minutes is not what this is about.
+    const live = (seconds: number) => {
+      let ran = 0;
+      while (ran < seconds - 1e-9 && s.phase !== 'intermission') {
+        const running = s.phase === 'playing' && s.hitstop <= 0;
+        stepMatch(s);
+        if (running) ran += RULES.fixedStep;
+        else if (s.phase === 'faceoff') s.phase = 'playing';
+      }
+    };
+    live(RULES.playSeconds - RULES.realTimeFinish);
     expect(s.clock).toBeCloseTo(RULES.realTimeFinish, 1);
     // The finish is real seconds.
-    tick(s, 5);
+    live(5);
     expect(s.clock).toBeCloseTo(RULES.realTimeFinish - 5, 1);
-    tick(s, 5.1);
+    live(5.1);
     expect(s.phase).toBe('intermission');
   });
   it('plays three periods, reverses ends and ends a tie as a draw', () => {
@@ -152,7 +164,7 @@ describe('puck physics', () => {
   });
   it('rebounds off a post and rounded boards', () => {
     const s = openIce();
-    Object.assign(s.puck, { x: 25.8, z: 1.8, y: 0.4, vx: 44, lockout: 1 });
+    Object.assign(s.puck, { x: 25.8, z: RINK.goalHalfWidth, y: 0.4, vx: 44, lockout: 1 });
     stepMatch(s);
     expect(s.puck.vx).toBeLessThan(0);
     expect(s.events.some((e) => e.type === 'post')).toBe(true);
@@ -1306,20 +1318,20 @@ describe('aimed passing', () => {
   });
 });
 describe('tighter gameplay', () => {
-  it('wins a timed faceoff draw and loses an early strike', () => {
+  it('wins a draw swung at the drop and loses one jumped early', () => {
     const won = createMatch();
     startMatch(won);
-    tick(won, 2.7);
+    while (won.countdown > FACEOFF.fall + FACEOFF.late) stepMatch(won);
     stepMatch(won, seat(won, { ...EMPTY_INPUT, pass: true }));
-    tick(won, 0.5);
+    tick(won, 0.6);
     expect(won.phase).toBe('playing');
-    expect(won.puck.owner).toBe(played(won) * 6);
+    expect(won.puck.lastTouch).toBe(played(won));
     const lost = createMatch();
     startMatch(lost);
     stepMatch(lost, seat(lost, { ...EMPTY_INPUT, poke: true }));
     tick(lost, 3.2);
     expect(lost.phase).toBe('playing');
-    expect(lost.puck.owner).toBe((1 - played(lost)) * 6);
+    expect(lost.puck.lastTouch).toBe(1 - played(lost));
   });
   it('hockey-stops faster than it coasts', () => {
     const coast = openIce(),
@@ -1372,7 +1384,15 @@ describe('tighter gameplay', () => {
   it('does not save a far-side shot when the goalie is cheating', () => {
     const s = openIce();
     Object.assign(s.skaters[11], { x: 25, z: 1.25 });
-    Object.assign(s.puck, { x: 24.6, z: -1.45, y: 0.35, vx: 32, vz: 0, shot: true, lockout: 0 });
+    Object.assign(s.puck, {
+      x: 24.6,
+      z: 0.35 - RINK.goalHalfWidth,
+      y: 0.35,
+      vx: 32,
+      vz: 0,
+      shot: true,
+      lockout: 0,
+    });
     while (s.phase === 'playing' && s.puck.x < RINK.goalX && s.score[0] === 0) stepMatch(s);
     expect(s.events.some((e) => e.type === 'save')).toBe(false);
     expect(s.score[0]).toBe(1);

@@ -10,7 +10,7 @@ import {
 } from '../game/clubs';
 import { modeInfo } from '../game/modes';
 import { connectToRoom, disconnect, quickPlay } from '../app/online';
-import { useGame } from '../app/store';
+import { runtime, useGame } from '../app/store';
 import type { GameMode, Team } from '../game/types';
 import { useNav, step } from '../input/menuNavigation';
 import { DirectorySession } from '../net/directory';
@@ -414,6 +414,8 @@ function Lobby({
       clubs,
       jerseys: jerseysFor(me.team, 'home'),
       hostTeam: me.team,
+      style: runtime.settings.style,
+      rink: runtime.settings.rink,
     };
     net.start(setup);
   };
