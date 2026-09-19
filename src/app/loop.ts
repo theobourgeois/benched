@@ -7,7 +7,7 @@ import type { Human, InputFrame, MatchState, Phase, Team } from '../game/types';
 import type { Controller } from '../input/controller';
 import { screenInputToRink } from '../input/coordinates';
 import { mergeEdges, noEdges } from '../input/frames';
-import { navigateSeatTwo, navigateWithController } from '../input/menuNavigation';
+import { navigateSeatTwo, navigateWithController, setNavFeedback } from '../input/menuNavigation';
 import { labHooks } from '../scene/animationReview';
 import { askToLeave } from './online';
 import {
@@ -436,3 +436,19 @@ export class GameLoop {
 
 /** The one loop. The scene drives it; everything else reads the runtime it advances. */
 export const loop = new GameLoop();
+
+// Every press a menu takes is heard. Wired here rather than in the store, which the unit tests
+// load without a window. The menu's key handler stops the press before the store's first-gesture
+// unlock hears it, so this unlocks too.
+setNavFeedback((action) => {
+  runtime.audio.unlock();
+  runtime.audio.ui(
+    action === 'up' || action === 'down' || action === 'left' || action === 'right'
+      ? 'move'
+      : action === 'confirm' || action === 'start'
+        ? 'select'
+        : action === 'back'
+          ? 'back'
+          : 'action',
+  );
+});

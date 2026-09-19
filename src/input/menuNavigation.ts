@@ -43,7 +43,24 @@ export function useDevice() {
   );
 }
 
-const dispatch = (action: NavAction) => layers.at(-1)?.current(action);
+/**
+ * Something to hear on every press a menu takes. Set once by the app, which owns the audio; the
+ * input layer only says that a press landed. It sounds whether or not the screen used it, as a
+ * console menu clicks at the end of a list.
+ */
+let feedback: NavHandler = () => {};
+export const setNavFeedback = (fn: NavHandler) => {
+  feedback = fn;
+};
+/** For presses that arrive by mouse rather than through a layer. */
+export const navFeedback = (action: NavAction) => feedback(action);
+
+const dispatch = (action: NavAction) => {
+  const top = layers.at(-1);
+  if (!top) return;
+  feedback(action);
+  top.current(action);
+};
 
 /**
  * Seat two's presses, for the few screens that want them (a second player joining the matchup).
@@ -85,7 +102,11 @@ export function navigateWithController(controller: Controller) {
 export function navigateSeatTwo(controller: Controller) {
   const top = seatTwoLayers.at(-1);
   if (!top || !navActive()) return;
-  for (const button of MENU_BUTTONS) if (controller.ui[button]) top.current(button);
+  for (const button of MENU_BUTTONS)
+    if (controller.ui[button]) {
+      feedback(button);
+      top.current(button);
+    }
 }
 
 const KEYS: Record<string, NavAction> = {

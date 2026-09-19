@@ -2,7 +2,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useEffect, useId, useRef, type CSSProperties, type ReactNode } from 'react';
 import type { Club, Uniform } from '../game/clubs';
 import { useGame } from '../app/store';
-import { useDevice, type Device, type NavAction } from '../input/menuNavigation';
+import { navFeedback, useDevice, type Device, type NavAction } from '../input/menuNavigation';
 
 export type PromptKey = NavAction | 'updown' | 'leftright' | 'bumpers';
 const PAD: Record<PromptKey, string> = {
@@ -75,7 +75,13 @@ export function Prompts({ items }: { items: Prompt[] }) {
           key={item.label}
           tabIndex={-1}
           className="prompt"
-          onClick={item.onClick}
+          onClick={
+            item.onClick &&
+            (() => {
+              navFeedback(promptSound(item.k));
+              item.onClick?.();
+            })
+          }
           disabled={!item.onClick}
         >
           <Glyph k={item.k} /> {item.label}
@@ -84,6 +90,23 @@ export function Prompts({ items }: { items: Prompt[] }) {
     </footer>
   );
 }
+
+/** What a clicked prompt sounds like: the press it stands for. */
+const promptSound = (k: PromptKey): NavAction =>
+  k === 'updown' ? 'down' : k === 'leftright' ? 'right' : k === 'bumpers' ? 'rb' : k;
+
+/**
+ * The mouse's share of the menu sounds. Hovering onto a new item ticks as a pad move would; a
+ * pad move also focuses the button, which is why this listens to the pointer and not to focus.
+ */
+const hoverSound = (focused: boolean, onFocus: () => void) => () => {
+  if (!focused) navFeedback('down');
+  onFocus();
+};
+const clickSound = (run: () => void) => () => {
+  navFeedback('confirm');
+  run();
+};
 
 /** Keeps the browser's focus on the item the pad is on, and scrolls it into view. */
 function useFollowFocus<T extends HTMLElement>(focused: boolean) {
@@ -119,9 +142,9 @@ export function MenuItem({
       className={`menu-item ${className}`}
       data-focused={focused || undefined}
       disabled={disabled}
-      onMouseEnter={disabled ? undefined : onFocus}
+      onMouseEnter={disabled ? undefined : hoverSound(focused, onFocus)}
       onFocus={onFocus}
-      onClick={onSelect}
+      onClick={clickSound(onSelect)}
     >
       <span>{children}</span>
       <i className="caret" aria-hidden="true" />
@@ -159,7 +182,11 @@ export function OptionRow({
   const valueId = useId();
   const sliding = kind === 'slider';
   return (
-    <div className="option" data-focused={focused || undefined} onMouseEnter={onFocus}>
+    <div
+      className="option"
+      data-focused={focused || undefined}
+      onMouseEnter={hoverSound(focused, onFocus)}
+    >
       <button
         ref={ref}
         className="option-hit"
@@ -172,12 +199,19 @@ export function OptionRow({
         aria-label={label}
         aria-describedby={kind === 'toggle' ? undefined : valueId}
         onFocus={onFocus}
-        onClick={onSelect}
+        onClick={clickSound(onSelect)}
       />
       <span className="option-label">{label}</span>
       <span className="option-value" data-kind={kind}>
         {kind === 'cycle' && (
-          <button tabIndex={-1} aria-label={`Previous ${label}`} onClick={() => onStep?.(-1)}>
+          <button
+            tabIndex={-1}
+            aria-label={`Previous ${label}`}
+            onClick={() => {
+              navFeedback('left');
+              onStep?.(-1);
+            }}
+          >
             <ChevronLeft size={18} />
           </button>
         )}
@@ -186,7 +220,14 @@ export function OptionRow({
         ) : null}
         {sliding && (
           <>
-            <button tabIndex={-1} aria-label={`Decrease ${label}`} onClick={() => onStep?.(-1)}>
+            <button
+              tabIndex={-1}
+              aria-label={`Decrease ${label}`}
+              onClick={() => {
+                navFeedback('left');
+                onStep?.(-1);
+              }}
+            >
               <ChevronLeft size={18} />
             </button>
             <input
@@ -210,7 +251,10 @@ export function OptionRow({
           <button
             tabIndex={-1}
             aria-label={`${kind === 'cycle' ? 'Next' : 'Increase'} ${label}`}
-            onClick={() => onStep?.(1)}
+            onClick={() => {
+              navFeedback('right');
+              onStep?.(1);
+            }}
           >
             <ChevronRight size={18} />
           </button>

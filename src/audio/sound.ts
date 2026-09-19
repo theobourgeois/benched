@@ -73,6 +73,9 @@ export function formatVolume(n: number) {
 }
 
 /** Field recordings and the goal soundtrack. */
+/** The menu's four kinds of press. */
+export type UiSound = 'move' | 'select' | 'back' | 'action';
+
 export class ArenaAudio {
   private context: AudioContext | null = null;
   private master: GainNode | null = null;
@@ -97,6 +100,11 @@ export class ArenaAudio {
   private lastSong: string | undefined;
   /** The whole second the clock showed last frame, so each of the last ten beeps once. */
   private clockSecond = Infinity;
+  /** Last frame's phase and countdown, so each new faceoff chimes once. Pauses are skipped. */
+  private lastPhase: MatchState['phase'] | null = null;
+  private lastCountdown = 0;
+  /** When the last menu blip started, so a held direction does not smear into a buzz. */
+  private lastBlip = -Infinity;
   get enabled() {
     return this.active;
   }
@@ -213,6 +221,102 @@ export class ArenaAudio {
     const second = Math.ceil(match.clock);
     if (live && match.clock > 0 && second <= 10 && second < this.clockSecond) this.beep();
     this.clockSecond = second;
+    // A new draw is a faceoff phase that was not one last frame, or one whose countdown jumped
+    // back up. Read off the match like the clock, so a guest hears it on its own view.
+    if (match.phase === 'paused') return;
+    const fresh =
+      match.phase === 'faceoff' &&
+      (this.lastPhase !== 'faceoff' || match.countdown > this.lastCountdown + 0.05);
+    if (fresh) this.faceoffSet();
+    this.lastPhase = match.phase;
+    this.lastCountdown = match.countdown;
+  }
+  /**
+   * The centres are set: a low hit with a bright metallic edge, like a broadcast sting. There is
+   * no count to the drop on purpose, so this marks the start of the wait and the whistle its end.
+   */
+  private faceoffSet() {
+    this.thump(95, 0.2, 0.4);
+    this.noise('bandpass', 2000, 0.9, 0.07, 0.22);
+    this.ping(1568, 0.25, 0.025, 0.004);
+  }
+  /**
+   * Menu presses, in the manner of a console sports menu: nothing melodic, just short, sharp
+   * transients. A move is a soft low tick, confirm is a snap with a little weight under it,
+   * back is the same snap darker and softer, and the other buttons a mid click.
+   */
+  ui(kind: UiSound) {
+    const ctx = this.context;
+    if (!this.active || !ctx || !this.sfx) return;
+    if (kind === 'move') {
+      // Pad and key repeat both run faster than a click can ring out; let every other one through.
+      if (ctx.currentTime - this.lastBlip < 0.045) return;
+      this.lastBlip = ctx.currentTime;
+      this.noise('bandpass', 2400, 0.9, 0.014, 0.22);
+    } else if (kind === 'select') {
+      this.noise('bandpass', 2000, 1, 0.035, 0.3);
+      this.thump(140, 0.08, 0.28);
+      this.ping(1760, 0.08, 0.02, 0.006);
+    } else if (kind === 'back') {
+      this.noise('lowpass', 1500, 0.8, 0.04, 0.26);
+      this.thump(100, 0.07, 0.22);
+    } else this.noise('bandpass', 1800, 1.2, 0.025, 0.25);
+  }
+  /** Half a second of white noise, made once and shared by every click. */
+  private noiseBuffer: AudioBuffer | null = null;
+  /** Connects a one-shot through an envelope into the effects bus and tidies it after. */
+  private shot(source: AudioScheduledSourceNode, first: AudioNode, level: number, length: number) {
+    const ctx = this.context!,
+      at = ctx.currentTime,
+      env = ctx.createGain();
+    env.gain.setValueAtTime(0, at);
+    env.gain.linearRampToValueAtTime(level, at + 0.0015);
+    env.gain.exponentialRampToValueAtTime(0.001, at + length);
+    first.connect(env);
+    env.connect(this.sfx!);
+    source.start(at);
+    source.stop(at + length + 0.02);
+    source.onended = () => {
+      source.disconnect();
+      first.disconnect();
+      env.disconnect();
+    };
+  }
+  /** A filtered burst of noise: the body of every click. */
+  private noise(type: BiquadFilterType, freq: number, q: number, length: number, level: number) {
+    const ctx = this.context;
+    if (!this.active || !ctx || !this.sfx) return;
+    if (!this.noiseBuffer) {
+      this.noiseBuffer = ctx.createBuffer(1, ctx.sampleRate / 2, ctx.sampleRate);
+      const data = this.noiseBuffer.getChannelData(0);
+      for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+    }
+    const source = ctx.createBufferSource(),
+      filter = ctx.createBiquadFilter();
+    source.buffer = this.noiseBuffer;
+    filter.type = type;
+    filter.frequency.value = freq;
+    filter.Q.value = q;
+    source.connect(filter);
+    this.shot(source, filter, level, length);
+  }
+  /** A sine that drops an octave fast: weight under a press, felt more than heard. */
+  private thump(freq: number, length: number, level: number) {
+    const ctx = this.context;
+    if (!this.active || !ctx || !this.sfx) return;
+    const osc = ctx.createOscillator();
+    osc.frequency.setValueAtTime(freq, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(freq / 2, ctx.currentTime + length);
+    this.shot(osc, osc, level, length);
+  }
+  /** A thin, steady sine: the glint on top of a click. `bend` sharpens its attack by a hair. */
+  private ping(freq: number, length: number, level: number, bend = 0) {
+    const ctx = this.context;
+    if (!this.active || !ctx || !this.sfx) return;
+    const osc = ctx.createOscillator();
+    osc.frequency.setValueAtTime(freq * (1 + bend * 10), ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(freq, ctx.currentTime + 0.01);
+    this.shot(osc, osc, level, length);
   }
   private beep() {
     const ctx = this.context;
