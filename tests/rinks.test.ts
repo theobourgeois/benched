@@ -2,11 +2,15 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   applyStyle,
   DEFAULT_PHYSICS,
+  BANDY_NET,
   NET,
   EMPTY_INPUT,
+  GOALIE,
+  IRON,
   PHYSICS,
   RINK,
   RINKS,
+  SHOT,
   STICK,
   STYLES,
 } from '../src/game/config';
@@ -61,12 +65,14 @@ describe('rink sizes', () => {
     expect(r.halfLength - r.goalX - 1.5).toBeLessThan(PHYSICS.playerRadius);
     expect(r.bandy!.penaltyArea).toBeLessThan(r.halfWidth);
   });
-  it('keeps every mark on the ice and the same net on every sheet', () => {
+  it('keeps every mark on the ice, the hockey net on hockey sheets and the bandy cage on bandy', () => {
     for (const size of SIZES) {
       const r = RINKS[size];
       expect(r.corner, size).toBeLessThan(r.halfWidth);
       expect(r.goalX + 1.5, size).toBeLessThan(r.halfLength);
-      expect([r.goalHalfWidth, r.goalHeight], size).toEqual([NET.goalHalfWidth, NET.goalHeight]);
+      const net = r.bandy ? BANDY_NET : NET;
+      expect([r.goalHalfWidth, r.goalHeight], size).toEqual([net.goalHalfWidth, net.goalHeight]);
+      if (r.hockey) expect(r.goalieScale, size).toBe(1);
       // One kind of paint per sheet.
       expect(!!r.hockey, size).toBe(!r.bandy);
       const paint = r.hockey;
@@ -87,6 +93,20 @@ describe('rink sizes', () => {
     }
     createMatch();
     expect(RINK).toEqual(RINKS.barn);
+  });
+  it("hangs the frame, the aim and the goalie off the sheet's net, and puts them back", () => {
+    createMatch();
+    const barn = { crossbar: IRON.crossbarY, corner: SHOT.corner, goalie: { ...GOALIE } };
+    createMatch(0, 'exhibition', undefined, undefined, { rink: 'bandy' });
+    expect(BANDY_NET.goalHalfWidth / NET.goalHalfWidth).toBeCloseTo(3.5 / 1.83, 6);
+    expect(IRON.crossbarY).toBeCloseTo(BANDY_NET.goalHeight + 0.05, 6);
+    expect(SHOT.corner).toBeGreaterThan(barn.corner);
+    expect(GOALIE.handReach).toBeCloseTo(barn.goalie.handReach * RINKS.bandy.goalieScale, 6);
+    expect(GOALIE.reachTop).toBeGreaterThan(barn.goalie.reachTop);
+    expect(GOALIE.extend).toBe(barn.goalie.extend);
+    createMatch();
+    expect([IRON.crossbarY, SHOT.corner]).toEqual([barn.crossbar, barn.corner]);
+    expect(GOALIE).toEqual(barn.goalie);
   });
   it('holds a body inside the boards of each sheet, corners included', () => {
     for (const size of SIZES) {

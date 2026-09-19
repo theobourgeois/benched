@@ -269,7 +269,7 @@ export function createMatch(
  * calls this with what that match was set up as.
  */
 export function adoptMatchTables(s: Pick<MatchState, 'style' | 'rink'>) {
-  applyStyle(s.style);
+  applyStyle(s.style, s.rink);
   applyRink(s.rink);
 }
 export function resetFormation(s: MatchState) {

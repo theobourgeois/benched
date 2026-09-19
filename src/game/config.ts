@@ -40,12 +40,28 @@ export interface RinkSpec {
   centreCircle: number;
   hockey: HockeyPaint | null;
   bandy: BandyPaint | null;
+  /**
+   * How much wider the goalie plays than on a hockey net: their widths, reaches, depth and feet
+   * are multiplied by this, and their reach up by the net's height against the hockey one's.
+   */
+  goalieScale: number;
 }
 /**
- * The net is the game's own on every sheet. A real one is 1.83 × 1.22 m; this is wider than
- * that, because the broadcast camera and a pad-sized goalie need it, but no longer twice as wide.
+ * The hockey net, the game's own on every hockey sheet. A real one is 1.83 × 1.22 m; this is wider
+ * than that, because the broadcast camera and a pad-sized goalie need it, but no longer twice as
+ * wide.
  */
 export const NET = { goalHalfWidth: 1.5, goalHeight: 1.2, crease: 2.1 };
+/**
+ * A bandy goal is 3.5 × 2.1 m against hockey's 1.83 × 1.22. Widened by the same share as the
+ * hockey net above, so the goalie stands in it as a real one stands in a bandy goal: small, with
+ * a lot of frame either side and over their shoulders.
+ */
+export const BANDY_NET = {
+  goalHalfWidth: (NET.goalHalfWidth * 3.5) / 1.83,
+  goalHeight: 2.1,
+  crease: NET.crease,
+};
 export const RINKS: Record<RinkSize, Readonly<RinkSpec>> = {
   /** The house rink the game grew up on: 60 × 26 m, tight corners, a deep end behind the net. */
   barn: {
@@ -67,6 +83,7 @@ export const RINKS: Record<RinkSize, Readonly<RinkSpec>> = {
       trapezoid: null,
     },
     bandy: null,
+    goalieScale: 1,
   },
   /**
    * NHL Rule 1: 200 × 85 ft, 28 ft corners, goal lines 11 ft off the end boards. The blue line is
@@ -94,6 +111,7 @@ export const RINKS: Record<RinkSize, Readonly<RinkSpec>> = {
       trapezoid: { goalLine: 11 * FT, boards: 14 * FT },
     },
     bandy: null,
+    goalieScale: 1,
   },
   /**
    * IIHF full-size sheet, as the Olympics were played on before they moved to NHL ice: 60 × 30 m,
@@ -120,18 +138,19 @@ export const RINKS: Record<RinkSize, Readonly<RinkSpec>> = {
       trapezoid: null,
     },
     bandy: null,
+    goalieScale: 1,
   },
   /**
    * A bandy field at its international size, 100 × 60 m: nearly four Olympic sheets. Bandy has no
    * zones and nothing behind the goal, which stands on the end line, so the net here backs onto
    * the end boards. The paint is bandy's: a 17 m penalty area, the spot 12 m out, 5 m free-stroke
-   * circles on the penalty line and a 5 m centre circle. What is not bandy is what the game
-   * needs to stay hockey: real boards with glass all the way round instead of a 15 cm border
-   * along the sides, corners a skater can carry a puck through rather than a 1 m arc, and the
-   * same net as every other sheet rather than a 3.5 × 2.1 m cage.
+   * circles on the penalty line, a 5 m centre circle and the big bandy cage. What is not bandy is
+   * what the game needs to stay hockey: real boards with glass all the way round instead of a
+   * 15 cm border along the sides, and corners a skater can carry a puck through rather than a
+   * 1 m arc.
    */
   bandy: {
-    ...NET,
+    ...BANDY_NET,
     halfLength: 50,
     halfWidth: 30,
     corner: 9,
@@ -141,6 +160,9 @@ export const RINKS: Record<RinkSize, Readonly<RinkSpec>> = {
     centreCircle: 5,
     hockey: null,
     bandy: { penaltyArea: 17, penaltySpot: 12, freeStroke: 5 },
+    // Measured CPU against CPU: 1 lets in 27 a game, 1.3 about 7.5 at an 87% save rate, which is
+    // what bandy scores; 1.6 makes it as tight as hockey.
+    goalieScale: 1.3,
   },
 };
 /**
@@ -150,6 +172,10 @@ export const RINKS: Record<RinkSize, Readonly<RinkSpec>> = {
 export const RINK: RinkSpec = { ...RINKS.barn };
 export function applyRink(size: RinkSize) {
   Object.assign(RINK, RINKS[size]);
+  // The frame and the aim points hang off the net, which is the sheet's.
+  IRON.crossbarY = RINK.goalHeight + 0.05;
+  SHOT.topShelf = RINK.goalHeight - 0.11;
+  SHOT.corner = RINK.goalHalfWidth - 0.34;
 }
 export const RULES = {
   /** What a period shows on the clock. It runs faster than real time; see `clockRate`. */
@@ -322,7 +348,7 @@ export const PHYSICS = {
 };
 /**
  * Goal frame as the arena draws it: post axes at z = ±goalHalfWidth and the crossbar axis at
- * crossbarY, all on the goal line.
+ * crossbarY, all on the goal line. `applyRink` moves the crossbar to the sheet's net.
  */
 export const IRON = {
   radius: 0.065,
@@ -337,7 +363,10 @@ export const IRON = {
   /** Beat the play holds on a bar-down ring, so the ding lands. */
   ringHold: 0.06,
 };
-/** Shot placement and accuracy. Spread is an angle, so the aim circle grows with distance. */
+/**
+ * Shot placement and accuracy. Spread is an angle, so the aim circle grows with distance. The aim
+ * points follow the sheet's net through `applyRink`.
+ */
 export const SHOT = {
   /** Highest aim point, just under the crossbar so a slightly high top-shelf shot rings it. */
   topShelf: NET.goalHeight - 0.11,
@@ -517,11 +546,36 @@ function retune<T extends Record<string, number>>(live: T, base: T, next: T) {
     base[key] = next[key];
   }
 }
-export function applyStyle(style: GameStyle) {
-  const tuned = STYLES[style];
+/** The goalie numbers that grow with a bigger net: how much of it they cover and how fast. */
+const GOALIE_SIZED = [
+  'bodyHalf',
+  'padStand',
+  'padReach',
+  'padStack',
+  'hand',
+  'handReach',
+  'reachFull',
+  'stickHalf',
+  'coverReach',
+  'depthMin',
+  'depthRate',
+  'shuffleSpeed',
+  'pushSpeed',
+] as const;
+/**
+ * Lays the style over `fast`, then sizes the goalie to the sheet's net. The rink comes in here
+ * rather than in `applyRink` so the feel tuner's defaults are the goalie as played, and a number
+ * moved by hand is still told apart from one the style or the rink moved.
+ */
+export function applyStyle(style: GameStyle, rink: RinkSize = 'barn') {
+  const tuned = STYLES[style],
+    spec = RINKS[rink];
   retune(PHYSICS, DEFAULT_PHYSICS, { ...FAST.physics, ...tuned.physics });
   retune(STICK, DEFAULT_STICK, { ...FAST.stick, ...tuned.stick });
-  retune(GOALIE, DEFAULT_GOALIE, { ...FAST.goalie, ...tuned.goalie });
+  const goalie = { ...FAST.goalie, ...tuned.goalie };
+  for (const key of GOALIE_SIZED) goalie[key] *= spec.goalieScale;
+  goalie.reachTop *= spec.goalHeight / NET.goalHeight;
+  retune(GOALIE, DEFAULT_GOALIE, goalie);
 }
 export const EMPTY_INPUT: InputFrame = {
   moveX: 0,

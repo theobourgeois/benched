@@ -95,10 +95,11 @@ entry in `STYLES` (keep every value inside its `src/dev/feel.ts` range; `tests/f
 checks) and a new rink is a `RinkSpec` in `RINKS`; add either to `GAME_STYLES` / `RINK_SIZES`
 in `src/net/protocol.ts` too, which is the list the room validates against, and to the option
 lists in `src/ui/Settings.tsx`. `pro` and `olympic` are the rule books' measurements and
-`tests/rinks.test.ts` holds them to it; a sheet carries either `hockey` or `bandy` paint. The net
-(`NET`) is the game's own size on every sheet, and the `GOALIE` widths, reaches and depth were
-fitted to it: resize the net and the goalie has to be measured again, or nothing from the slot
-goes in. The AI's
+`tests/rinks.test.ts` holds them to it; a sheet carries either `hockey` or `bandy` paint. Hockey
+sheets use the game's own net (`NET`); bandy uses `BANDY_NET`, the real cage widened by the same
+share. The `GOALIE` widths, reaches and depth were fitted to `NET`, and `applyStyle` multiplies
+them by the sheet's `goalieScale`: resize a net and measure again (CPU against CPU), or nothing
+from the slot goes in, or everything does. The AI's
 spots stay written in barn coordinates and go through `deep`, `wide` and `zoneOf` in
 `src/game/ai.ts`; the arena, ice paint and cameras are built from the spec. In a local game a
 change of either setting takes hold at once (`retable` in `src/app/store.ts`): a new rink
